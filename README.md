@@ -18,6 +18,9 @@ makefiles and several patches; nothing here tracks Debian any more.
   `ADB_BUILD_ID`.
 - `aosp-patches/`: the patch stack (`aosp-patches/series`). Every patch
   carries an `Upstream-Status`.
+- `scripts/export-oe-patches.sh <recipe-dir>`: copies the stack into an OE
+  recipe directory and writes `android-tools-aosp-patches.inc` (SRCREV plus
+  the patches in SRC_URI).
 
 ## Building
 
