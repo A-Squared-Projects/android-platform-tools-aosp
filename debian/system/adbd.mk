@@ -1,5 +1,7 @@
 NAME = adbd
 
+include debian/system/version.mk
+
 # packages/modules/adb/Android.bp
 ADBD_SRC_FILES = \
   adb.cpp \
@@ -62,6 +64,7 @@ CXXFLAGS += \
 
 CPPFLAGS += \
   -D_GNU_SOURCE \
+  -DADB_BUILD_ID='"$(ADB_BUILD_ID)"' \
   -DPLATFORM_TOOLS_VERSION='"$(PLATFORM_TOOLS_VERSION)"' \
   -DADB_HOST=0 \
   -DADB_VERSION='"$(DEB_VERSION)"' \

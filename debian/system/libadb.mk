@@ -1,5 +1,7 @@
 NAME := libadb
 
+include debian/system/version.mk
+
 # packages/modules/adb/Android.bp
 LIBADB_SRC_FILES := \
   adb_unique_fd.cpp \

@@ -1,5 +1,7 @@
 NAME = fastboot
 
+include debian/system/version.mk
+
 # system/core/fastboot/Android.bp
 fastboot_SOURCES = \
   bootimg_utils.cpp \
@@ -39,6 +41,7 @@ OBJECTS = $(SOURCES:.cpp=.o)
 CXXFLAGS += -fpermissive
 CPPFLAGS += \
   -D_FILE_OFFSET_BITS=64 \
+  -DADB_BUILD_ID='"$(ADB_BUILD_ID)"' \
   -DPLATFORM_TOOLS_VERSION='"$(PLATFORM_TOOLS_VERSION)"' \
   -Iexternal/avb \
   -Iexternal/fmtlib/include \

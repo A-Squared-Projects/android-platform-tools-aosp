@@ -1,8 +1,11 @@
-Description: just hard code rather than deal with circular deps
+Description: take the build number from the build system
+ android::build::GetBuildNumber() comes from Soong's build/version.h, which
+ this build does not have. Use ADB_BUILD_ID, set by debian/system/version.mk
+ (default: the platform-tools version). Debian hard-coded "debian" here.
 Forwarded: not-needed
 --- a/packages/modules/adb/adb.cpp
 +++ b/packages/modules/adb/adb.cpp
-@@ -47,9 +47,6 @@
+@@ -50,9 +50,6 @@
  #include <android-base/utf8.h>
  #include <diagnose_usb.h>
  
@@ -12,27 +15,27 @@ Forwarded: not-needed
  #include "adb_auth.h"
  #include "adb_io.h"
  #include "adb_listeners.h"
-@@ -100,7 +97,7 @@
+@@ -106,7 +103,7 @@ std::string adb_version() {
              "Installed as %s\n"
              "Running on %s\n",
              ADB_VERSION_MAJOR, ADB_VERSION_MINOR, ADB_SERVER_VERSION, PLATFORM_TOOLS_VERSION,
 -            android::build::GetBuildNumber().c_str(), android::base::GetExecutablePath().c_str(),
-+            "debian", android::base::GetExecutablePath().c_str(),
++            ADB_BUILD_ID, android::base::GetExecutablePath().c_str(),
              GetOSVersion().c_str());
  }
  
-@@ -1339,7 +1339,7 @@ HostRequestResult handle_host_request(std::string_view service, TransportType ty
+@@ -1380,7 +1377,7 @@ HostRequestResult handle_host_request(st
          status.set_mdns_backend_forced(getenv("ADB_MDNS_OPENSCREEN") != nullptr);
  
          status.set_version(std::string(PLATFORM_TOOLS_VERSION));
 -        status.set_build(android::build::GetBuildNumber());
-+        status.set_build("debian");
++        status.set_build(ADB_BUILD_ID);
          status.set_executable_absolute_path(android::base::GetExecutablePath());
          status.set_log_absolute_path(GetLogFilePath());
          status.set_os(GetOSVersion());
 --- a/system/core/fastboot/fastboot.cpp
 +++ b/system/core/fastboot/fastboot.cpp
-@@ -64,11 +64,9 @@
+@@ -61,11 +61,9 @@
  #include <android-base/stringprintf.h>
  #include <android-base/strings.h>
  #include <android-base/unique_fd.h>
@@ -44,13 +47,13 @@ Forwarded: not-needed
  #include <sparse/sparse.h>
  #include <ziparchive/zip_archive.h>
  
-@@ -1962,8 +1960,7 @@
+@@ -2317,8 +2315,7 @@ int FastBootTool::Main(int argc, char* a
                  setvbuf(stdout, nullptr, _IONBF, 0);
                  setvbuf(stderr, nullptr, _IONBF, 0);
              } else if (name == "version") {
 -                fprintf(stdout, "fastboot version %s-%s\n", PLATFORM_TOOLS_VERSION,
 -                        android::build::GetBuildNumber().c_str());
-+                fprintf(stdout, "fastboot version %s-%s\n", PLATFORM_TOOLS_VERSION, "debian");
++                fprintf(stdout, "fastboot version %s-%s\n", PLATFORM_TOOLS_VERSION, ADB_BUILD_ID);
                  fprintf(stdout, "Installed as %s\n", android::base::GetExecutablePath().c_str());
                  return 0;
              } else {
