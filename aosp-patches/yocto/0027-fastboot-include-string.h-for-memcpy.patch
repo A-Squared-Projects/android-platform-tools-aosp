@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Kiernan <alex.kiernan@gmail.com>
+Date: Fri, 13 Nov 2026 12:00:00 +0000
+Subject: [PATCH] fastboot: include <string.h> for memcpy()
+
+fastboot_driver_interface.h calls memcpy() without including <string.h>; it
+builds on Android because the libc++ headers pull it in transitively, but
+not with GCC and libstdc++:
+
+  fastboot_driver_interface.h:89:21: error: 'memcpy' was not declared in this scope
+
+Upstream-Status: Pending
+
+AI-Generated: Claude Opus 5.5 (Claude Code)
+Signed-off-by: Alex Kiernan <alex.kiernan@gmail.com>
+---
+--- a/system/core/fastboot/fastboot_driver_interface.h
++++ b/system/core/fastboot/fastboot_driver_interface.h
+@@ -15,6 +15,8 @@
+ //
+ #pragma once
+ 
++#include <string.h>
++
+ #include <functional>
+ #include <string>
+ #include <vector>
