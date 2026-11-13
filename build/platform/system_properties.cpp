@@ -16,6 +16,9 @@
  *    /etc/build.prop:/run/build.prop): "key=value" lines, '#' comments. When
  *    several files set a key, the later file wins.
  *
+ * Setting a property may act on it, as init's property triggers do on
+ * Android: see adbd_platform_property_set() (build/platform/usb_gadget.cpp).
+ *
  * Values are read on every lookup, so a file written while adbd runs (a
  * build.prop staged in /run, say) is seen by later lookups. adbd itself
  * decides root and authentication at startup, as on Android.
@@ -111,6 +114,8 @@ bool MakeDirs(const std::string& path, mode_t mode) {
 
 }  // namespace
 
+void adbd_platform_property_set(const std::string& name, const std::string& value);
+
 // Called as root by minijail_enter(), before adbd changes uid: the store must
 // stay writable, since `adb root` is requested from the unprivileged adbd.
 void adbd_platform_prepare_user(uid_t uid, gid_t gid) {
@@ -176,6 +181,7 @@ extern "C" int __system_property_set(const char* key, const char* value) {
         errno = saved;
         return -1;
     }
+    adbd_platform_property_set(key, value);
     return 0;
 }
 

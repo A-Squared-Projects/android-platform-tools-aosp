@@ -4,12 +4,15 @@ NAME = adbd
 include build/version.mk
 
 # The Android platform adbd expects (build/platform/): who AID_SHELL is, where
-# properties live, and the commands behind `adb reboot` and `adb remount`.
+# properties live, the commands behind `adb reboot` and `adb remount`, and
+# the USB gadget adbd binds when functionfs is ready (empty: not adbd's job).
 ADBD_USER ?= adb
 ADBD_PROPERTY_FILES ?= /etc/build.prop:/run/build.prop
 ADBD_PROPERTY_DIR ?= /run/adbd/properties
 ADBD_REBOOT_COMMAND ?= /usr/libexec/adbd/reboot
 ADBD_REMOUNT_COMMAND ?= remount
+ADBD_USB_GADGET ?=
+ADBD_USB_UDC ?=
 
 # packages/modules/adb/Android.bp
 ADBD_SRC_FILES = \
@@ -61,6 +64,7 @@ PLATFORM_SRC_FILES = \
   minijail.cpp \
   selinux.cpp \
   system_properties.cpp \
+  usb_gadget.cpp \
 
 LOCAL_SRC_FILES := \
   $(ADBD_SRC_FILES) \
@@ -92,6 +96,8 @@ CPPFLAGS += \
   -DADBD_PROPERTY_DIR='"$(ADBD_PROPERTY_DIR)"' \
   -DADBD_REBOOT_COMMAND='"$(ADBD_REBOOT_COMMAND)"' \
   -DADBD_REMOUNT_COMMAND='"$(ADBD_REMOUNT_COMMAND)"' \
+  -DADBD_USB_GADGET='"$(ADBD_USB_GADGET)"' \
+  -DADBD_USB_UDC='"$(ADBD_USB_UDC)"' \
   -Ibuild/platform/include \
   -Iframeworks/native/libs/adbd_auth/include/ \
   -Ipackages/modules/adb \
