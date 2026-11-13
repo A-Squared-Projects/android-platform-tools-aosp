@@ -7,7 +7,6 @@ debian/revert/support-mips.patch
 debian/revert/Revert-3-Add-rust-demangling.patch
 debian/revert/Revert-Enforcing-static-invariants-to-prevent-failur.patch
 debian/gcc-only/stdatomic.patch
-debian/gcc-only/workaround__builtin_available.patch
 debian/gcc-only/Nullable.patch
 debian/system/unwindstack-porting.patch
 debian/system/move-log-file-to-proper-dir.patch
@@ -18,7 +17,6 @@ debian/system/hard-code-build-number.patch
 debian/system/stub-out-fastdeploy.patch
 debian/system/Implement-const_iterator-operator.patch
 debian/system/Drop-gki-dependency-from-mkbootimg.patch
-debian/system/add-missing-headers.patch
 debian/system/Support-MIPS-for-Android-V.patch
 debian/development/typos.patch
 debian/adbd/adbd-allow-usb-on-linux.patch

@@ -27,11 +27,9 @@ Signed-off-by: Alex Kiernan <alex.kiernan@gmail.com>
  packages/modules/adb/daemon/usb.cpp  |  7 +++++++
  3 files changed, 41 insertions(+), 3 deletions(-)
 
-diff --git a/packages/modules/adb/adb.h b/packages/modules/adb/adb.h
-index b43bb42ec736..20c002051937 100644
 --- a/packages/modules/adb/adb.h
 +++ b/packages/modules/adb/adb.h
-@@ -263,3 +263,9 @@ void adb_set_reject_kill_server(bool reject);
+@@ -255,3 +255,9 @@ bool is_usb_enabled();
  #endif
  
  void usb_init();
@@ -41,8 +39,6 @@ index b43bb42ec736..20c002051937 100644
 +// call does anything.
 +void adbd_notify_ready();
 +#endif
-diff --git a/packages/modules/adb/daemon/main.cpp b/packages/modules/adb/daemon/main.cpp
-index ac37461f21dc..a5b1d6b3e0eb 100644
 --- a/packages/modules/adb/daemon/main.cpp
 +++ b/packages/modules/adb/daemon/main.cpp
 @@ -53,6 +53,8 @@
@@ -54,7 +50,7 @@ index ac37461f21dc..a5b1d6b3e0eb 100644
  #include "adb.h"
  #include "adb_auth.h"
  #include "adb_listeners.h"
-@@ -244,6 +246,27 @@ static void drop_privileges(int) {
+@@ -251,6 +253,27 @@ static void drop_privileges() {
  }
  #endif
  
@@ -81,8 +77,8 @@ index ac37461f21dc..a5b1d6b3e0eb 100644
 +
  static void setup_adb(const std::vector<std::string>& addrs) {
  #if defined(__ANDROID__)
-     // Get the first valid port from addrs and setup mDNS.
-@@ -368,9 +391,11 @@ int adbd_main(int server_port) {
+     // Get the first valid port from addrs and register it with mDNS.
+@@ -377,9 +400,11 @@ int adbd_main() {
      init_jdwp();
      D("adbd_main(): post init_jdwp()");
  
@@ -97,11 +93,9 @@ index ac37461f21dc..a5b1d6b3e0eb 100644
  
      D("Event loop starting");
      fdevent_loop();
-diff --git a/packages/modules/adb/daemon/usb.cpp b/packages/modules/adb/daemon/usb.cpp
-index e44c7b788587..a970c4e1fd28 100644
 --- a/packages/modules/adb/daemon/usb.cpp
 +++ b/packages/modules/adb/daemon/usb.cpp
-@@ -805,6 +805,13 @@ static void usb_ffs_open_thread() {
+@@ -786,6 +786,13 @@ static void usb_ffs_open_thread() {
                  std::move(control), std::move(bulk_out), std::move(bulk_in),
                  std::move(destruction_notifier)));
          register_transport(transport);

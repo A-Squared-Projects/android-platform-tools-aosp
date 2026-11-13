@@ -1,6 +1,5 @@
 # Debian patches used by the Yocto build (no MIPS reverts)
 debian/gcc-only/stdatomic.patch
-debian/gcc-only/workaround__builtin_available.patch
 debian/gcc-only/Nullable.patch
 debian/system/unwindstack-porting.patch
 debian/system/move-log-file-to-proper-dir.patch
@@ -11,7 +10,6 @@ debian/system/hard-code-build-number.patch
 debian/system/stub-out-fastdeploy.patch
 debian/system/Implement-const_iterator-operator.patch
 debian/system/Drop-gki-dependency-from-mkbootimg.patch
-debian/system/add-missing-headers.patch
 debian/development/typos.patch
 debian/adbd/adbd-allow-usb-on-linux.patch
 debian/adbd/adbd-allow-notifying-systemd.patch

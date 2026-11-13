@@ -38,11 +38,9 @@ Signed-off-by: Alex Kiernan <alex.kiernan@gmail.com>
  packages/modules/adb/daemon/usb.cpp | 38 +++++++++++++++++++++--------
  1 file changed, 28 insertions(+), 10 deletions(-)
 
-diff --git a/packages/modules/adb/daemon/usb.cpp b/packages/modules/adb/daemon/usb.cpp
-index 1fe2d3aa3215..e44c7b788587 100644
 --- a/packages/modules/adb/daemon/usb.cpp
 +++ b/packages/modules/adb/daemon/usb.cpp
-@@ -146,6 +146,7 @@ struct UsbFfsConnection : public Connection {
+@@ -147,6 +147,7 @@ struct UsbFfsConnection : public Connect
      UsbFfsConnection(unique_fd control, unique_fd read, unique_fd write,
                       std::promise<void> destruction_notifier)
          : worker_started_(false),
@@ -50,9 +48,9 @@ index 1fe2d3aa3215..e44c7b788587 100644
            stopped_(false),
            destruction_notifier_(std::move(destruction_notifier)),
            control_fd_(std::move(control)),
-@@ -406,6 +407,14 @@ struct UsbFfsConnection : public Connection {
+@@ -410,6 +411,14 @@ struct UsbFfsConnection : public Connect
              adb_thread_setname("UsbFfs-worker");
-             LOG(INFO) << "UsbFfs-worker thread spawned";
+             VLOG(USB) << "UsbFfs-worker thread spawned";
  
 +            // On EVERY exit path, not as a final statement: the SubmitRead
 +            // failure below returns early, and that is precisely a case
@@ -65,7 +63,7 @@ index 1fe2d3aa3215..e44c7b788587 100644
              for (size_t i = 0; i < kUsbReadQueueDepth; ++i) {
                  read_requests_[i] = CreateReadBlock(next_read_id_++);
                  if (!SubmitRead(&read_requests_[i])) {
-@@ -435,8 +444,23 @@ struct UsbFfsConnection : public Connection {
+@@ -439,8 +448,23 @@ struct UsbFfsConnection : public Connect
              return;
          }
  
@@ -90,7 +88,7 @@ index 1fe2d3aa3215..e44c7b788587 100644
              int rc = pthread_kill(worker_thread_handle, kInterruptionSignal);
              if (rc != 0) {
                  LOG(ERROR) << "failed to send interruption signal to worker: " << strerror(rc);
-@@ -444,15 +468,6 @@ struct UsbFfsConnection : public Connection {
+@@ -448,15 +472,6 @@ struct UsbFfsConnection : public Connect
              }
  
              std::this_thread::sleep_for(100ms);
@@ -106,7 +104,7 @@ index 1fe2d3aa3215..e44c7b788587 100644
          }
  
          worker_thread_.join();
-@@ -709,6 +724,9 @@ struct UsbFfsConnection : public Connection {
+@@ -691,6 +706,9 @@ struct UsbFfsConnection : public Connect
  
      bool worker_started_;
      std::thread worker_thread_;

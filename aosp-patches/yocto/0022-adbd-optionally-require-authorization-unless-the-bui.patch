@@ -31,8 +31,6 @@ Signed-off-by: Alex Kiernan <alex.kiernan@gmail.com>
  packages/modules/adb/daemon/main.cpp |  2 +-
  5 files changed, 25 insertions(+), 4 deletions(-)
 
-diff --git a/debian/system/adbd.mk b/debian/system/adbd.mk
-index a3f88f169b9b..5e2c5ccaea30 100644
 --- a/debian/system/adbd.mk
 +++ b/debian/system/adbd.mk
 @@ -109,6 +109,10 @@ LDFLAGS += -lsystemd
@@ -46,11 +44,9 @@ index a3f88f169b9b..5e2c5ccaea30 100644
  STATIC_LIBS = \
    debian/out/system/libadb.a \
    debian/out/system/libcrypto_utils.a \
-diff --git a/packages/modules/adb/adb.cpp b/packages/modules/adb/adb.cpp
-index 78bbfb6df48f..6e753484971c 100644
 --- a/packages/modules/adb/adb.cpp
 +++ b/packages/modules/adb/adb.cpp
-@@ -392,7 +392,7 @@ static void handle_new_connection(atransport* t, apacket* p) {
+@@ -419,7 +419,7 @@ static void handle_new_connection(atrans
          // we'll just not verify the client's certificate. This should be the
          // first packet the client receives to indicate the new protocol.
          send_tls_request(t);
@@ -59,11 +55,9 @@ index 78bbfb6df48f..6e753484971c 100644
          LOG(INFO) << "authentication not required";
          handle_online(t);
          send_connect(t);
-diff --git a/packages/modules/adb/adb_auth.h b/packages/modules/adb/adb_auth.h
-index 38312211f3ad..e23ad2b089c7 100644
 --- a/packages/modules/adb/adb_auth.h
 +++ b/packages/modules/adb/adb_auth.h
-@@ -51,6 +51,10 @@ void adb_auth_tls_handshake(atransport* t);
+@@ -55,6 +55,10 @@ std::string adb_auth_get_userkey_path();
  extern bool auth_required;
  extern bool socket_access_allowed;
  
@@ -74,8 +68,6 @@ index 38312211f3ad..e23ad2b089c7 100644
  void adbd_auth_init();
  void adbd_auth_verified(atransport *t);
  
-diff --git a/packages/modules/adb/daemon/auth.cpp b/packages/modules/adb/daemon/auth.cpp
-index 7df15aedd58a..2bb0fa65aad5 100644
 --- a/packages/modules/adb/daemon/auth.cpp
 +++ b/packages/modules/adb/daemon/auth.cpp
 @@ -37,6 +37,7 @@
@@ -86,7 +78,7 @@ index 7df15aedd58a..2bb0fa65aad5 100644
  #include <android-base/no_destructor.h>
  #include <android-base/strings.h>
  #include <crypto_utils/android_pubkey.h>
-@@ -157,6 +158,18 @@ static uint32_t transport_auth_id = 0;
+@@ -158,6 +159,18 @@ static uint32_t transport_auth_id = 0;
  bool auth_required = true;
  bool socket_access_allowed = true;
  
@@ -105,7 +97,7 @@ index 7df15aedd58a..2bb0fa65aad5 100644
  static void* transport_to_callback_arg(atransport* transport) {
      uint32_t id = transport_auth_id++;
      (*transports)[id] = transport->weak();
-@@ -196,7 +209,7 @@ static void IteratePublicKeys(std::function<bool(std::string_view public_key)> f
+@@ -197,7 +210,7 @@ static void IteratePublicKeys(std::funct
  }
  
  bssl::UniquePtr<STACK_OF(X509_NAME)> adbd_tls_client_ca_list() {
@@ -114,20 +106,18 @@ index 7df15aedd58a..2bb0fa65aad5 100644
          return nullptr;
      }
  
-@@ -390,7 +403,7 @@ void adbd_notify_framework_connected_key(atransport* t) {
+@@ -417,7 +430,7 @@ void adbd_notify_framework_connected_key
  }
  
  int adbd_tls_verify_cert(X509_STORE_CTX* ctx, std::string* auth_key) {
 -    if (!auth_required) {
 +    if (!adbd_connection_auth_required()) {
          // Any key will do.
-         LOG(INFO) << __func__ << ": auth not required";
+         VLOG(AUTH) << __func__ << ": auth not required";
          return 1;
-diff --git a/packages/modules/adb/daemon/main.cpp b/packages/modules/adb/daemon/main.cpp
-index a5b1d6b3e0eb..d309e235b947 100644
 --- a/packages/modules/adb/daemon/main.cpp
 +++ b/packages/modules/adb/daemon/main.cpp
-@@ -313,7 +313,7 @@ int adbd_main(int server_port) {
+@@ -322,7 +322,7 @@ int adbd_main() {
          auth_required = android::base::GetBoolProperty("ro.adb.secure", false);
  #endif
      }

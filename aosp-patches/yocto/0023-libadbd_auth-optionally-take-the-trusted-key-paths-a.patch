@@ -24,8 +24,6 @@ Signed-off-by: Alex Kiernan <alex.kiernan@gmail.com>
  .../native/libs/adbd_auth/adbd_auth.cpp       | 19 ++++++++++++++++---
  2 files changed, 20 insertions(+), 3 deletions(-)
 
-diff --git a/debian/system/adbd.mk b/debian/system/adbd.mk
-index 5e2c5ccaea30..dc82b998e77a 100644
 --- a/debian/system/adbd.mk
 +++ b/debian/system/adbd.mk
 @@ -113,6 +113,10 @@ ifeq ($(ADBD_AUTH_UNLESS_DEBUGGABLE),1)
@@ -39,34 +37,44 @@ index 5e2c5ccaea30..dc82b998e77a 100644
  STATIC_LIBS = \
    debian/out/system/libadb.a \
    debian/out/system/libcrypto_utils.a \
-diff --git a/frameworks/native/libs/adbd_auth/adbd_auth.cpp b/frameworks/native/libs/adbd_auth/adbd_auth.cpp
-index 78896ed553c4..9b76c17b1b39 100644
 --- a/frameworks/native/libs/adbd_auth/adbd_auth.cpp
 +++ b/frameworks/native/libs/adbd_auth/adbd_auth.cpp
-@@ -390,10 +390,23 @@ public:
-         }
-     }
+@@ -403,15 +403,32 @@ void AdbdAuthContext::Stop() {
+   Interrupt();
+ }
  
--    static constexpr const char* key_paths[] = {"/adb_keys", "/data/misc/adb/adb_keys"};
+-static constexpr std::pair<const char*, bool> key_paths[] = {
+-    {"/adb_keys", true /* follow symlinks */},
+-    {"/data/misc/adb/adb_keys", false /* don't follow symlinks */},
+-};
 +#if defined(ADBD_AUTH_KEY_PATHS)
-+    // A colon-separated list, for systems where AOSP's locations mean nothing.
-+    // Read on every attempt, so a file that appears after adbd started counts.
-+    static std::vector<std::string> KeyPaths() {
-+        return android::base::Split(ADBD_AUTH_KEY_PATHS, ":");
++// A colon-separated list, for systems where AOSP's locations mean nothing.
++// Read on every attempt, so a file that appears after adbd started counts.
++// Symlinks are not followed.
++static std::vector<std::pair<std::string, bool>> KeyPaths() {
++  std::vector<std::pair<std::string, bool>> paths;
++  for (auto& path : android::base::Split(ADBD_AUTH_KEY_PATHS, ":")) {
++    if (!path.empty()) {
++      paths.emplace_back(std::move(path), false /* don't follow symlinks */);
 +    }
++  }
++  return paths;
++}
 +#else
-+    static std::vector<std::string> KeyPaths() {
-+        return {"/adb_keys", "/data/misc/adb/adb_keys"};
-+    }
++static std::vector<std::pair<std::string, bool>> KeyPaths() {
++  return {
++      {"/adb_keys", true /* follow symlinks */},
++      {"/data/misc/adb/adb_keys", false /* don't follow symlinks */},
++  };
++}
 +#endif
-     void IteratePublicKeys(bool (*callback)(void*, const char*, size_t), void* opaque) {
--        for (const auto& path : key_paths) {
--            if (access(path, R_OK) == 0) {
-+        for (const auto& path : KeyPaths()) {
-+            if (path.empty()) {
-+                continue;
-+            }
-+            if (access(path.c_str(), R_OK) == 0) {
-                 LOG(INFO) << "adbd_auth: loading keys from " << path;
-                 std::string content;
-                 if (!android::base::ReadFileToString(path, &content)) {
+ void AdbdAuthContext::IteratePublicKeys(bool (*callback)(void*, const char*,
+                                                          size_t),
+                                         void* opaque) {
+-  for (const auto& [path, follow_symlinks] : key_paths) {
+-    if (access(path, R_OK) == 0) {
++  for (const auto& [path, follow_symlinks] : KeyPaths()) {
++    if (access(path.c_str(), R_OK) == 0) {
+       LOG(INFO) << "adbd_auth: loading keys from " << path;
+       std::string content;
+       if (!android::base::ReadFileToString(path, &content, follow_symlinks)) {

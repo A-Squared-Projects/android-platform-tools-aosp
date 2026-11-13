@@ -3,9 +3,9 @@ Author: Umang Parmar <umangjparmar@gmail.com>
 Forwarded: not-needed
 Last-Update: 2018-05-26
 
---- a/packages/modules/adb/client/usb_libusb.cpp
-+++ b/packages/modules/adb/client/usb_libusb.cpp
-@@ -36,7 +36,7 @@
+--- a/packages/modules/adb/client/usb_libusb_device.cpp
++++ b/packages/modules/adb/client/usb_libusb_device.cpp
+@@ -29,7 +29,7 @@
  #include <unordered_map>
  #include <vector>
  
@@ -14,3 +14,14 @@ Last-Update: 2018-05-26
  
  #include <android-base/file.h>
  #include <android-base/logging.h>
+--- a/packages/modules/adb/client/usb_libusb_hotplug.h
++++ b/packages/modules/adb/client/usb_libusb_hotplug.h
+@@ -18,7 +18,7 @@
+ 
+ #include "usb_libusb.h"
+ 
+-#include <libusb/libusb.h>
++#include <libusb-1.0/libusb.h>
+ 
+ namespace libusb {
+ 
