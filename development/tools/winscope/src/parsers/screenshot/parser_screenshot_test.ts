@@ -14,21 +14,13 @@
  * limitations under the License.
  */
 
-import {assertDefined} from 'common/assert';
-import {
-  TimestampConverter,
-  UTC_TIMEZONE_INFO,
-} from 'common/time/timestamp_converter';
-import {getFixtureFile} from 'test/unit/io_helpers';
-import {
-  TIMESTAMP_CONVERTER_WITH_UTC_OFFSET,
-  makeElapsedTimestamp,
-  timestampEqualityTester,
-} from 'test/unit/time_test_helpers';
-import {TraceFile} from 'trace/trace_file';
-import {CoarseVersion} from 'trace_api/coarse_version';
-import {MediaBasedTraceEntry} from 'trace_api/media_based_trace_entry';
-import {TraceType} from 'trace_api/trace_type';
+import {getFixtureFile} from '@common/testing/io_helpers';
+import {makeConverterNoRteOffsets, makeConverterWithUtcOffset, makeElapsedTimestamp, makeRealTimestamp, timestampEqualityTester,} from '@common/time/testing/test_helpers';
+import {CoarseVersion} from '@trace_api/coarse_version';
+import {TraceFile} from '@trace_api/trace_file';
+import {TraceType} from '@trace_api/trace_type';
+import {CanvasEntry} from '@trace/media_based/media_based_trace_entry';
+
 import {ParserScreenshot} from './parser_screenshot';
 
 describe('ParserScreenshot', () => {
@@ -40,7 +32,7 @@ describe('ParserScreenshot', () => {
     file = await getFixtureFile('traces/screenshot/screenshot.png');
     parser = new ParserScreenshot(
       new TraceFile(file),
-      new TimestampConverter(UTC_TIMEZONE_INFO, 0n),
+      makeConverterNoRteOffsets(),
     );
     await parser.parse();
     parser.createTimestamps();
@@ -55,28 +47,28 @@ describe('ParserScreenshot', () => {
   });
 
   it('provides timestamps', () => {
-    const timestamps = assertDefined(parser.getTimestamps());
-
+    const timestamps = parser.getTimestamps();
     const expected = makeElapsedTimestamp(0n);
-    timestamps.forEach((timestamp) => expect(timestamp).toEqual(expected));
+    expect(timestamps).toEqual([expected]);
   });
 
   it('does not apply timezone info', async () => {
     const parserWithTimezoneInfo = new ParserScreenshot(
       new TraceFile(file),
-      TIMESTAMP_CONVERTER_WITH_UTC_OFFSET,
+      await makeConverterWithUtcOffset(),
     );
     await parserWithTimezoneInfo.parse();
+    parserWithTimezoneInfo.createTimestamps();
 
-    const expectedReal = makeElapsedTimestamp(0n);
-    assertDefined(parser.getTimestamps()).forEach((timestamp) =>
-      expect(timestamp).toEqual(expectedReal),
-    );
+    const timestamps = parserWithTimezoneInfo.getTimestamps();
+    const expected = makeRealTimestamp(0n);
+    expect(timestamps).toEqual([expected]);
   });
 
   it('retrieves entry', async () => {
     const entry = await parser.getEntry(0);
-    expect(entry).toBeInstanceOf(MediaBasedTraceEntry);
-    expect(entry.isImage).toBeTrue();
+    expect(entry).toBeInstanceOf(CanvasEntry);
+    expect(entry.frame).toBeDefined();
+    expect(entry.frame?.size).toEqual({width: 1080, height: 2400});
   });
 });

@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-import {divideAndRound} from 'common/bigint_math';
+import {divideAndRound} from '@common/bigint_math';
+
 import {TimestampFormatter} from './time';
 import {TIME_UNIT_TO_NANO, TIME_UNITS} from './time_units';
 import {UTCOffset} from './utc_offset';
@@ -50,7 +51,7 @@ export class RealTimestampFormatter implements TimestampFormatter {
 
   format(timestampNs: bigint): string {
     const timestampNanos = timestampNs + (this.utcOffset.getValueNs() ?? 0n);
-    const ms = divideAndRound(timestampNanos, BigInt(TIME_UNIT_TO_NANO.ms));
+    const ms = divideAndRound(timestampNanos, TIME_UNIT_TO_NANO.ms);
     const formattedTimestamp = new Date(Number(ms))
       .toISOString()
       .replace('Z', '')
@@ -61,10 +62,11 @@ export class RealTimestampFormatter implements TimestampFormatter {
 
 /**
  * Formats timestamps representing elapsed time since an arbitrary point.
- * This formatter converts a `Timestamp` value (in nanoseconds) into a human-readable string
- * by breaking it down into units like days, hours, minutes, seconds, milliseconds, and nanoseconds.
- * It's useful for displaying durations or timestamps from sources that don't provide real-world time,
- * such as timestamps from traces that only provide monotonic time.
+ * This formatter converts a `Timestamp` value (in nanoseconds) into a
+ * human-readable string by breaking it down into units like days, hours,
+ * minutes, seconds, milliseconds, and nanoseconds. It's useful for displaying
+ * durations or timestamps from sources that don't provide real-world time, such
+ * as timestamps from traces that only provide monotonic time.
  */
 export class ElapsedTimestampFormatter {
   format(timestampNs: bigint): string {
@@ -72,11 +74,11 @@ export class ElapsedTimestampFormatter {
     const parts: Array<{value: bigint; unit: string}> = TIME_UNITS.slice()
       .reverse()
       .map(({nanosInUnit, unit}) => {
-        let amountOfUnit = BigInt(0);
+        let amountOfUnit = 0n;
         if (leftNanos >= nanosInUnit) {
-          amountOfUnit = leftNanos / BigInt(nanosInUnit);
+          amountOfUnit = leftNanos / nanosInUnit;
         }
-        leftNanos = leftNanos % BigInt(nanosInUnit);
+        leftNanos = leftNanos % nanosInUnit;
         return {value: amountOfUnit, unit};
       });
 
@@ -99,8 +101,9 @@ export const REAL_TIMESTAMP_FORMATTER_UTC = new RealTimestampFormatter(
 );
 /**
  * Formats timestamps representing elapsed time since an arbitrary point.
- * This formatter converts a `Timestamp` value (in nanoseconds) into a human-readable string
- * by breaking it down into units like days, hours, minutes, seconds, milliseconds, and nanoseconds.
- * It's useful for displaying durations or timestamps from sources that don't provide real-world time.
+ * This formatter converts a `Timestamp` value (in nanoseconds) into a
+ * human-readable string by breaking it down into units like days, hours,
+ * minutes, seconds, milliseconds, and nanoseconds. It's useful for displaying
+ * durations or timestamps from sources that don't provide real-world time.
  */
 export const ELAPSED_TIMESTAMP_FORMATTER = new ElapsedTimestampFormatter();

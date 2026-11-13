@@ -13,17 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {getFixtureFile} from 'test/unit/io_helpers';
-import {
-  createZipArchive,
-  decompressGZipFile,
-  DOWNLOAD_FILENAME_REGEX,
-  getFileDirectory,
-  getFileExtension,
-  removeDirFromFileName,
-  removeExtensionFromFilename,
-  unzipFile,
-} from './io';
+import {getFixtureFile} from '@common/testing/io_helpers';
+
+import {createZipArchive, decompressGZipFile, DOWNLOAD_FILENAME_REGEX, getFileDirectory, getFileExtension, removeDirFromFileName, removeExtensionFromFilename, unzipFile,} from './io';
 
 describe('file_utils', () => {
   it('extracts file extensions', () => {

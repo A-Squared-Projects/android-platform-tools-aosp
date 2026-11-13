@@ -14,23 +14,21 @@
  * limitations under the License.
  */
 
-import {assertBigInt, assertDefined} from 'common/assert';
-import {NOT_IMPLEMENTED_ERROR} from 'common/errors';
-import {INVALID_TIME_NS, Timestamp} from 'common/time/time';
-import {TimestampConverter} from 'common/time/timestamp_converter';
-import {Analytics} from 'logging/analytics';
-import {TraceSearchQueryFailed} from 'messaging/user_warnings';
-import {UserNotifier} from 'services/user_notifier';
-import {CoarseVersion} from 'trace_api/coarse_version';
-import {
-  CustomQueryParserResultTypeMap,
-  CustomQueryType,
-} from 'trace_api/custom_query';
-import {AbsoluteEntryIndex, EntriesRange} from 'trace_api/index_types';
-import {Parser} from 'trace_api/parser';
-import {TraceType} from 'trace_api/trace_type';
-import {QueryResult} from 'trace_processor/query_result';
-import {TraceProcessorFactory} from 'trace_processor/trace_processor_factory';
+import {assertBigInt, assertDefined} from '@common/assert';
+import {NOT_IMPLEMENTED_ERROR} from '@common/errors';
+import {INVALID_TIME_NS, Timestamp} from '@common/time/time';
+import {TimestampConverter} from '@common/time/timestamp_converter';
+import {Analytics} from '@logging/analytics';
+import {makeWarningTraceSearchQueryFailed} from '@parsers/helpers/warnings';
+import {UserNotifier} from '@services/user_notifier';
+import {CoarseVersion} from '@trace_api/coarse_version';
+import {CustomQueryParserResultTypeMap, CustomQueryType,} from '@trace_api/custom_query';
+import {AbsoluteEntryIndex, EntriesRange} from '@trace_api/index_types';
+import {Parser} from '@trace_api/parser';
+import {TraceType} from '@trace_api/trace_type';
+import {QueryResult, QueryResults} from '@trace_processor/query_result';
+import {RawDataQueryResult} from '@trace_processor/raw_data_query_result';
+import {TraceProcessorFactory} from '@trace_processor/trace_processor_factory';
 
 export class ParserSearch implements Parser<QueryResult> {
   private queryResult?: QueryResult;
@@ -40,6 +38,10 @@ export class ParserSearch implements Parser<QueryResult> {
     private readonly query: string,
     private timestampConverter: TimestampConverter,
   ) {}
+
+  onDestroy() {
+    // do nothing
+  }
 
   getCoarseVersion(): CoarseVersion {
     return CoarseVersion.LATEST;
@@ -66,7 +68,7 @@ export class ParserSearch implements Parser<QueryResult> {
     return this.timestamps;
   }
 
-  async getEntry(index: AbsoluteEntryIndex): Promise<QueryResult> {
+  async getEntry(_: AbsoluteEntryIndex): Promise<QueryResult> {
     return this.validateQueryResult();
   }
 
@@ -74,15 +76,18 @@ export class ParserSearch implements Parser<QueryResult> {
     throw NOT_IMPLEMENTED_ERROR;
   }
 
-  getRangeOfEntries(
-    entriesRange: EntriesRange,
-  ): Promise<Array<QueryResult | undefined>> {
+  getRangeOfEntries(_: EntriesRange): Promise<QueryResult[]> {
+    throw NOT_IMPLEMENTED_ERROR;
+  }
+
+  getQueryResults(
+    _: EntriesRange,
+  ): Promise<QueryResults<QueryResult | RawDataQueryResult>> {
     throw NOT_IMPLEMENTED_ERROR;
   }
 
   customQuery<Q extends CustomQueryType>(
-    type: Q,
-    entriesRange: EntriesRange,
+    _: Q,
   ): Promise<CustomQueryParserResultTypeMap[Q]> {
     throw NOT_IMPLEMENTED_ERROR;
   }
@@ -97,14 +102,6 @@ export class ParserSearch implements Parser<QueryResult> {
 
   getRealToBootTimeOffsetNs(): bigint | undefined {
     return undefined;
-  }
-
-  createTimestamps(): void {
-    throw NOT_IMPLEMENTED_ERROR;
-  }
-
-  canConvertToPerfetto(): boolean {
-    return false;
   }
 
   async parse() {
@@ -128,7 +125,7 @@ export class ParserSearch implements Parser<QueryResult> {
     } catch (e) {
       Analytics.TraceSearch.logQueryFailure();
       UserNotifier.add(
-        new TraceSearchQueryFailed((e as Error).message),
+        makeWarningTraceSearchQueryFailed((e as Error).message),
       ).notify();
       throw e;
     }

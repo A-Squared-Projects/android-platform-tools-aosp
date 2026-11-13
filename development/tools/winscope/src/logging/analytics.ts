@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-import {FilesSource} from 'app/files_source';
-import {analyticsLogEvent} from 'common/analytics';
-import {CoarseVersion} from 'trace_api/coarse_version';
-import {Parser} from 'trace_api/parser';
-import {TraceType} from 'trace_api/trace_type';
+import {analyticsLogEvent} from '@common/analytics';
+import {CoarseVersion} from '@trace_api/coarse_version';
+import {FilesSource} from '@trace_api/files_source';
+import {Parser} from '@trace_api/parser';
+import {TraceType} from '@trace_api/trace_type';
 
 const BUGANIZER_OPENED = 'buganizer_opened';
 const CROSS_TOOL_SYNC = 'cross_tool_sync';
@@ -37,6 +37,8 @@ const JS_MEMORY_USAGE = 'js_memory_usage';
 const LOAD_FILES_TIME = 'load_files_time';
 const LOAD_VIEWERS_TIME = 'load_viewer_time';
 const NAVIGATION_ZOOM_EVENT = 'navigation_zoom';
+const PLAYBACK_START_REQUEST = 'playback_start_request';
+const PLAYBACK_ERROR = 'playback_error';
 const PROPERTIES_SETTINGS = 'properties_settings';
 const PROXY_ERROR = 'proxy_error';
 const PROXY_SERVER_NOT_FOUND = 'proxy_server_not_found';
@@ -48,6 +50,8 @@ const TP_QUERY_EXECUTION_TIME = 'tp_query_execution_time';
 const TP_QUERY_REQUESTED = 'tp_query_requested';
 const TP_QUERY_FAILED = 'tp_query_failed';
 const TP_QUERY_SAVED = 'tp_query_saved';
+const TP_QUERY_EXPORTED_TO_CSV = 'tp_query_exported_to_csv';
+const TP_QUERY_EXPORT_FAILED = 'tp_query_export_failed';
 const TP_SEARCH_INITIALIZATION_TIME = 'tp_search_initialization_time';
 const TIME_BOOKMARK = 'time_bookmark';
 const TIME_COPIED = 'time_copied';
@@ -59,6 +63,7 @@ const TRACING_COLLECT_DUMP = 'tracing_collect_dump';
 const TRACING_COLLECT_TRACE = 'tracing_collect_trace';
 const TRACING_LOADED_EVENT = 'tracing_trace_loaded';
 const TRACING_OPEN_FROM_ABT = 'tracing_from_abt';
+const TRACING_OPEN_FROM_REMOTE_TOOL = 'tracing_from_remote_tool';
 const TRACING_START_TIME = 'tracing_start_time';
 const USER_WARNING = 'user_warning';
 const VIEWER_INITIALIZATION_TIME = 'viewer_initialization_time';
@@ -77,6 +82,11 @@ export const Analytics = {
     },
     logFrameMapError(description: string) {
       analyticsLogEvent(FRAME_MAP_ERROR, {
+        description,
+      } as Gtag.CustomParams);
+    },
+    logPlaybackError(description: string) {
+      analyticsLogEvent(PLAYBACK_ERROR, {
         description,
       } as Gtag.CustomParams);
     },
@@ -105,7 +115,7 @@ export const Analytics = {
     },
 
     logFileParsingTime(
-      type: 'perfetto' | 'legacy',
+      type: 'perfetto' | 'legacy' | 'non_perfetto',
       files_source: FilesSource,
       ms: number,
     ) {
@@ -141,6 +151,7 @@ export const Analytics = {
 
   Memory: {
     logUsage(stage: string, params: object = {}) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const memory: Memory | undefined = (performance as any).memory;
       if (memory) {
         Object.assign(params, {
@@ -267,6 +278,14 @@ export const Analytics = {
     },
   },
 
+  Playback: {
+    logStartRequest(type: 'forwards' | 'backwards') {
+      analyticsLogEvent(PLAYBACK_START_REQUEST, {
+        type,
+      });
+    },
+  },
+
   Proxy: {
     logServerNotFound(connectionType: string) {
       analyticsLogEvent(PROXY_SERVER_NOT_FOUND, {
@@ -316,10 +335,16 @@ export const Analytics = {
     logQuerySaved() {
       analyticsLogEvent(TP_QUERY_SAVED);
     },
+    logQueryExportedToCsv() {
+      analyticsLogEvent(TP_QUERY_EXPORTED_TO_CSV);
+    },
+    logQueryExportFailed() {
+      analyticsLogEvent(TP_QUERY_EXPORT_FAILED);
+    },
   },
 
   Tracing: {
-    logTraceLoaded(parser: Parser<object>) {
+    logTraceLoaded(parser: Parser<unknown>) {
       analyticsLogEvent(TRACING_LOADED_EVENT, {
         type: TraceType[parser.getTraceType()],
         coarse_version: CoarseVersion[parser.getCoarseVersion()],
@@ -350,6 +375,10 @@ export const Analytics = {
 
     logOpenFromABT() {
       analyticsLogEvent(TRACING_OPEN_FROM_ABT);
+    },
+
+    logOpenFromRemoteTool() {
+      analyticsLogEvent(TRACING_OPEN_FROM_REMOTE_TOOL);
     },
 
     logRefreshDumps() {

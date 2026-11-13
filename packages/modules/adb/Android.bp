@@ -13,7 +13,6 @@
 // limitations under the License.
 
 package {
-    default_team: "trendy_team_native_tools_libraries",
     default_applicable_licenses: ["packages_modules_adb_license"],
 }
 
@@ -267,6 +266,7 @@ cc_library_host_static {
         "client/openscreen/platform/logging.cpp",
         "client/openscreen/platform/task_runner.cpp",
         "client/openscreen/platform/udp_socket.cpp",
+        "client/adbmdns/adbmdns.cpp",
         "client/auth.cpp",
         "client/adb_wifi.cpp",
         "client/detach.cpp",
@@ -287,7 +287,10 @@ cc_library_host_static {
 
     target: {
         linux: {
-            srcs: ["client/usb_linux.cpp"] + libadb_linux_srcs,
+            srcs: [
+                "client/usb_linux.cpp",
+                "client/usb_linux_netlink.cpp",
+            ] + libadb_linux_srcs,
         },
         darwin: {
             srcs: ["client/usb_osx.cpp"] + libadb_darwin_srcs,
@@ -366,6 +369,7 @@ cc_test_host {
     srcs: libadb_test_srcs + [
         "client/adb_wifi_test.cpp",
         "client/commandline_test.cpp",
+        "client/console_test.cpp",
         "client/discovered_services_test.cpp",
         "client/mdns_utils_test.cpp",
         "test_utils/test_utils.cpp",
@@ -392,6 +396,7 @@ cc_test_host {
         "libprotobuf-cpp-full",
         "libssl",
         "libusb",
+        "libadbmdns_bridge",
     ],
 
     target: {
@@ -409,6 +414,9 @@ cc_test_host {
             strip: {
                 none: true,
             },
+            srcs: [
+                "client/usb_linux_test.cpp",
+            ],
         },
         darwin: {
             sanitize: {
@@ -483,6 +491,7 @@ cc_defaults {
         "libz",
         "libziparchive",
         "libzstd",
+        "libadbmdns_bridge",
     ],
 
     // Don't add anything here, we don't want additional shared dependencies
@@ -612,7 +621,7 @@ cc_library_static {
                 "adbd_flags_c_lib",
             ],
             static_libs: [
-                 "android_adbdauth_flags_cc_lib",
+                "android_adbdauth_flags_cc_lib",
             ],
         },
         recovery: {
@@ -1075,6 +1084,7 @@ cc_library_host_static {
         "libutils",
         "libz",
         "libziparchive",
+        "libadbmdns_bridge",
     ],
     proto: {
         type: "lite",
@@ -1121,6 +1131,7 @@ cc_test_host {
         "libutils",
         "libz",
         "libziparchive",
+        "libadbmdns_bridge",
     ],
     target: {
         windows: {

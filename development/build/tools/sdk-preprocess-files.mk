@@ -16,14 +16,23 @@ sys_img_props := $(patsubst \
                    $(wildcard $(TOPDIR)development/sys-img/*_source.prop_template))
 ALL_SDK_FILES += $(sdk_props) $(sample_props) $(sys_img_props)
 
+# Set the beta version. Set to the empty string unless PREVIEW_SDK_INT
+# (PLATFORM_PREVIEW_SDK_VERSION) represents a beta of an upcoming SDK (when the
+# value is on the format MMmB, where MM is the major version, m the minor
+# version, B the beta version; 3612 would be the 2nd beta of an upcoming 36.1
+# SDK).
+BETA_SDK_VERSION := $(shell if [[ "$(PLATFORM_PREVIEW_SDK_VERSION)" =~ ^[0-9]{4}$$ ]]; then echo "$(PLATFORM_PREVIEW_SDK_VERSION)" | cut -c4 ; fi)
+
 # Rule to convert a source.prop template into the desired source.property
 # This needs to vary based on the CPU ABI for the system-image files.
 # Rewritten variables:
-# - ${PLATFORM_VERSION}               e.g. "1.0"
-# - ${PLATFORM_SDK_VERSION}           e.g. "3.1", aka the API major.minor version
+# - ${BETA_SDK_VERSION}               e.g. "", "1", "2"
 # - ${PLATFORM_EXTENSION_SDK_VERSION} e.g. "7" -- the extension sdk level
 # - ${PLATFORM_IS_BASE_SDK}           bool. -- whether the current extension sdk is the base extension for this api level
+# - ${PLATFORM_PREVIEW_SDK_VERSION}   e.g. "0", "1", "3701", "20251006"
+# - ${PLATFORM_SDK_VERSION}           e.g. "3.1", aka the API major.minor version
 # - ${PLATFORM_VERSION_CODENAME}      e.g. "REL" (transformed into "") or "Cupcake"
+# - ${PLATFORM_VERSION}               e.g. "1.0"
 # - ${TARGET_ARCH}                    e.g. "arm", "x86", "mips" and their 64-bit variants.
 # - ${TARGET_CPU_ABI}                 e.g. "armeabi", "x86", "mips" and their 64-bit variants.
 define process_prop_template
@@ -35,11 +44,15 @@ $(hide) sed \
 	-e 's/$${PLATFORM_SDK_EXTENSION_VERSION}/$(PLATFORM_SDK_EXTENSION_VERSION)/' \
 	-e 's/$${PLATFORM_IS_BASE_SDK}/$(if $(filter $(PLATFORM_SDK_EXTENSION_VERSION),$(PLATFORM_BASE_SDK_EXTENSION_VERSION)),true,false)/' \
 	-e 's/$${PLATFORM_VERSION_CODENAME}/$(subst REL,,$(PLATFORM_VERSION_CODENAME))/' \
+	-e 's/$${PLATFORM_PREVIEW_SDK_VERSION}/$(PLATFORM_PREVIEW_SDK_VERSION)/' \
+	-e 's/$${BETA_SDK_VERSION}/$(BETA_SDK_VERSION)/' \
 	-e 's/$${TARGET_ARCH}/$(TARGET_ARCH)/' \
 	-e 's/$${TARGET_CPU_ABI}/$(TARGET_CPU_ABI)/' \
 	-e 's/$${EMULATOR_MINIMAL_VERSION}/$(EMULATOR_MINIMAL_VERSION)/' \
 	-e 's/$${SYSTEM_IMAGE_TAG_ID}/${SYSTEM_IMAGE_TAG_ID}/' \
 	-e 's/$${SYSTEM_IMAGE_TAG_DISPLAY}/${SYSTEM_IMAGE_TAG_DISPLAY}/' \
+	-e 's/$${EXTRA_SYSTEM_IMAGE_TAGS}/${EXTRA_SYSTEM_IMAGE_TAGS}/' \
+	-e 's/$${EXTRA_SYSTEM_IMAGE_TAG_DISPLAY}/${EXTRA_SYSTEM_IMAGE_TAG_DISPLAY}/' \
 	$< > $@ && sed -i -e '/^AndroidVersion.CodeName=\s*$$/d' $@
 endef
 
@@ -106,45 +119,11 @@ ALL_SDK_FILES += $(TARGET_OUT_COMMON_INTERMEDIATES)/JAVA_LIBRARIES/android.test.
 # ======= Lint API XML (complete API) ===========
 full_target := $(TARGET_OUT_COMMON_INTERMEDIATES)/PACKAGING/api_versions_public_generated-api-versions.xml
 ALL_SDK_FILES += $(full_target)
-$(call dist-for-goals,sdk,$(full_target):data/api-versions.xml)
 
 # ======= Lint Annotations zip (complete API) ===========
 full_target := $(TARGET_OUT_COMMON_INTERMEDIATES)/PACKAGING/sdk-annotations.zip
 $(eval $(call copy-one-file,$(call intermediates-dir-for,ETC,sdk-annotations.zip)/sdk-annotations.zip,$(full_target)))
 ALL_SDK_FILES += $(full_target)
-$(call dist-for-goals,sdk,$(full_target):data/annotations.zip)
-
-# ======= Lint system API XML (complete API) ===========
-full_target := $(TARGET_OUT_COMMON_INTERMEDIATES)/PACKAGING/api_versions_system_generated-api-versions.xml
-$(call dist-for-goals,sdk,$(full_target):system-data/api-versions.xml)
-
-# ======= Lint system Annotations zip (complete API) ===========
-full_target := $(call intermediates-dir-for,ETC,sdk-annotations-system.zip)/sdk-annotations-system.zip
-$(call dist-for-goals,sdk,$(full_target):system-data/annotations.zip)
-
-# ======= Lint module-lib API XML (non-updatable APIs only) ===========
-full_target := $(TARGET_OUT_COMMON_INTERMEDIATES)/PACKAGING/api_versions_module_lib_generated-api-versions.xml
-$(call dist-for-goals,sdk,$(full_target):module-lib-data/api-versions.xml)
-
-# ======= Lint module-lib API XML (complete API) ===========
-full_target := $(TARGET_OUT_COMMON_INTERMEDIATES)/PACKAGING/api_versions_module_lib_complete_generated-api-versions.xml
-$(call dist-for-goals,sdk,$(full_target):module-lib-data/api-versions-complete.xml)
-
-# ======= Lint module-lib Annotations zip (complete API) ===========
-full_target := $(call intermediates-dir-for,ETC,sdk-annotations-module-lib.zip)/sdk-annotations-module-lib.zip
-$(call dist-for-goals,sdk,$(full_target):module-lib-data/annotations.zip)
-
-# ======= Lint system-server API XML (non-updatable APIs only) ===========
-full_target := $(TARGET_OUT_COMMON_INTERMEDIATES)/PACKAGING/api_versions_system_server_generated-api-versions.xml
-$(call dist-for-goals,sdk,$(full_target):system-server-data/api-versions.xml)
-
-# ======= Lint system-server API XML (complete API) ===========
-full_target := $(TARGET_OUT_COMMON_INTERMEDIATES)/PACKAGING/api_versions_system_server_complete_generated-api-versions.xml
-$(call dist-for-goals,sdk,$(full_target):system-server-data/api-versions-complete.xml)
-
-# ======= Lint system-server Annotations zip (complete API) ===========
-full_target := $(call intermediates-dir-for,ETC,sdk-annotations-system-server.zip)/sdk-annotations-system-server.zip
-$(call dist-for-goals,sdk,$(full_target):system-server-data/annotations.zip)
 
 # ============ SDK AIDL ============
 $(eval $(call copy-one-file,$(FRAMEWORK_AIDL),$(TARGET_OUT_COMMON_INTERMEDIATES)/PACKAGING/framework.aidl))
@@ -182,6 +161,3 @@ $(wear_sdk_jar_full_target): $(wear_sdk_current_stubs_target) $(wildcard $(PRIVA
         )
 
 ALL_SDK_FILES += $(wear_sdk_jar_full_target)
-
-# ===== Generate source.property files for clockwork device image. =====
--include vendor/google_clockwork/sdk/build/gen-src-properties.mk

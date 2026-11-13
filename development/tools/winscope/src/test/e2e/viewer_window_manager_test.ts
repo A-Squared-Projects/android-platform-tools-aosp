@@ -15,20 +15,8 @@
  */
 
 import {browser} from 'protractor';
-import {
-  changeRealTimestampInWinscope,
-  checkFinalRealTimestamp,
-  checkInitialRealTimestamp,
-  checkItemInPropertiesTree,
-  checkRectLabel,
-  checkTimelineTraceSelector,
-  checkWinscopeRealTimestamp,
-  filterHierarchy,
-  loadTraceAndCheckViewer,
-  selectItemInHierarchy,
-  setTimeouts,
-  WINSCOPE_URL,
-} from './utils';
+
+import {changeRealTimestampInWinscope, checkFinalRealTimestamp, checkInitialRealTimestamp, checkItemInPropertiesTreeByName, checkRectLabel, checkTimelineTraceSelector, checkWinscopeRealTimestamp, filterHierarchy, loadTraceAndCheckViewer, selectItemInHierarchy, setTimeouts, WINSCOPE_URL,} from './helpers';
 
 describe('Viewer Window Manager', () => {
   const viewerSelector = 'viewer-window-manager';
@@ -40,7 +28,7 @@ describe('Viewer Window Manager', () => {
 
   it('processes trace from zip and navigates correctly', async () => {
     await loadTraceAndCheckViewer(
-      'archives/deployment_full_trace_phone.zip',
+      'archives/deployment_full_trace_phone_perfetto.zip',
       'Window Manager',
       viewerSelector,
     );
@@ -65,7 +53,7 @@ describe('Viewer Window Manager', () => {
   });
 
   async function checkRootProperties() {
-    await checkItemInPropertiesTree(
+    await checkItemInPropertiesTreeByName(
       viewerSelector,
       'focusedApp',
       'focusedApp:\ncom.google.android.apps.messaging/.ui.ConversationListActivity',
@@ -73,19 +61,19 @@ describe('Viewer Window Manager', () => {
   }
 
   async function checkInputMethodWindowProperties() {
-    await checkItemInPropertiesTree(
+    await checkItemInPropertiesTreeByName(
       viewerSelector,
       'fitInsetsTypes',
       'fitInsetsTypes:\nNAVIGATION_BARS | STATUS_BARS',
     );
 
-    await checkItemInPropertiesTree(
+    await checkItemInPropertiesTreeByName(
       viewerSelector,
       'flags',
       'flags:\nFLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS | FLAG_HARDWARE_ACCELERATED | FLAG_SPLIT_TOUCH | FLAG_LAYOUT_IN_SCREEN | FLAG_NOT_FOCUSABLE',
     );
 
-    await checkItemInPropertiesTree(
+    await checkItemInPropertiesTreeByName(
       viewerSelector,
       'compatFrame',
       'compatFrame:\n(136, 74) - (2340, 1080)',

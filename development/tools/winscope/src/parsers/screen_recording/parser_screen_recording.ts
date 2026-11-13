@@ -14,65 +14,38 @@
  * limitations under the License.
  */
 
-import {searchSubarray} from 'common/typed_array';
-import {Timestamp} from 'common/time/time';
-import {ParserTimestampConverter} from 'common/time/timestamp_converter';
-import {MonotonicScreenRecording} from 'messaging/user_warnings';
-import {AbstractParser} from 'parsers/legacy/abstract_parser';
-import {UserNotifier} from 'services/user_notifier';
-import {timestampToVideoTimeSeconds} from 'trace/screen_recording_utils';
-import {TraceFile} from 'trace/trace_file';
-import {CoarseVersion} from 'trace_api/coarse_version';
-import {MediaBasedTraceEntry} from 'trace_api/media_based_trace_entry';
-import {TraceMetadata} from 'trace_api/trace_metadata';
-import {TraceType} from 'trace_api/trace_type';
+import {Timestamp} from '@common/time/time';
+import {makeWarningMonotonicScreenRecording} from '@parsers/helpers/warnings';
+import {UserNotifier} from '@services/user_notifier';
+import {CoarseVersion} from '@trace_api/coarse_version';
+
+import {AbstractParserScreenRecording} from './abstract_parser_screen_recording';
+import {parseIntFromBuffer, ScreenRecordingParser, WINSCOPE_MAGIC_STRING,} from './helpers';
 import {ParserExternalMetadata} from './parser_external_metadata';
 import {ParserFilename} from './parser_filename';
 import {ParserMetadataV1Or2} from './parser_metadata_v1_or_v2';
 import {ParserMetadataV3} from './parser_metadata_v3';
-import {
-  parseIntFromBuffer,
-  ScreenRecordingParser,
-  WINSCOPE_MAGIC_STRING,
-} from './utils';
 
-export class ParserScreenRecording extends AbstractParser<
-  MediaBasedTraceEntry,
-  bigint
-> {
+export class ParserScreenRecording extends AbstractParserScreenRecording {
   private realToBootTimeOffsetNs: bigint | undefined;
   private makeTimestampFromExactValue = false;
 
-  constructor(
-    trace: TraceFile,
-    timestampConverter: ParserTimestampConverter,
-    metadata: TraceMetadata,
-  ) {
-    super(trace, timestampConverter, metadata);
-  }
-
-  override getTraceType(): TraceType {
-    return TraceType.SCREEN_RECORDING;
-  }
-
-  override getCoarseVersion(): CoarseVersion {
-    return CoarseVersion.LATEST;
-  }
-
-  override getMagicNumber(): number[] | undefined {
-    return undefined;
-  }
-
-  override getRealToMonotonicTimeOffsetNs(): bigint | undefined {
-    return undefined;
+  protected override getMagicNumber(): number[] {
+    return [];
   }
 
   override getRealToBootTimeOffsetNs(): bigint | undefined {
     return this.realToBootTimeOffsetNs;
   }
 
-  override async decodeTrace(videoData: Uint8Array): Promise<Array<bigint>> {
-    const posVersion = this.searchMagicString(videoData);
+  override getCoarseVersion(): CoarseVersion {
+    return CoarseVersion.LATEST;
+  }
+
+  protected override async decodeTrace(
+    videoData: Uint8Array,
+  ): Promise<readonly bigint[]> {
+    const posVersion = this.searchMagicString(videoData, WINSCOPE_MAGIC_STRING);
 
     let parser: ScreenRecordingParser;
     if (posVersion !== undefined) {
@@ -88,6 +61,7 @@ export class ParserScreenRecording extends AbstractParser<
     if (result.realToBootTimeOffsetNs === 0n) {
       this.makeTimestampFromExactValue = true;
     }
+    this.queueThumbnailGeneration(videoData);
     return result.timestamps;
   }
 
@@ -96,27 +70,6 @@ export class ParserScreenRecording extends AbstractParser<
       return this.timestampConverter.makeTimestampFromRealNs(decodedEntry);
     }
     return this.timestampConverter.makeTimestampFromBootTimeNs(decodedEntry);
-  }
-
-  override processDecodedEntry(
-    index: number,
-    entry: bigint,
-  ): MediaBasedTraceEntry {
-    const videoTimeSeconds = timestampToVideoTimeSeconds(
-      this.decodedEntries[0],
-      entry,
-    );
-    const videoData = this.traceFile.file;
-    return new MediaBasedTraceEntry(videoTimeSeconds, videoData);
-  }
-
-  private searchMagicString(videoData: Uint8Array): number | undefined {
-    let pos = searchSubarray(videoData, WINSCOPE_MAGIC_STRING);
-    if (pos === undefined) {
-      return undefined;
-    }
-    pos += WINSCOPE_MAGIC_STRING.length;
-    return pos;
   }
 
   private getParserForEmbeddedMetadata(
@@ -148,7 +101,7 @@ export class ParserScreenRecording extends AbstractParser<
       // If no device suspensions are involved, SYSTEM_TIME_MONOTONIC should
       // indeed correspond to SYSTEM_TIME_BOOTTIME and things will work as
       // expected.
-      UserNotifier.add(new MonotonicScreenRecording());
+      UserNotifier.add(makeWarningMonotonicScreenRecording());
     }
     return new ParserMetadataV1Or2(posTimeOffset);
   }

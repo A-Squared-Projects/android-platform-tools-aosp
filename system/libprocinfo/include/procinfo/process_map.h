@@ -74,8 +74,8 @@ struct MapInfo {
   // "[anon:mt:...ivetest64/bionic-unit-tests/bionic-loader-test-libs/libdlext_test.so+e000]".
   // For mappings under MTE globals, we thus post-process the name to extract the page offset, and
   // canonicalize the name.
-  static constexpr const char* kMtePrefix = "[anon:mt:";
-  static constexpr size_t kMtePrefixLength = sizeof(kMtePrefix) - 1;
+  static constexpr const char kMtePrefix[] = "[anon:mt:";
+  static constexpr size_t kMtePrefixLength = std::char_traits<char>::length(kMtePrefix);
 
   void MaybeExtractMemtagGlobalsInfo() {
     if (!this->name.starts_with(kMtePrefix)) return;
@@ -86,7 +86,7 @@ struct MapInfo {
     if (sscanf(this->name.c_str() + offset_to_plus + 1, "%" SCNx64 "]", &this->pgoff) != 1) return;
 
     this->name =
-        std::string(this->name.begin() + kMtePrefixLength + 2, this->name.begin() + offset_to_plus);
+        std::string(this->name.begin() + kMtePrefixLength, this->name.begin() + offset_to_plus);
   }
 
   MapInfo(uint64_t start, uint64_t end, uint16_t flags, uint64_t pgoff, ino_t inode,

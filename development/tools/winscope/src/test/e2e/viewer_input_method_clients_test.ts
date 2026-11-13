@@ -15,19 +15,8 @@
  */
 
 import {browser, by, element} from 'protractor';
-import {
-  applyStateToHierarchyOptions,
-  changeRealTimestampInWinscope,
-  checkFinalRealTimestamp,
-  checkInitialRealTimestamp,
-  checkItemInPropertiesTree,
-  checkTimelineTraceSelector,
-  checkWinscopeRealTimestamp,
-  loadTraceAndCheckViewer,
-  selectItemInHierarchy,
-  setTimeouts,
-  WINSCOPE_URL,
-} from './utils';
+
+import {applyStateToHierarchyOptions, changeRealTimestampInWinscope, checkFinalRealTimestamp, checkInitialRealTimestamp, checkItemInPropertiesTreeByName, checkTimelineTraceSelector, checkWinscopeRealTimestamp, collapseAdditionalProperties, loadTraceAndCheckViewer, scrollDown, selectItemInHierarchy, setTimeouts, WINSCOPE_URL,} from './helpers';
 
 describe('Viewer Input Method Clients', () => {
   const viewerSelector = 'viewer-input-method';
@@ -39,7 +28,7 @@ describe('Viewer Input Method Clients', () => {
 
   it('processes trace from zip and navigates correctly', async () => {
     await loadTraceAndCheckViewer(
-      'archives/deployment_full_trace_phone.zip',
+      'archives/deployment_full_trace_phone_perfetto.zip',
       'IME Clients',
       viewerSelector,
     );
@@ -61,6 +50,10 @@ describe('Viewer Input Method Clients', () => {
     await clickInputMethodSurface();
     await checkInputMethodSurfaceProperties();
 
+    await scrollDown(
+      `${viewerSelector} .hierarchy-view .tree-scroll`,
+      `${viewerSelector} hierarchy-view [id="nodeInputMethod#765"]`,
+    );
     await selectItemInHierarchy(viewerSelector, 'InputMethod#765');
     await checkInputMethodLayerProperties();
 
@@ -69,43 +62,45 @@ describe('Viewer Input Method Clients', () => {
   });
 
   async function checkHierarchy() {
+    await collapseAdditionalProperties(viewerSelector);
     const nodes = await element.all(
       by.css(`${viewerSelector} hierarchy-view .node`),
     );
+
     expect(nodes.length).toBe(5);
     expect(await nodes[0].getText()).toContain(
-      'InputMethodClients - 2022-11-21, 18:05:14.970 - InsetsSourceConsumer#notifyAnimationFinished',
+      'InputMethodClientsTraceProto - 2022-11-21, 18:05:14.970 - InsetsSourceConsumer#notifyAnimationFinished',
     );
     expect(await nodes[1].getText()).toContain('253 - SfSubtree - Task=8#253');
     expect(await nodes[2].getText()).toContain(
-      '778 - Letterbox - left#778 HWC V',
+      '778 - Letterbox - left#778HWCV',
     );
     expect(await nodes[3].getText()).toContain(
-      '786 - com.google.(...).ZeroStateSearchActivity#786 HWC V',
+      '786 - com.google.(...).ZeroStateSearchActivity#786HWCV',
     );
-    expect(await nodes[4].getText()).toContain('765 - InputMethod#765 HWC V');
+    expect(await nodes[4].getText()).toContain('765 - InputMethod#765HWCV');
   }
 
   async function checkInputMethodLayerProperties() {
-    await checkItemInPropertiesTree(
+    await checkItemInPropertiesTreeByName(
       viewerSelector,
       'activeBuffer',
       'activeBuffer:\nw: 1006, h: 2204, stride: 268437760, format: 1',
     );
 
-    await checkItemInPropertiesTree(
+    await checkItemInPropertiesTreeByName(
       viewerSelector,
       'bufferTransform',
       'bufferTransform:\nROT_270',
     );
 
-    await checkItemInPropertiesTree(
+    await checkItemInPropertiesTreeByName(
       viewerSelector,
       'hwcCompositionType',
       'hwcCompositionType:\nHWC_TYPE_DEVICE',
     );
 
-    await checkItemInPropertiesTree(
+    await checkItemInPropertiesTreeByName(
       viewerSelector,
       'bounds',
       'bounds:\n(0, 0) - (2204, 1006)',
@@ -176,16 +171,16 @@ describe('Viewer Input Method Clients', () => {
   }
 
   async function checkWmStateProperties() {
-    await checkItemInPropertiesTree(
+    await checkItemInPropertiesTreeByName(
       viewerSelector,
       'screenState',
       'screenState:\nSCREEN_STATE_ON',
     );
 
-    await checkItemInPropertiesTree(
+    await checkItemInPropertiesTreeByName(
       viewerSelector,
-      'windowFramesValid',
-      'windowFramesValid:\ntrue',
+      'focusedApp',
+      'focusedApp:\ncom.google.android.apps.messaging/.ui.search.ZeroStateSearchActivity',
     );
   }
 
@@ -197,9 +192,9 @@ describe('Viewer Input Method Clients', () => {
   }
 
   async function checkImeContainerProperties() {
-    await checkItemInPropertiesTree(viewerSelector, 'id', 'id:\n12');
+    await checkItemInPropertiesTreeByName(viewerSelector, 'id', 'id:\n12');
 
-    await checkItemInPropertiesTree(
+    await checkItemInPropertiesTreeByName(
       viewerSelector,
       'bounds',
       'bounds:\n(-10800, -23400) - (10800, 23400)',
@@ -214,15 +209,15 @@ describe('Viewer Input Method Clients', () => {
   }
 
   async function checkInputMethodSurfaceProperties() {
-    await checkItemInPropertiesTree(viewerSelector, 'id', 'id:\n795');
+    await checkItemInPropertiesTreeByName(viewerSelector, 'id', 'id:\n795');
 
-    await checkItemInPropertiesTree(
+    await checkItemInPropertiesTreeByName(
       viewerSelector,
       'position',
       'position:\nx: 136, y: 148',
     );
 
-    await checkItemInPropertiesTree(
+    await checkItemInPropertiesTreeByName(
       viewerSelector,
       'transform',
       'transform:\nTRANSLATE',

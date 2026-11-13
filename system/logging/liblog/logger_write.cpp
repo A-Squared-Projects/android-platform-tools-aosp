@@ -43,7 +43,6 @@
 
 #ifdef __ANDROID__
 #include "logd_writer.h"
-#include "pmsg_writer.h"
 #endif
 
 #if defined(__APPLE__)
@@ -115,7 +114,6 @@ static int check_log_uid_permissions() {
 void __android_log_close() {
 #ifdef __ANDROID__
   LogdClose();
-  PmsgClose();
 #endif
 }
 
@@ -227,10 +225,7 @@ static int write_to_log(log_id_t log_id, struct iovec* vec, size_t nr,
     }
   }
 
-  int ret = LogdWrite(log_id, timestamp, vec, nr);
-  PmsgWrite(log_id, timestamp, vec, nr);
-
-  return ret;
+  return LogdWrite(log_id, timestamp, vec, nr);
 }
 #else
 static int write_to_log(log_id_t, struct iovec*, size_t, const struct timespec* = nullptr) {

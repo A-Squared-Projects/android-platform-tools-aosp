@@ -14,19 +14,21 @@
  * limitations under the License.
  */
 
-import {removeDirFromFileName} from 'common/io';
-import {Timer} from 'common/time/timer';
-import {ProgressListener} from 'messaging/progress_listener';
-import {ProxyTracingWarnings} from 'messaging/user_warnings';
-import {UserNotifier} from 'services/user_notifier';
-import {AdbDeviceConnection} from 'trace_collection/adb/adb_device_connection';
-import {AdbHostConnection} from 'trace_collection/adb/adb_host_connection';
-import {AdbConnectionType} from 'trace_collection/adb_connection_type';
-import {ConnectionStateListener} from 'trace_collection/connection_state_listener';
-import {MockAdbHostConnection} from 'trace_collection/mock/mock_adb_host_connection';
-import {UserRequest} from 'trace_collection/user_request';
-import {WdpHostConnection} from 'trace_collection/wdp/wdp_host_connection';
-import {WinscopeProxyHostConnection} from 'trace_collection/winscope_proxy/winscope_proxy_host_connection';
+import {removeDirFromFileName} from '@common/io';
+import {Timer} from '@common/time/timer';
+import {getLogger, Logger} from '@compat/logging';
+import {ProgressListener} from '@messaging/progress_listener';
+import {UserNotifier} from '@services/user_notifier';
+import {AdbConnectionType} from '@trace_collection/adb_connection_type';
+import {AdbDeviceConnection} from '@trace_collection/adb_device_connection';
+import {AdbHostConnection} from '@trace_collection/adb_host_connection';
+import {ConnectionStateListener} from '@trace_collection/connection_state_listener';
+import {MockAdbHostConnection} from '@trace_collection/mock/mock_adb_host_connection';
+import {UserRequest} from '@trace_collection/user_request';
+import {makeWarningProxyTracingWarnings} from '@trace_collection/warnings';
+import {WdpHostConnection} from '@trace_collection/wdp/wdp_host_connection';
+import {WinscopeProxyHostConnection} from '@trace_collection/winscope_proxy/winscope_proxy_host_connection';
+
 import {PerfettoSessionModerator} from './perfetto_session_moderator';
 import {TracingSession} from './tracing_session';
 import {UserRequestParser} from './user_request_parser';
@@ -39,6 +41,7 @@ export class TraceCollectionController {
   constructor(
     connectionType: string,
     private listener: ConnectionStateListener & ProgressListener,
+    private readonly logger: Logger = getLogger('TraceCollectionController'),
   ) {
     if (connectionType === AdbConnectionType.WDP) {
       this.host = new WdpHostConnection(listener);
@@ -137,7 +140,7 @@ export class TraceCollectionController {
     const adbData: File[] = [];
     const paths = await device.findFiles(`${WINSCOPE_BACKUP_DIR}*`, []);
     for (const [index, filepath] of paths.entries()) {
-      console.debug(`Fetching file ${filepath} from device`);
+      this.logger.debug(`Fetching file ${filepath} from device`);
       const data = await device.pullFile(filepath);
       const filename = removeDirFromFileName(filepath);
       adbData.push(new File([data], filename));
@@ -145,7 +148,7 @@ export class TraceCollectionController {
         'Fetching files...',
         (100 * index) / paths.length,
       );
-      console.debug(`Fetched ${filepath}`);
+      this.logger.debug(`Fetched ${filepath}`);
     }
     this.listener.onOperationFinished(true);
     return adbData;
@@ -162,7 +165,7 @@ export class TraceCollectionController {
 
     if (sessions.length === 0) {
       UserNotifier.add(
-        new ProxyTracingWarnings([
+        makeWarningProxyTracingWarnings([
           'None of the requested targets are available on this device.',
         ]),
       ).notify();
@@ -178,13 +181,13 @@ export class TraceCollectionController {
   ) {
     await perfettoModerator.tryStopCurrentPerfettoSession();
     await perfettoModerator.clearPreviousConfigFiles();
-    console.debug('Clearing previous tracing session files from device');
+    this.logger.trace('Clearing previous tracing session files from device');
     let output = await device.runShellCommand(`rm -rf ${WINSCOPE_BACKUP_DIR}`);
-    console.debug(
+    this.logger.trace(
       `Cleared previous tracing session files from device. Output: ${output}`,
     );
     output = await device.runShellCommand(`mkdir ${WINSCOPE_BACKUP_DIR}`);
-    console.debug(`Created new backup dir on device. Output: ${output}`);
+    this.logger.trace(`Created new backup dir on device. Output: ${output}`);
   }
 
   private async moveFiles(

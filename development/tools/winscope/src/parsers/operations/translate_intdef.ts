@@ -14,15 +14,12 @@
  * limitations under the License.
  */
 
-import intDefMapping from 'common/intDefMapping.json';
-import {
-  FixedStringFormatter,
-  FLAG_SEPARATOR,
-  formatAsHex,
-} from 'trace/formatters';
-import {TamperedProtoField} from 'trace/proto_utils/tampered_message_type';
-import {Operation} from 'tree_node/operation';
-import {PropertyTreeNode} from 'tree_node/property_tree_node';
+import {INTDEF_MAPPING_JSON} from '@compat/intdef_mapping';
+import {getLogger} from '@compat/logging';
+import {FixedStringFormatter, FLAG_SEPARATOR, formatAsHex,} from '@trace/formatters';
+import {TamperedProtoField} from '@trace/proto_utils/tampered_message_type';
+import {Operation} from '@tree_node/operation';
+import {PropertyTreeNode} from '@tree_node/property_tree_node';
 
 export class TranslateIntDef implements Operation<PropertyTreeNode> {
   constructor(
@@ -31,7 +28,7 @@ export class TranslateIntDef implements Operation<PropertyTreeNode> {
   ) {}
 
   apply(value: PropertyTreeNode, parentField = this.rootField): void {
-    const protoType = parentField.tamperedMessageType;
+    const protoType = parentField?.resolve();
 
     if (protoType === undefined) {
       return;
@@ -52,6 +49,7 @@ export class TranslateIntDef implements Operation<PropertyTreeNode> {
         const translation = this.translateIntDefToStringIfNeeded(
           propertyValue,
           field,
+          value.name,
         );
         if (typeof translation === 'string') {
           value.setFormatter(new FixedStringFormatter(translation));
@@ -63,15 +61,20 @@ export class TranslateIntDef implements Operation<PropertyTreeNode> {
   private translateIntDefToStringIfNeeded(
     value: number,
     field: TamperedProtoField,
+    propertyName: string,
   ): string | number {
     const typeDefSpec = this.getTypeDefSpecFromField(field);
 
-    const translateAsAll = this.translateAsAll.includes(field.name);
+    const translateAsAll = this.translateAsAll.includes(propertyName);
 
-    if (typeDefSpec) {
+    if (typeDefSpec && field.name === propertyName) {
       return this.getIntFlagsAsStrings(value, typeDefSpec, translateAsAll);
     } else {
-      const propertyPath = `${field.parent?.name}.${field.name}`;
+      const parentName =
+        field.name === propertyName
+          ? field.parent?.name
+          : field.resolve()?.name;
+      const propertyPath = `${parentName}.${propertyName}`;
       if (this.intDefColumn[propertyPath]) {
         return this.getIntFlagsAsStrings(
           value,
@@ -87,12 +90,7 @@ export class TranslateIntDef implements Operation<PropertyTreeNode> {
   private getTypeDefSpecFromField(
     field: TamperedProtoField,
   ): string | undefined {
-    return (
-      field.options?.['(.perfetto.protos.typedef)'] ??
-      field.options?.['(.android.typedef)'] ??
-      field.options?.['(.android_common.typedef)'] ??
-      undefined
-    );
+    return field.intDefType ?? undefined;
   }
 
   private getIntFlagsAsStrings(
@@ -102,14 +100,17 @@ export class TranslateIntDef implements Operation<PropertyTreeNode> {
   ): string {
     const flags: string[] = [];
     const mapping =
-      intDefMapping[annotationType as keyof typeof intDefMapping]?.values ?? {};
+      INTDEF_MAPPING_JSON[annotationType as keyof typeof INTDEF_MAPPING_JSON]
+        ?.values ?? {};
 
     const knownFlagValues = Object.keys(mapping)
       .reverse()
       .map((x) => Math.floor(Number(x)));
 
     if (knownFlagValues.length === 0) {
-      console.warn('No mapping for type', annotationType);
+      getLogger('TranslateIntDef').warn(
+        `No mapping for type ${annotationType}`,
+      );
       return intFlags + '';
     }
 
@@ -132,7 +133,8 @@ export class TranslateIntDef implements Operation<PropertyTreeNode> {
     }
 
     if (leftOver) {
-      // If 0 is a valid flag value that isn't in the intDefMapping it will be ignored
+      // If 0 is a valid flag value that isn't in the intDefMapping it will be
+      // ignored
       flags.push(this.formatUnknownFlag(leftOver));
     }
 
@@ -156,18 +158,24 @@ export class TranslateIntDef implements Operation<PropertyTreeNode> {
       'android.content.pm.ActivityInfo.ScreenOrientation',
     'InputWindowInfoProto.inputConfig':
       'android.view.InputWindowHandle.InputConfigFlags',
+    'InputWindowInfoProto.testAndroidTypedef':
+      'android.content.pm.ActivityInfo.ScreenOrientation',
     'InputWindowInfoProto.layoutParamsFlags':
       'android.view.WindowManager.LayoutParams.Flags',
     'InsetsSourceConsumerProto.typeNumber':
       'android.view.WindowInsets.Type.InsetsType',
     'InsetsSourceControlProto.typeNumber':
       'android.view.WindowInsets.Type.InsetsType',
+    'RemoteInsetsControlTargetProto.animatingTypes':
+      'android.view.WindowInsets.Type.InsetsType',
     'RemoteInsetsControlTargetProto.requestedVisibleTypes':
       'android.view.WindowInsets.Type.InsetsType',
     'ShellTransition.flags': 'android.view.WindowManager.TransitionFlags',
-    'Target.flags': 'android.window.TransitionInfo.ChangeFlags',
+    'Change.flags': 'android.window.TransitionInfo.ChangeFlags',
     'WindowContainerProto.orientation':
       'android.content.pm.ActivityInfo.ScreenOrientation',
+    'WindowStateProto.animatingTypes':
+      'android.view.WindowInsets.Type.InsetsType',
     'WindowStateProto.requestedVisibleTypes':
       'android.view.WindowInsets.Type.InsetsType',
   };

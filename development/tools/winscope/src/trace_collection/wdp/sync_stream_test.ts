@@ -14,12 +14,10 @@
  * limitations under the License.
  */
 
-import {ArrayBufferBuilder} from 'common/buffer';
-import {base64Encode, binaryEncode, utf8Decode} from 'common/string_helpers';
-import {
-  makeFakeWebSocket,
-  makeFakeWebSocketMessage,
-} from 'test/unit/web_socket_utils';
+import {ArrayBufferBuilder} from '@common/buffer';
+import {base64Encode, binaryEncode, utf8Decode} from '@common/string_helpers';
+import {makeFakeWebSocket, makeFakeWebSocketMessage,} from '@trace_collection/wdp/testing/web_socket_test_helpers';
+
 import {SyncStream} from './sync_stream';
 
 describe('SyncStream', () => {
@@ -222,7 +220,7 @@ describe('SyncStream', () => {
 
     webSocket.send.withArgs(expectedSendBuffer).and.callFake(() => {
       const message = jasmine.createSpyObj<MessageEvent<ArrayBuffer>>([], {
-        'data': messageData,
+        data: messageData,
       });
       webSocket.onmessage!(message);
     });

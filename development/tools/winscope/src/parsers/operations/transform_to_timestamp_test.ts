@@ -14,14 +14,13 @@
  * limitations under the License.
  */
 
-import {assertDefined} from 'common/assert';
-import {MockLong} from 'test/unit/mock_long';
-import {PropertyTreeBuilder} from 'test/unit/property_tree_builder';
-import {PropertyTreeNode} from 'tree_node/property_tree_node';
-import {
-  makeRealTimestamp,
-  makeElapsedTimestamp,
-} from 'test/unit/time_test_helpers';
+import {assertDefined} from '@common/assert';
+import {makeElapsedTimestamp, makeRealTimestamp,} from '@common/time/testing/test_helpers';
+import {Timestamp} from '@common/time/time';
+import {MockLong} from '@parsers/mock_long';
+import {PropertyTreeNode} from '@tree_node/property_tree_node';
+import {PropertyTreeBuilder} from '@tree_node/testing/property_tree_builder';
+
 import {TransformToTimestamp} from './transform_to_timestamp';
 
 describe('TransformToTimestamp', () => {
@@ -48,10 +47,14 @@ describe('TransformToTimestamp', () => {
     );
     operation.apply(propertyRoot);
     expect(
-      assertDefined(propertyRoot.getChildByName('timestamp')).getValue(),
+      assertDefined(
+        propertyRoot.getChildByName('timestamp'),
+      ).getValue<Timestamp>(),
     ).toEqual(makeRealTimestamp(10n));
     expect(
-      assertDefined(propertyRoot.getChildByName('otherTimestamp')).getValue(),
+      assertDefined(
+        propertyRoot.getChildByName('otherTimestamp'),
+      ).getValue<MockLong>(),
     ).toEqual(longTimestamp);
   });
 
@@ -62,10 +65,14 @@ describe('TransformToTimestamp', () => {
     );
     operation.apply(propertyRoot);
     expect(
-      assertDefined(propertyRoot.getChildByName('timestamp')).getValue(),
+      assertDefined(
+        propertyRoot.getChildByName('timestamp'),
+      ).getValue<Timestamp>(),
     ).toEqual(makeElapsedTimestamp(10n));
     expect(
-      assertDefined(propertyRoot.getChildByName('otherTimestamp')).getValue(),
+      assertDefined(
+        propertyRoot.getChildByName('otherTimestamp'),
+      ).getValue<MockLong>(),
     ).toEqual(longTimestamp);
   });
 

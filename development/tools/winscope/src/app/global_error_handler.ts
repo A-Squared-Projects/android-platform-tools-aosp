@@ -14,8 +14,9 @@
  * limitations under the License.
  */
 
-import {ErrorHandler} from '@angular/core';
-import {Analytics} from 'logging/analytics';
+import {ErrorHandler, Injectable} from '@angular/core';
+import {getLogger, Logger} from '@compat/logging';
+import {Analytics} from '@logging/analytics';
 
 /**
  * A global error handler for the application.
@@ -23,9 +24,12 @@ import {Analytics} from 'logging/analytics';
  * NOTE: This handler is not triggered for errors that occur within the context of a promise.
  *       Such errors must be handled via a dedicated `.catch(...)` block.
  */
+@Injectable()
 export class GlobalErrorHandler implements ErrorHandler {
+  private readonly logger: Logger = getLogger('GlobalErrorHandler');
+
   handleError(error: Error) {
     Analytics.Error.logGlobalException(error.message);
-    console.error(error);
+    this.logger.error(error.message, error);
   }
 }

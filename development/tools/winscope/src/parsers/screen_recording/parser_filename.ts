@@ -14,20 +14,17 @@
  * limitations under the License.
  */
 
-import {removeDirFromFileName, removeExtensionFromFilename} from 'common/io';
-import {TIME_UNIT_TO_NANO} from 'common/time/time_units';
-import {
-  ParserResult,
-  parseTimestampsFromMp4VideoTrack,
-  ScreenRecordingParser,
-} from './utils';
+import {removeDirFromFileName, removeExtensionFromFilename} from '@common/io';
+import {TIME_UNIT_TO_NANO} from '@common/time/time_units';
+import {getLogger, Logger} from '@compat/logging';
+
+import {ParserResult, parseTimestampsFromMp4VideoTrack, ScreenRecordingParser,} from './helpers';
 
 export class ParserFilename implements ScreenRecordingParser {
-  private filename: string;
-
-  constructor(filename: string) {
-    this.filename = filename;
-  }
+  constructor(
+    private filename: string,
+    private readonly logger: Logger = getLogger('ParserFilename'),
+  ) {}
 
   async parse(videoData: Uint8Array): Promise<ParserResult> {
     // try parse offset from filename
@@ -40,7 +37,7 @@ export class ParserFilename implements ScreenRecordingParser {
 
     if (offsetMs !== undefined) {
       try {
-        const offset = BigInt(offsetMs) * BigInt(TIME_UNIT_TO_NANO.ms);
+        const offset = offsetMs * TIME_UNIT_TO_NANO.ms;
         // set realToBootTimeOffsetNs as 0n as we only have the real
         // start time of the recording
         return {
@@ -51,7 +48,7 @@ export class ParserFilename implements ScreenRecordingParser {
           realToBootTimeOffsetNs: 0n,
         };
       } catch (e) {
-        console.error(e);
+        this.logger.error((e as Error).message);
       }
     }
 
@@ -65,7 +62,7 @@ export class ParserFilename implements ScreenRecordingParser {
   private async parseTimestampsUsingFilenameOffset(
     videoData: Uint8Array,
     offset: bigint,
-  ): Promise<Array<bigint>> {
+  ): Promise<bigint[]> {
     const timestampsElapsedNs = await parseTimestampsFromMp4VideoTrack(
       videoData,
       offset,

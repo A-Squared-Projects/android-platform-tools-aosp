@@ -14,12 +14,7 @@
  * limitations under the License.
  */
 
-import {
-  parseIntFromBuffer,
-  parseLongFromBuffer,
-  ParserResult,
-  ScreenRecordingParser,
-} from './utils';
+import {parseIntFromBuffer, parseLongFromBuffer, ParserResult, ScreenRecordingParser,} from './helpers';
 
 //  Metadata v2 is written as a binary array with the following format:
 //  - Winscope magic string
@@ -47,7 +42,7 @@ export class ParserMetadataV1Or2 implements ScreenRecordingParser {
         'Failed to parse timestamps. Video data is too short.',
       );
     }
-    const timestamps: Array<bigint> = [];
+    const timestamps: bigint[] = [];
     let pos = posTimestamps;
     for (let i = 0; i < count; ++i) {
       const [newPos, timestamp] = parseLongFromBuffer(videoData, pos);

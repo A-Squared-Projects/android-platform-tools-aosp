@@ -13,37 +13,33 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import {assertDefined} from '@common/assert';
+import {TransformTypeFlags} from '@common/geometry/transform';
+import {makeElapsedTimestamp} from '@common/time/testing/test_helpers';
+import {getFakeProtoDescriptors} from '@compat/test/protobuf';
+import {EMPTY_OBJ_STRING, LAYER_ID_FORMATTER} from '@trace/formatters';
+import {Registry, TamperedMessageType, TamperedProtoField,} from '@trace/proto_utils/tampered_message_type';
+import {PropertyTreeNode} from '@tree_node/property_tree_node';
+import {PropertyTreeBuilder} from '@tree_node/testing/property_tree_builder';
+import {makeBufferNode, makeColorNode, makePositionNode, makeRectNode, makeSizeNode, makeTransformNode,} from '@tree_node/testing/tree_node_test_helpers';
 
-import {assertDefined} from 'common/assert';
-import {TransformTypeFlags} from 'common/geometry/transform';
-import root from 'protos/test/fake_proto/json';
-import {PropertyTreeBuilder} from 'test/unit/property_tree_builder';
-import {makeElapsedTimestamp} from 'test/unit/time_test_helpers';
-import {
-  makeBufferNode,
-  makeColorNode,
-  makePositionNode,
-  makeRectNode,
-  makeSizeNode,
-  makeTransformNode,
-} from 'test/unit/tree_node_test_helpers';
-import {EMPTY_OBJ_STRING, LAYER_ID_FORMATTER} from 'trace/formatters';
-import {
-  TamperedMessageType,
-  TamperedProtoField,
-} from 'trace/proto_utils/tampered_message_type';
-import {PropertyTreeNode} from 'tree_node/property_tree_node';
-import {SetFormatters} from 'viewers/operations/set_formatters';
+import {SetFormatters} from './set_formatters';
 
 describe('SetFormatters', () => {
   let propertyRoot: PropertyTreeNode;
   let operation: SetFormatters;
   let field: TamperedProtoField;
 
+  beforeAll(async () => {
+    Registry.getInstance().parseDescriptors(await getFakeProtoDescriptors());
+  });
+
   beforeEach(() => {
-    field = TamperedMessageType.tamper(root.lookupType('RootMessage')).fields[
-      'entry'
-    ];
+    field = (
+      Registry.getInstance().getType(
+        'winscope.test.RootMessage',
+      ) as TamperedMessageType
+    ).fields['entry'];
     operation = new SetFormatters();
   });
 
@@ -58,9 +54,7 @@ describe('SetFormatters', () => {
     operation.apply(propertyRoot);
 
     expect(propertyRoot.formattedValue()).toBe('');
-    expect(propertyRoot.getChildByName('enum0')?.formattedValue()).toEqual(
-      'ENUM0_VALUE_ZERO',
-    );
+    expect(propertyRoot.getChildByName('enum0')?.formattedValue()).toEqual('0');
   });
 
   it('adds correct formatter for color node', () => {

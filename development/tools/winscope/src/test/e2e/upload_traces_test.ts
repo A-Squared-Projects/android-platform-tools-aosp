@@ -15,16 +15,8 @@
  */
 
 import {browser, by, element} from 'protractor';
-import {
-  areMessagesEmitted,
-  clickClearAllButton,
-  clickCloseIcon,
-  clickViewTracesButton,
-  loadBugReport,
-  setTimeouts,
-  uploadFixture,
-  WINSCOPE_URL,
-} from './utils';
+
+import {areMessagesEmitted, clickClearAllButton, clickCloseIcon, clickViewTracesButton, loadBugReport, setTimeouts, uploadFixture, WINSCOPE_URL,} from './helpers';
 
 describe('Upload traces', () => {
   const DEFAULT_TIMEOUT_MS = 40000;
@@ -62,8 +54,13 @@ describe('Upload traces', () => {
 
   it('can process bugreport', async () => {
     await loadBugReport(DEFAULT_TIMEOUT_MS);
-    await clickViewTracesButton();
+    await clickViewTracesButton(true);
     await checkRendersSurfaceFlingerView();
+  });
+
+  it("doesn't emit messages for valid trace file", async () => {
+    await uploadFixture('traces/elapsed_and_real_timestamp/SurfaceFlinger.pb');
+    expect(await areMessagesEmitted(DEFAULT_TIMEOUT_MS)).toBeFalsy();
   });
 
   async function checkRendersSurfaceFlingerView() {
@@ -72,11 +69,6 @@ describe('Upload traces', () => {
     ).isPresent();
     expect(viewerPresent).toBeTruthy();
   }
-
-  it("doesn't emit messages for valid trace file", async () => {
-    await uploadFixture('traces/elapsed_and_real_timestamp/SurfaceFlinger.pb');
-    expect(await areMessagesEmitted(DEFAULT_TIMEOUT_MS)).toBeFalsy();
-  });
 
   async function checkNoFilesUploaded() {
     // default timeout to understand whether the messages where emitted or not.

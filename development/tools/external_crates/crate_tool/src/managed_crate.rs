@@ -15,7 +15,8 @@
 use std::{
     cell::OnceCell,
     collections::BTreeSet,
-    fs::{copy, read_dir, read_to_string, remove_dir_all, remove_file, rename, write},
+    fs::{copy, read, read_dir, read_to_string, remove_dir_all, remove_file, rename, write},
+    io::ErrorKind,
     os::unix::fs::symlink,
     path::{Path, PathBuf},
     process::Command,
@@ -231,8 +232,10 @@ impl ManagedCrate<New> {
         self,
         pseudo_crate: &PseudoCrate<CargoVendorClean>,
         run_cargo_embargo: bool,
+        update_imports: bool,
     ) -> Result<ManagedCrate<CopiedAndPatched>> {
-        let regenerated = self.into_vendored(pseudo_crate)?.regenerate(run_cargo_embargo)?;
+        let regenerated =
+            self.into_vendored(pseudo_crate)?.regenerate(run_cargo_embargo, update_imports)?;
         Ok(regenerated)
     }
 }
@@ -305,20 +308,46 @@ impl ManagedCrate<Vendored> {
     /// later, by cargo_embargo
     fn apply_patches(&self) -> Result<()> {
         for patch in self.patches()? {
-            Command::new("patch")
-                .args(["-p1", "-l", "--no-backup-if-mismatch", "-i"])
-                .arg(&patch)
-                .current_dir(self.temporary_build_directory())
-                .output()?
-                .success_or_error()
-                .context(format!(
-                    "Failed to apply patch file {}",
-                    patch.file_name().unwrap_or_default().to_string_lossy()
-                ))?;
+            let patchname = self.android_crate.name().to_owned()
+                + "/patches/"
+                + &patch.file_name().unwrap_or_default().to_string_lossy();
+
+            let patch_with_extra_args = |args: &[&str]| {
+                let mut cmd = Command::new("patch");
+                cmd.args(args)
+                    .args(["-p1", "-l", "--no-backup-if-mismatch", "-i"])
+                    .arg(&patch)
+                    .current_dir(self.temporary_build_directory());
+                cmd
+            };
+
+            // Run the patch command first with `--dry-run`. If this fails, we'll error out with the
+            // tree in a clean state, rather than in a state that potentially has a
+            // partially-applied patch.
+            let output_or_error =
+                patch_with_extra_args(&["--dry-run"]).output()?.success_or_error();
+            if let Err(success_or_error::Error::CommandFailedwithOutput { ref stdout, .. }) =
+                output_or_error
+            {
+                if stdout.contains("Reversed (or previously applied) patch detected!") {
+                    println!("\nTIP: This patch may have landed upstream. Check that it has. If so, try removing {:?} and run the crate_tool again.\n", patchname);
+                }
+            }
+            output_or_error.with_context(|| {
+                format!("Failed to apply patch file {} with `--dry-run`", patchname)
+            })?;
+
+            patch_with_extra_args(&[]).output()?.success_or_error().with_context(|| {
+                format!("Failed to apply patch file {}, but --dry-run passed", patchname)
+            })?;
         }
         Ok(())
     }
-    pub fn regenerate(self, run_cargo_embargo: bool) -> Result<ManagedCrate<CopiedAndPatched>> {
+    pub fn regenerate(
+        self,
+        run_cargo_embargo: bool,
+        update_imports: bool,
+    ) -> Result<ManagedCrate<CopiedAndPatched>> {
         self.copy_to_temporary_build_directory()?;
         self.copy_customizations()?;
 
@@ -327,9 +356,9 @@ impl ManagedCrate<Vendored> {
         for deletion in self.config().deletions() {
             let dir = self.temporary_build_directory().join(deletion)?;
             if dir.abs().is_dir() {
-                remove_dir_all(dir)?;
+                remove_dir_all(&dir).context(format!("Failed to remove {dir}"))?;
             } else {
-                remove_file(dir)?;
+                remove_file(&dir).context(format!("Failed to remove {dir}"))?;
             }
         }
 
@@ -341,13 +370,32 @@ impl ManagedCrate<Vendored> {
             Crate::from(self.temporary_build_directory())?.license(),
         )?;
         let regenerated = self.into_copied_and_patched(licenses)?;
-        regenerated.regenerate(run_cargo_embargo)?;
+        regenerated.regenerate(run_cargo_embargo, update_imports)?;
         Ok(regenerated)
     }
 }
 
+fn file_contents_identical(a: &Path, b: &Path) -> Result<bool> {
+    let a_len =
+        a.metadata().with_context(|| format!("reading metadata for {}", a.display()))?.len();
+
+    let b_len =
+        b.metadata().with_context(|| format!("reading metadata for {}", b.display()))?.len();
+
+    if a_len != b_len {
+        return Ok(false);
+    }
+
+    let a_contents =
+        read(a).with_context(|| format!("reading contents for {}", a.display()))?.len();
+
+    let b_contents =
+        read(b).with_context(|| format!("reading contents for {}", b.display()))?.len();
+    Ok(a_contents == b_contents)
+}
+
 impl ManagedCrate<CopiedAndPatched> {
-    pub fn regenerate(&self, run_cargo_embargo: bool) -> Result<()> {
+    pub fn regenerate(&self, run_cargo_embargo: bool, update_imports: bool) -> Result<()> {
         // License logic must happen AFTER applying patches, because we use patches
         // to add missing license files. It must also happen BEFORE cargo_embargo,
         // because cargo_embargo needs to put license information in the Android.bp.
@@ -362,14 +410,13 @@ impl ManagedCrate<CopiedAndPatched> {
         }
 
         self.update_metadata()?;
-        self.fix_test_mapping()?;
+        self.fix_test_mapping(update_imports)?;
         // Fails on dangling symlinks, which happens when we run on the log crate.
         checksum::generate(self.temporary_build_directory())?;
 
         let android_crate_dir = self.android_crate.path();
         remove_dir_all(android_crate_dir)?;
-        rename(self.temporary_build_directory(), android_crate_dir)?;
-
+        move_dir(self.temporary_build_directory(), android_crate_dir)?;
         Ok(())
     }
     fn update_license_files(&self) -> Result<()> {
@@ -399,10 +446,11 @@ impl ManagedCrate<CopiedAndPatched> {
             );
         }
 
+        let temporary_build_dir: PathBuf = self.temporary_build_directory().abs().into();
         // Per go/thirdparty/licenses#multiple:
         // "Delete any LICENSE files or license texts that were not selected and are not in use."
         for unneeded_license_file in self.extra.licenses.unneeded.values() {
-            remove_file(self.temporary_build_directory().abs().join(unneeded_license_file))?;
+            remove_file(temporary_build_dir.join(unneeded_license_file))?;
         }
 
         // Per http://go/thirdpartyreviewers#license:
@@ -416,20 +464,32 @@ impl ManagedCrate<CopiedAndPatched> {
             .map(|path| path.as_path())
             .collect::<BTreeSet<_>>();
         let canonical_license_file_name = Path::new("LICENSE");
-        let canonical_license_path = self.temporary_build_directory().abs().join("LICENSE");
+        let canonical_license_path = temporary_build_dir.join("LICENSE");
         if license_files.len() == 1 {
             // If there's a single applicable license file, it must either
             // be called LICENSE, or else we need to symlink LICENSE to it.
             let license_file = license_files.first().unwrap();
             if *license_file != canonical_license_file_name {
                 if canonical_license_path.exists() {
-                    // TODO: Maybe just blindly delete LICENSE and replace it with a symlink.
-                    // Currently, we have to use a deletions config in android_config.toml
-                    // to remove it.
-                    bail!("Found a single license file {}, but we can't create a symlink to it because a file named LICENSE already exists", license_file.display());
-                } else {
-                    symlink(license_file, canonical_license_path)?;
+                    let license_path = temporary_build_dir.join(license_file);
+                    if !file_contents_identical(&canonical_license_path, &license_path)
+                        .with_context(|| {
+                            format!(
+                                "comparing {} with {}",
+                                canonical_license_path.display(),
+                                license_file.display()
+                            )
+                        })?
+                    {
+                        // TODO: Maybe just blindly delete LICENSE and replace it with a symlink.
+                        // Currently, we have to use a deletions config in android_config.toml
+                        // to remove it.
+                        bail!("Found a single license file {}, but we can't create a symlink to it because a file named LICENSE already exists", license_file.display());
+                    }
+                    remove_file(&canonical_license_path)
+                        .context("removing existing LICENSE file")?;
                 }
+                symlink(license_file, canonical_license_path)?;
             }
         } else {
             // We found multiple license files. Per go/thirdparty/licenses#multiple they should
@@ -491,16 +551,36 @@ impl ManagedCrate<CopiedAndPatched> {
     }
     /// Updates the TEST_MAPPING file in the temporary build directory, by
     /// removing deleted tests and adding new tests as post-submits.
-    fn fix_test_mapping(&self) -> Result<()> {
+    fn fix_test_mapping(&self, update_imports: bool) -> Result<()> {
         let mut tm = TestMapping::read(self.temporary_build_directory())?;
         let mut changed = tm.fix_import_paths();
         changed |= tm.add_new_tests_to_postsubmit()?;
         changed |= tm.remove_unknown_tests()?;
-        // TODO: Add an option to fix up the reverse dependencies.
+        if update_imports {
+            tm.update_imports()?;
+            changed = true;
+        }
         if changed {
             println!("Updating TEST_MAPPING for {}", self.name());
             tm.write()?;
         }
         Ok(())
     }
+}
+
+/// Moves a directory from `from` to `to`.
+///
+/// Unlike `std::fs::rename`, this works across devices.
+///
+/// If the rename crosses devices, this will copy the file from `from` to `to`
+/// and then remove the file at `from`.
+fn move_dir<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> Result<()> {
+    match rename(&from, &to) {
+        Err(e) if e.kind() == ErrorKind::CrossesDevices => {
+            copy_dir(&from, to)?;
+            remove_dir_all(from)
+        }
+        res => res,
+    }?;
+    Ok(())
 }

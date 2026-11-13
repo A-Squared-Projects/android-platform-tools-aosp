@@ -14,58 +14,51 @@
  * limitations under the License.
  */
 
-import {assertDefined} from 'common/assert';
-import {Store} from 'common/store/store';
-import {Timestamp} from 'common/time/time';
-import {Timer} from 'common/time/timer';
-import {CrossToolProtocol} from 'cross_tool/cross_tool_protocol';
-import {Analytics} from 'logging/analytics';
-import {ProgressListener} from 'messaging/progress_listener';
-import {UserWarning} from 'messaging/user_warning';
-import {
-  CannotVisualizeTraceEntry,
-  FailedToInitializeTimelineData,
-  IncompleteFrameMapping,
-  NoTraceTargetsSelected,
-  NoValidFiles,
-} from 'messaging/user_warnings';
-import {
-  ActiveTraceChanged,
-  AppTraceViewRequest,
-  AppTraceViewRequestHandled,
-  ExpandedTimelineToggled,
-  ShowTraceUploadWarning,
-  TraceAddRequest,
-  TracePositionUpdate,
-  TraceSearchCompleted,
-  TraceSearchFailed,
-  TraceSearchInitialized,
-  ViewersLoaded,
-  ViewersUnloaded,
-  WinscopeEvent,
-  WinscopeEventType,
-} from 'messaging/winscope_event';
-import {WinscopeEventEmitter} from 'messaging/winscope_event_emitter';
-import {WinscopeEventListener} from 'messaging/winscope_event_listener';
-import {UserNotifier} from 'services/user_notifier';
-import {Trace, TraceEntry} from 'trace_api/trace';
-import {TRACE_INFO} from 'trace_api/trace_info';
-import {TracePosition} from 'trace_api/trace_position';
-import {TraceType} from 'trace_api/trace_type';
-import {RequestedTraceTypes} from 'trace_collection/adb_files';
-import {View, Viewer, ViewType} from 'viewers/viewer';
-import {ViewerFactory} from 'viewers/viewer_factory';
-import {FilesSource} from './files_source';
-import {TimelineData} from './timeline_data';
-import {TracePipeline} from './trace_pipeline';
-import {TraceSearchInitializer} from './trace_search/trace_search_initializer';
-import {PlaybackState} from 'viewers/common/playback/playback_state';
+import {TraceSearchInitializer} from '@app/search/trace_search_initializer';
+import {ViewerFactory} from '@app/viewer_factory';
+import {assertDefined} from '@common/assert';
+import {Store} from '@common/store/store';
+import {Timestamp} from '@common/time/time';
+import {Timer} from '@common/time/timer';
+import {getLogger, Logger} from '@compat/logging';
+import {CrossToolProtocol} from '@cross_tool/cross_tool_protocol';
+import {RemoteToolDownloadStart, RemoteToolFilesReceived, RemoteToolInitialized, RemoteToolTimestampReceived, RemoteToolWaitingForFiles,} from '@cross_tool/remote_tool_events';
+import {Analytics} from '@logging/analytics';
+import {ProgressListener} from '@messaging/progress_listener';
+import {UserWarning} from '@messaging/user_warning';
+import {WinscopeEvent} from '@messaging/winscope_event';
+import {WinscopeEventEmitter} from '@messaging/winscope_event_emitter';
+import {WinscopeEventListener} from '@messaging/winscope_event_listener';
+import {UserNotifier} from '@services/user_notifier';
+import {FilesSource} from '@trace_api/files_source';
+import {PlaybackPrefetchedEntries} from '@trace_api/playback_prefetched_entries';
+import {Trace} from '@trace_api/trace';
+import {ActiveTraceChanged, InitializeTraceSearchRequest, ScreenRecordingChange, ShowTraceUploadWarning, TraceAddRequest, TracePositionUpdate, TraceRemoveRequest, TraceSearchCompleted, TraceSearchFailed, TraceSearchInitialized, TraceSearchRequest,} from '@trace_api/trace_events';
+import {TRACE_INFO} from '@trace_api/trace_info';
+import {TracePosition} from '@trace_api/trace_position';
+import {TraceType} from '@trace_api/trace_type';
+import {RequestedTraceTypes} from '@trace_collection/adb_files';
+import {MediaBasedTraceEntry} from '@trace/media_based/media_based_trace_entry';
+import {AppFilesCollected, AppFilesUploaded, AppInitialized, AppRefreshDumpsRequest, AppResetRequest, AppTraceViewRequest, AppTraceViewRequestHandled,} from '@ui/shared/events/app_events';
+import {ActiveSearchQueriesUpdate, BookmarksChanged, BugreportFileSelected, BugreportFileSelectionRequest, DarkModeToggled, FilterPresetApplyRequest, FilterPresetSaveRequest, NoTraceTargetsSelectedEvent,} from '@ui/shared/events/misc_events';
+import {TabbedViewSwitched, TabbedViewSwitchRequest,} from '@ui/shared/events/tabbed_view_events';
+import {PlaybackSpeedChange, PlaybackStateChangeHandled, PlaybackStateChangeRequest,} from '@ui/shared/playback/events';
+import {PlaybackState} from '@ui/shared/playback/playback_state';
+import {Viewer, ViewType} from '@ui/shared/viewers/viewer';
+import {PlaybackStateChangePropagate} from '@ui/timeline/playback_events';
+import {TimelineData} from '@ui/timeline/timeline_data';
+import {ExpandedTimelineToggled} from '@ui/timeline/timeline_events';
+import {FileLoader} from '@ui/trace_loading/file_loader';
+import {LoadedFileData} from '@ui/trace_loading/loaded_file_data';
+import {makeWarningCannotVisualizeTraceEntry, makeWarningFailedToInitializeTimelineData, makeWarningNoTraceTargetsSelected, makeWarningNoValidFiles,} from '@ui/trace_loading/warnings';
+
+import {AngularViewer} from './shared/angular_viewer';
+import {ViewersLoaded, ViewersUnloaded} from './viewers_events';
 
 /**
  * Mediator class for communication between components
  */
 export class Mediator {
-  initialTimelineTabTraceType: TraceType | undefined;
   private abtChromeExtensionProtocol: WinscopeEventEmitter &
     WinscopeEventListener;
   private crossToolProtocol: CrossToolProtocol;
@@ -77,41 +70,41 @@ export class Mediator {
   private timelineComponent?: WinscopeEventEmitter & WinscopeEventListener;
   private appComponent: WinscopeEventListener;
   private storage: Store;
-
-  private tracePipeline: TracePipeline;
+  private loadedFileData: LoadedFileData;
+  private activeFileLoader: FileLoader | undefined;
   private timelineData: TimelineData;
-  private viewers: Viewer[] = [];
-  private focusedTabView: undefined | View;
+  private viewers: AngularViewer[] = [];
+  private focusedTabView: undefined | Viewer;
   private areViewersLoaded = false;
   private lastRemoteToolDeferredTimestampReceived?: () => Timestamp | undefined;
   private currentProgressListener?: ProgressListener;
+  private screenRecordingTrace?: Trace<MediaBasedTraceEntry>;
+  private activeSearchQueries: string[] = [];
 
   constructor(
-    tracePipeline: TracePipeline,
+    loadedFileData: LoadedFileData,
     timelineData: TimelineData,
     abtChromeExtensionProtocol: WinscopeEventEmitter & WinscopeEventListener,
     crossToolProtocol: CrossToolProtocol,
     appComponent: WinscopeEventListener,
     storage: Store,
+    private readonly logger: Logger = getLogger('Mediator'),
   ) {
-    this.tracePipeline = tracePipeline;
     this.timelineData = timelineData;
-    this.abtChromeExtensionProtocol = abtChromeExtensionProtocol;
-    this.crossToolProtocol = crossToolProtocol;
     this.appComponent = appComponent;
     this.storage = storage;
 
-    this.tracePipeline.setEmitEvent(async (event) => {
-      await this.onWinscopeEvent(event);
-    });
+    this.loadedFileData = loadedFileData;
 
-    this.crossToolProtocol.setEmitEvent(async (event) => {
-      await this.onWinscopeEvent(event);
-    });
+    this.crossToolProtocol = crossToolProtocol;
+    this.setEmitEvent(this.crossToolProtocol);
 
-    this.abtChromeExtensionProtocol.setEmitEvent(async (event) => {
-      await this.onWinscopeEvent(event);
-    });
+    this.abtChromeExtensionProtocol = abtChromeExtensionProtocol;
+    this.setEmitEvent(this.abtChromeExtensionProtocol);
+  }
+
+  setLoadedFileData(value: LoadedFileData) {
+    this.loadedFileData = value;
   }
 
   setUploadTracesComponent(
@@ -126,346 +119,439 @@ export class Mediator {
       | undefined,
   ) {
     this.collectTracesComponent = component;
-    this.collectTracesComponent?.setEmitEvent(async (event) => {
-      await this.onWinscopeEvent(event);
-    });
+    if (this.collectTracesComponent) {
+      this.setEmitEvent(this.collectTracesComponent);
+    }
   }
 
   setTraceViewComponent(
     component: (WinscopeEventEmitter & WinscopeEventListener) | undefined,
   ) {
     this.traceViewComponent = component;
-    this.traceViewComponent?.setEmitEvent(async (event) => {
-      await this.onWinscopeEvent(event);
-    });
+    if (this.traceViewComponent) {
+      this.setEmitEvent(this.traceViewComponent);
+    }
   }
 
   setTimelineComponent(
     component: (WinscopeEventEmitter & WinscopeEventListener) | undefined,
   ) {
     this.timelineComponent = component;
-    this.timelineComponent?.setEmitEvent(async (event) => {
-      await this.onWinscopeEvent(event);
-    });
+    if (this.timelineComponent) {
+      this.setEmitEvent(this.timelineComponent);
+    }
   }
 
-  async onWinscopeEvent(event: WinscopeEvent) {
-    await event.visit(WinscopeEventType.APP_INITIALIZED, async (event) => {
-      await this.abtChromeExtensionProtocol.onWinscopeEvent(event);
-    });
+  private createFileLoader() {
+    const fileLoader = new FileLoader(
+      this.loadedFileData.getTimestampConverter(),
+    );
+    this.setEmitEvent(fileLoader);
+    return fileLoader;
+  }
 
-    await event.visit(WinscopeEventType.APP_FILES_UPLOADED, async (event) => {
-      this.currentProgressListener = this.uploadTracesComponent;
-      await this.loadFiles(event.files, FilesSource.UPLOADED);
+  private async onAppInitialized(event: WinscopeEvent) {
+    this.abtChromeExtensionProtocol.onWinscopeEvent(event);
+  }
 
+  private async onAppFilesUploaded(event: AppFilesUploaded) {
+    this.currentProgressListener = this.uploadTracesComponent;
+    await this.loadFiles(event.files, FilesSource.UPLOADED);
+    this.currentProgressListener?.onOperationFinished(true);
+    UserNotifier.notify();
+  }
+
+  private async onAppFilesCollected(event: AppFilesCollected) {
+    this.currentProgressListener = this.collectTracesComponent;
+
+    if (event.files.collected.length === 0) {
+      this.currentProgressListener?.onOperationFinished(false);
+      UserNotifier.add(makeWarningNoValidFiles()).notify();
+      return;
+    }
+
+    await this.loadFiles(event.files.collected, FilesSource.COLLECTED);
+    const loadedReaders = this.loadedFileData.getLoadedFileReaders();
+    if (loadedReaders.length === 0) {
+      this.currentProgressListener?.onOperationFinished(false);
       UserNotifier.notify();
-    });
+      return;
+    }
 
-    await event.visit(WinscopeEventType.APP_FILES_COLLECTED, async (event) => {
-      this.currentProgressListener = this.collectTracesComponent;
-      if (event.files.collected.length > 0) {
-        await this.loadFiles(event.files.collected, FilesSource.COLLECTED);
-        const traces = this.tracePipeline.getTraces();
-        if (traces.getSize() > 0) {
-          const failedTraces: string[] = [];
-          event.files.requested.forEach((requested: RequestedTraceTypes) => {
-            if (
-              !requested.types.some((type) => traces.getTraces(type).length > 0)
-            ) {
-              failedTraces.push(requested.name);
-            }
-          });
-          if (failedTraces.length > 0) {
-            UserNotifier.add(new NoValidFiles(failedTraces));
-          }
-          await this.uploadTracesComponent?.onWinscopeEvent(
-            new AppTraceViewRequest(),
-          );
-          await this.loadViewers(FilesSource.COLLECTED, false);
-          await this.uploadTracesComponent?.onWinscopeEvent(
-            new AppTraceViewRequestHandled(),
-          );
-        } else {
-          this.currentProgressListener?.onOperationFinished(false);
-        }
-      } else {
-        UserNotifier.add(new NoValidFiles());
-        this.currentProgressListener?.onOperationFinished(false);
+    const failedTraces: string[] = [];
+    event.files.requested.forEach((requested: RequestedTraceTypes) => {
+      if (!this.loadedFileData.hasLoadedRequestedType(requested.types)) {
+        failedTraces.push(requested.name);
       }
-      UserNotifier.notify();
     });
-
-    await event.visit(WinscopeEventType.APP_RESET_REQUEST, async () => {
-      await this.resetAppToInitialState();
-    });
-
-    await event.visit(
-      WinscopeEventType.APP_REFRESH_DUMPS_REQUEST,
-      async (event) => {
-        await this.resetAppToInitialState();
-        await this.collectTracesComponent?.onWinscopeEvent(event);
-      },
+    if (failedTraces.length > 0) {
+      UserNotifier.add(makeWarningNoValidFiles(failedTraces));
+    }
+    await this.uploadTracesComponent?.onWinscopeEvent(
+      new AppTraceViewRequest(),
     );
-
-    await event.visit(
-      WinscopeEventType.APP_TRACE_VIEW_REQUEST,
-      async (event) => {
-        await this.loadViewers(FilesSource.UPLOADED, event.discardLegacyTraces);
-        UserNotifier.notify();
-      },
+    await this.loadViewers(FilesSource.COLLECTED, false);
+    await this.uploadTracesComponent?.onWinscopeEvent(
+      new AppTraceViewRequestHandled(),
     );
+    UserNotifier.notify();
+  }
 
-    await event.visit(
-      WinscopeEventType.REMOTE_TOOL_DOWNLOAD_START,
-      async () => {
-        Analytics.Tracing.logOpenFromABT();
-        await this.resetAppToInitialState();
-        this.currentProgressListener = this.uploadTracesComponent;
-        this.currentProgressListener?.onProgressUpdate(
-          'Downloading files...',
-          undefined,
-        );
-        console.log('App reset for remote tool download.');
-      },
+  private async onAppResetRequest() {
+    await this.resetAppToInitialState();
+  }
+
+  private async onAppRefreshDumpsRequest(event: AppRefreshDumpsRequest) {
+    await this.collectTracesComponent?.onWinscopeEvent(event);
+  }
+
+  private async onAppTraceViewRequest(event: AppTraceViewRequest) {
+    await this.loadViewers(FilesSource.UPLOADED, event.discardLegacyFiles);
+    UserNotifier.notify();
+  }
+
+  private async onRemoteToolInitialized() {
+    Analytics.Tracing.logOpenFromRemoteTool();
+  }
+
+  private async onRemoteToolWaitingForFiles() {
+    this.currentProgressListener = this.uploadTracesComponent;
+    this.currentProgressListener?.onProgressUpdate(
+      'Opened from external tool. Waiting for files...',
+      undefined,
     );
+  }
 
-    await event.visit(
-      WinscopeEventType.REMOTE_TOOL_FILES_RECEIVED,
-      async (event) => {
-        console.log('Remote tool files received.');
-        await this.processRemoteFilesReceived(
-          event.files,
-          FilesSource.REMOTE_TOOL,
-        );
-        if (event.deferredTimestamp) {
-          await this.processRemoteToolDeferredTimestampReceived(
-            event.deferredTimestamp,
-          );
-        }
-      },
+  private async onRemoteToolDownloadStart() {
+    Analytics.Tracing.logOpenFromABT();
+    this.currentProgressListener = this.uploadTracesComponent;
+    this.currentProgressListener?.onProgressUpdate(
+      'Downloading files...',
+      undefined,
     );
+  }
 
-    await event.visit(
-      WinscopeEventType.REMOTE_TOOL_TIMESTAMP_RECEIVED,
-      async (event) => {
-        await this.processRemoteToolDeferredTimestampReceived(
-          event.deferredTimestamp,
-        );
-      },
-    );
-
-    await event.visit(
-      WinscopeEventType.TABBED_VIEW_SWITCH_REQUEST,
-      async (event) => {
-        await this.traceViewComponent?.onWinscopeEvent(event);
-      },
-    );
-
-    await event.visit(WinscopeEventType.TABBED_VIEW_SWITCHED, async (event) => {
-      const newActiveTrace = event.newFocusedView.traces[0];
-      if (this.timelineData.trySetActiveTrace(newActiveTrace)) {
-        const activeTraceChanged = new ActiveTraceChanged(newActiveTrace);
-        await this.timelineComponent?.onWinscopeEvent(activeTraceChanged);
-        for (const viewer of this.viewers) {
-          await viewer.onWinscopeEvent(activeTraceChanged);
-        }
-      }
-      await this.timelineComponent?.onWinscopeEvent(event);
-      this.focusedTabView = event.newFocusedView;
-      await this.propagateTracePosition(
-        this.timelineData.getCurrentPosition(),
-        false,
+  private async onRemoteToolFilesReceived(event: RemoteToolFilesReceived) {
+    this.logger.info('Files received from external tool.');
+    await this.processRemoteFilesReceived(event.files, FilesSource.REMOTE_TOOL);
+    if (event.deferredTimestamp) {
+      await this.processRemoteToolDeferredTimestampReceived(
+        event.deferredTimestamp,
       );
-      UserNotifier.notify();
-    });
+    }
+  }
 
-    await event.visit(
-      WinscopeEventType.TRACE_POSITION_UPDATE,
-      async (event) => {
-        if (event.updateTimeline) {
-          this.timelineData.setPosition(event.position);
-        }
-        await this.propagateTracePosition(event.position, false);
-        UserNotifier.notify();
-      },
+  private async onRemoteToolTimestampReceived(
+    event: RemoteToolTimestampReceived,
+  ) {
+    await this.processRemoteToolDeferredTimestampReceived(
+      event.deferredTimestamp,
     );
+  }
 
-    await event.visit(
-      WinscopeEventType.EXPANDED_TIMELINE_TOGGLED,
-      async (event) => {
-        await this.propagateToOverlays(event);
-      },
-    );
+  private async onTabbedViewSwitchRequest(event: TabbedViewSwitchRequest) {
+    await this.traceViewComponent?.onWinscopeEvent(event);
+  }
 
-    await event.visit(WinscopeEventType.ACTIVE_TRACE_CHANGED, async (event) => {
-      if (this.timelineData.trySetActiveTrace(event.trace)) {
-        for (const viewer of this.viewers) {
-          await viewer.onWinscopeEvent(event);
-        }
-        await this.timelineComponent?.onWinscopeEvent(event);
+  private async onTabbedViewSwitched(event: TabbedViewSwitched) {
+    const newActiveTrace = event.newFocusedView.getTraces()[0];
+    if (this.timelineData.trySetActiveTrace(newActiveTrace)) {
+      const activeTraceChanged = new ActiveTraceChanged(
+        newActiveTrace,
+        event.metadata,
+      );
+      await this.timelineComponent?.onWinscopeEvent(activeTraceChanged);
+      for (const viewer of this.viewers) {
+        await viewer.onWinscopeEvent(activeTraceChanged);
       }
-    });
+    }
+    await this.timelineComponent?.onWinscopeEvent(event);
+    this.focusedTabView = event.newFocusedView;
+    await this.propagateTracePosition(
+      this.timelineData.getCurrentPosition(),
+      false,
+    );
+    UserNotifier.notify();
+  }
 
-    await event.visit(WinscopeEventType.DARK_MODE_TOGGLED, async (event) => {
-      await this.timelineComponent?.onWinscopeEvent(event);
+  private async onTracePositionUpdate(event: TracePositionUpdate) {
+    if (event.updateTimeline) {
+      this.timelineData.setPosition(event.position);
+    }
+    await this.propagateTracePosition(
+      event.position,
+      false,
+      undefined,
+      event.prefetchedEntries,
+    );
+    UserNotifier.notify();
+    await this.appComponent.onWinscopeEvent(event);
+  }
+
+  private async onExpandedTimelineToggled(event: ExpandedTimelineToggled) {
+    await this.propagateToOverlays(event);
+  }
+
+  private async onScreenRecordingChange(event: ScreenRecordingChange) {
+    this.screenRecordingTrace = event.trace;
+    this.timelineData.updateCurrentScreenRecordingTrace(event.trace);
+    this.timelineComponent?.onWinscopeEvent(event);
+    for (const viewer of this.viewers) {
+      await viewer.onWinscopeEvent(event);
+    }
+  }
+
+  private async onActiveTraceChanged(event: ActiveTraceChanged) {
+    if (this.timelineData.trySetActiveTrace(event.trace)) {
       for (const viewer of this.viewers) {
         await viewer.onWinscopeEvent(event);
       }
-    });
-
-    await event.visit(WinscopeEventType.NO_TRACE_TARGETS_SELECTED, async () => {
-      UserNotifier.add(new NoTraceTargetsSelected()).notify();
-    });
-
-    await event.visit(
-      WinscopeEventType.FILTER_PRESET_SAVE_REQUEST,
-      async (event) => {
-        await this.findViewerByType(event.traceType)?.onWinscopeEvent(event);
-      },
-    );
-
-    await event.visit(
-      WinscopeEventType.FILTER_PRESET_APPLY_REQUEST,
-      async (event) => {
-        await this.findViewerByType(event.traceType)?.onWinscopeEvent(event);
-      },
-    );
-
-    await event.visit(WinscopeEventType.TRACE_SEARCH_REQUEST, async (event) => {
       await this.timelineComponent?.onWinscopeEvent(event);
-      const searchViewer = this.viewers.find(
-        (viewer) => viewer.getViews()[0].type === ViewType.GLOBAL_SEARCH,
-      );
-      const trace = await this.tracePipeline.tryCreateSearchTrace(event.query);
-      this.timelineComponent?.onWinscopeEvent(new TraceSearchCompleted());
-      if (!trace) {
-        await searchViewer?.onWinscopeEvent(new TraceSearchFailed());
+      await this.appComponent.onWinscopeEvent(event);
+    }
+  }
+
+  private async onDarkModeToggled(event: DarkModeToggled) {
+    await this.timelineComponent?.onWinscopeEvent(event);
+    for (const viewer of this.viewers) {
+      await viewer.onWinscopeEvent(event);
+    }
+  }
+
+  private async onNoTraceTargetsSelected() {
+    UserNotifier.add(makeWarningNoTraceTargetsSelected()).notify();
+  }
+
+  private async onFilterPresetSaveRequest(event: FilterPresetSaveRequest) {
+    await this.findViewerByType(event.traceType)?.onWinscopeEvent(event);
+  }
+
+  private async onFilterPresetApplyRequest(event: FilterPresetApplyRequest) {
+    await this.findViewerByType(event.traceType)?.onWinscopeEvent(event);
+  }
+
+  private async onTraceSearchRequest(event: TraceSearchRequest) {
+    await this.timelineComponent?.onWinscopeEvent(event);
+    const searchViewer = this.viewers.find(
+      (viewer) => viewer.getViewType() === ViewType.GLOBAL_SEARCH,
+    );
+    const trace = await this.loadedFileData.tryCreateSearchTrace(event.query);
+    this.timelineComponent?.onWinscopeEvent(new TraceSearchCompleted());
+    if (!trace) {
+      await searchViewer?.onWinscopeEvent(new TraceSearchFailed());
+      return;
+    }
+    const newSearchTrace = new TraceAddRequest(trace);
+    await searchViewer?.onWinscopeEvent(newSearchTrace);
+    if (trace.lengthEntries > 0 && !trace.isDumpWithoutTimestamp()) {
+      this.timelineData.getTraces().addTrace(trace);
+      await this.timelineComponent?.onWinscopeEvent(newSearchTrace);
+    }
+  }
+
+  private async onTraceRemoveRequest(event: TraceRemoveRequest) {
+    this.loadedFileData.getTraces().deleteTrace(event.trace);
+    if (this.timelineData.hasTrace(event.trace)) {
+      this.timelineData.getTraces().deleteTrace(event.trace);
+      await this.timelineComponent?.onWinscopeEvent(event);
+    }
+  }
+
+  private async onInitializeTraceSearchRequest(event: WinscopeEvent) {
+    await this.timelineComponent?.onWinscopeEvent(event);
+    const traces = this.loadedFileData.getTraces();
+    const views = await TraceSearchInitializer.createSearchViews(traces);
+    const searchViewer = this.viewers.find(
+      (viewer) => viewer.getViewType() === ViewType.GLOBAL_SEARCH,
+    );
+    const initializedEvent = new TraceSearchInitialized(views);
+    await searchViewer?.onWinscopeEvent(initializedEvent);
+    await this.timelineComponent?.onWinscopeEvent(initializedEvent);
+  }
+
+  private async onBugreportFileSelected(event: BugreportFileSelected) {
+    await this.activeFileLoader?.onWinscopeEvent(event);
+  }
+
+  private async onBugreportFileSelectionRequest(
+    event: BugreportFileSelectionRequest,
+  ) {
+    await this.appComponent.onWinscopeEvent(event);
+  }
+
+  private async onPlaybackStateChangeRequest(
+    event: PlaybackStateChangeRequest,
+  ) {
+    const viewer = this.findViewerByType(event.traceType);
+    if (!viewer) {
+      return;
+    }
+    switch (event.state) {
+      case PlaybackState.FORWARDS:
+      case PlaybackState.BACKWARDS: {
+        return await this.handlePlaybackPlayRequest(viewer, event);
+      }
+      case PlaybackState.PAUSED:
+        return await this.handlePlaybackPauseRequest(viewer, event);
+      default:
         return;
-      }
-      const newSearchTrace = new TraceAddRequest(trace);
-      await searchViewer?.onWinscopeEvent(newSearchTrace);
-      if (trace.lengthEntries > 0 && !trace.isDumpWithoutTimestamp()) {
-        assertDefined(this.timelineData).getTraces().addTrace(trace);
-        await this.timelineComponent?.onWinscopeEvent(newSearchTrace);
-      }
-    });
+    }
+  }
 
-    await event.visit(WinscopeEventType.TRACE_REMOVE_REQUEST, async (event) => {
-      this.tracePipeline.getTraces().deleteTrace(event.trace);
-      if (this.timelineData.hasTrace(event.trace)) {
-        this.timelineData.getTraces().deleteTrace(event.trace);
-        await this.timelineComponent?.onWinscopeEvent(event);
-      }
-    });
+  private async onPlaybackSpeedChange(event: PlaybackSpeedChange) {
+    this.handlePlaybackSpeedChange(event);
+  }
 
-    await event.visit(
-      WinscopeEventType.INITIALIZE_TRACE_SEARCH_REQUEST,
-      async (event) => {
-        await this.timelineComponent?.onWinscopeEvent(event);
-        const traces = this.tracePipeline.getTraces();
-        const views = await TraceSearchInitializer.createSearchViews(traces);
-        const searchViewer = this.viewers.find(
-          (viewer) => viewer.getViews()[0].type === ViewType.GLOBAL_SEARCH,
+  private async onBookmarksChanged(event: BookmarksChanged) {
+    await this.appComponent.onWinscopeEvent(event);
+  }
+
+  private async onActiveSearchQueriesUpdate(event: ActiveSearchQueriesUpdate) {
+    this.activeSearchQueries = event.queries;
+    await this.appComponent.onWinscopeEvent(event);
+  }
+
+  async onWinscopeEvent(event: WinscopeEvent) {
+    switch (event.constructor) {
+      case AppInitialized:
+        return await this.onAppInitialized(event);
+      case AppFilesUploaded:
+        return await this.onAppFilesUploaded(event as AppFilesUploaded);
+      case AppFilesCollected:
+        return await this.onAppFilesCollected(event as AppFilesCollected);
+      case AppResetRequest:
+        return await this.onAppResetRequest();
+      case AppRefreshDumpsRequest:
+        return await this.onAppRefreshDumpsRequest(
+          event as AppRefreshDumpsRequest,
         );
-        const initializedEvent = new TraceSearchInitialized(views);
-        await searchViewer?.onWinscopeEvent(initializedEvent);
-        await this.timelineComponent?.onWinscopeEvent(initializedEvent);
-      },
-    );
+      case AppTraceViewRequest:
+        return await this.onAppTraceViewRequest(event as AppTraceViewRequest);
+      case RemoteToolInitialized:
+        return await this.onRemoteToolInitialized();
+      case RemoteToolWaitingForFiles:
+        return await this.onRemoteToolWaitingForFiles();
+      case RemoteToolDownloadStart:
+        return await this.onRemoteToolDownloadStart();
+      case RemoteToolFilesReceived:
+        return await this.onRemoteToolFilesReceived(
+          event as RemoteToolFilesReceived,
+        );
+      case RemoteToolTimestampReceived:
+        return await this.onRemoteToolTimestampReceived(
+          event as RemoteToolTimestampReceived,
+        );
+      case TabbedViewSwitchRequest:
+        return await this.onTabbedViewSwitchRequest(
+          event as TabbedViewSwitchRequest,
+        );
+      case TabbedViewSwitched:
+        return await this.onTabbedViewSwitched(event as TabbedViewSwitched);
+      case TracePositionUpdate:
+        return await this.onTracePositionUpdate(event as TracePositionUpdate);
+      case ExpandedTimelineToggled:
+        return await this.onExpandedTimelineToggled(
+          event as ExpandedTimelineToggled,
+        );
+      case ScreenRecordingChange:
+        return await this.onScreenRecordingChange(
+          event as ScreenRecordingChange,
+        );
+      case ActiveTraceChanged:
+        return await this.onActiveTraceChanged(event as ActiveTraceChanged);
+      case DarkModeToggled:
+        return await this.onDarkModeToggled(event as DarkModeToggled);
+      case NoTraceTargetsSelectedEvent:
+        return await this.onNoTraceTargetsSelected();
+      case FilterPresetSaveRequest:
+        return await this.onFilterPresetSaveRequest(
+          event as FilterPresetSaveRequest,
+        );
+      case FilterPresetApplyRequest:
+        return await this.onFilterPresetApplyRequest(
+          event as FilterPresetApplyRequest,
+        );
+      case TraceSearchRequest:
+        return await this.onTraceSearchRequest(event as TraceSearchRequest);
+      case TraceRemoveRequest:
+        return await this.onTraceRemoveRequest(event as TraceRemoveRequest);
+      case InitializeTraceSearchRequest:
+        return await this.onInitializeTraceSearchRequest(event);
+      case BugreportFileSelected:
+        return await this.onBugreportFileSelected(
+          event as BugreportFileSelected,
+        );
+      case BugreportFileSelectionRequest:
+        return await this.onBugreportFileSelectionRequest(
+          event as BugreportFileSelectionRequest,
+        );
+      case PlaybackStateChangeRequest:
+        return await this.onPlaybackStateChangeRequest(
+          event as PlaybackStateChangeRequest,
+        );
+      case PlaybackStateChangeHandled:
+        return await this.onPlaybackStateChangeHandled(
+          event as PlaybackStateChangeHandled,
+        );
+      case PlaybackSpeedChange:
+        return await this.onPlaybackSpeedChange(event as PlaybackSpeedChange);
+      case BookmarksChanged:
+        return await this.onBookmarksChanged(event as BookmarksChanged);
+      case ActiveSearchQueriesUpdate:
+        return await this.onActiveSearchQueriesUpdate(
+          event as ActiveSearchQueriesUpdate,
+        );
+      default:
+        throw new Error('Unsupported event type ' + event);
+    }
+  }
 
-    await event.visit(
-      WinscopeEventType.BUGREPORT_FILE_SELECTED,
-      async (event) => {
-        await this.tracePipeline.onWinscopeEvent(event);
-      },
-    );
+  getActiveSearchQueries(): string[] {
+    return this.activeSearchQueries;
+  }
 
-    await event.visit(
-      WinscopeEventType.BUGREPORT_FILE_SELECTION_REQUEST,
-      async (event) => {
-        await this.appComponent.onWinscopeEvent(event);
-      },
-    );
+  getActiveTraceType(): TraceType | undefined {
+    return this.focusedTabView?.getTraces()[0]?.type;
+  }
 
-    await event.visit(
-      WinscopeEventType.PLAYBACK_STATE_CHANGE_REQUEST,
-      async (event) => {
-        const viewer = this.findViewerByType(event.traceType);
-        if (!viewer) {
-          return;
-        }
-        switch (event.state) {
-          case PlaybackState.FORWARDS:
-          case PlaybackState.BACKWARDS: {
-            const visible = this.isViewerVisible(viewer);
-            if (!visible) {
-              return;
-            }
-
-            const trace = this.tracePipeline
-              .getTraces()
-              .getTrace(event.traceType);
-            if (trace === undefined) {
-              return;
-            }
-
-            this.timelineData.trySetActiveTrace(trace as Trace<object>);
-            await viewer.onWinscopeEvent(event);
-            return;
-          }
-          case PlaybackState.PAUSED:
-            return await viewer.onWinscopeEvent(event);
-
-          default:
-            return;
-        }
-      },
-    );
-
-    await event.visit(
-      WinscopeEventType.PLAYBACK_STATE_CHANGE_HANDLED,
-      async (event) => {
-        return this.timelineComponent?.onWinscopeEvent(event);
-      },
-    );
-
-    await event.visit(
-      WinscopeEventType.PLAYBACK_SPEED_CHANGE,
-      async (event) => {
-        const viewer = this.findViewerByType(event.traceType);
-        if (viewer) {
-          await viewer.onWinscopeEvent(event);
-        }
-      },
-    );
+  getCurrentTimestamp(): Timestamp | undefined {
+    return this.timelineData.getCurrentPosition()?.timestamp;
   }
 
   private async loadFiles(files: File[], source: FilesSource) {
     const startTimeMs = Date.now();
-    const warnings = await this.tracePipeline.loadFiles(
+    this.activeFileLoader = this.createFileLoader();
+    const result = await this.activeFileLoader.load(
       files,
       source,
       this.currentProgressListener,
     );
+    this.activeFileLoader = undefined;
     Analytics.Loading.logLoadFilesTime(Date.now() - startTimeMs, source);
 
-    for (const warning of warnings) {
+    for (const warning of result.warnings) {
       await this.uploadTracesComponent?.onWinscopeEvent(
-        new ShowTraceUploadWarning(warning.getMessage()),
+        new ShowTraceUploadWarning(warning.message),
       );
     }
+    this.loadedFileData.addFiles(result, source);
   }
 
   private async propagateTracePosition(
     position: TracePosition | undefined,
     omitCrossToolProtocol: boolean,
     source?: FilesSource,
+    prefetchedEntries?: PlaybackPrefetchedEntries,
   ) {
     if (!position) {
       return;
     }
 
-    const event = new TracePositionUpdate(position);
+    const event = new TracePositionUpdate(
+      position,
+      undefined,
+      prefetchedEntries,
+    );
     const viewers: Viewer[] = [...this.viewers].filter((viewer) =>
       this.isViewerVisible(viewer),
     );
@@ -491,9 +577,9 @@ export class Mediator {
           Date.now() - startTimeMs,
         );
       } catch (e) {
-        console.error(e);
+        this.logger.error((e as Error).message);
         warnings.push(
-          new CannotVisualizeTraceEntry(
+          makeWarningCannotVisualizeTraceEntry(
             `Cannot parse entry for ${traceType} trace: Trace may be corrupted.`,
           ),
         );
@@ -531,16 +617,14 @@ export class Mediator {
       return true;
     }
 
-    return viewer.getViews().some((view) => {
-      if (view === this.focusedTabView) {
-        return true;
-      }
-      if (view.type === ViewType.OVERLAY) {
-        // Nice to have: update viewer only if overlay view is actually visible (not minimized)
-        return true;
-      }
-      return false;
-    });
+    if (viewer === this.focusedTabView) {
+      return true;
+    }
+    if (viewer.getViewType() === ViewType.OVERLAY) {
+      // Nice to have: update viewer only if overlay view is actually visible (not minimized)
+      return true;
+    }
+    return false;
   }
 
   private async processRemoteToolDeferredTimestampReceived(
@@ -568,83 +652,57 @@ export class Mediator {
   }
 
   private async processRemoteFilesReceived(files: File[], source: FilesSource) {
-    await this.resetAppToInitialState();
     this.currentProgressListener = this.uploadTracesComponent;
     await this.loadFiles(files, source);
+    this.currentProgressListener?.onOperationFinished(true);
     UserNotifier.notify();
   }
 
-  private async loadViewers(source: FilesSource, discardLegacyTraces: boolean) {
+  private async loadViewers(source: FilesSource, discardLegacyFiles: boolean) {
     const e2eStartTimeMs = Date.now();
-    const timer = new Timer(10, 10);
 
-    if (discardLegacyTraces) {
-      this.tracePipeline.discardLegacyTraces();
-    } else {
-      this.currentProgressListener?.onProgressUpdate(
-        'Converting legacy traces to perfetto...',
-        undefined,
-      );
-      await timer.sleepMs(); // allow the UI to update before making the main thread very busy
-      await this.tracePipeline.convertLegacyTracesToPerfetto();
-      this.currentProgressListener?.onOperationFinished(true);
-    }
-
-    this.currentProgressListener?.onProgressUpdate(
-      'Computing frame mapping...',
-      undefined,
+    const success = await this.loadedFileData.buildTraces(
+      discardLegacyFiles,
+      this.currentProgressListener,
     );
-
-    await timer.sleepMs(); // allow the UI to update before making the main thread very busy
-
-    this.tracePipeline.filterTracesWithoutVisualization();
-    if (this.tracePipeline.getTraces().getSize() === 0) {
+    if (!success) {
       this.currentProgressListener?.onOperationFinished(false);
       return;
     }
 
-    try {
-      const startTimeMs = Date.now();
-      await this.tracePipeline.buildTraces();
-      Analytics.Loading.logFrameMapBuildTime(Date.now() - startTimeMs);
-      Analytics.Memory.logUsage('frame_map_built');
-      this.currentProgressListener?.onOperationFinished(true);
-    } catch (e) {
-      UserNotifier.add(new IncompleteFrameMapping((e as Error).message));
-      this.currentProgressListener?.onOperationFinished(false);
-    }
-
+    // timer#sleepMs() allows the UI to update before making the main thread very busy
+    await new Timer(10, 100).sleepMs();
     this.currentProgressListener?.onProgressUpdate(
       'Initializing UI...',
       undefined,
     );
 
-    // TODO: move this into the ProgressListener
-    // allow the UI to update before making the main thread very busy
-    await timer.sleepMs();
+    const traces = this.loadedFileData.getTraces();
+    const screenRecordingTrace = traces.getTrace<MediaBasedTraceEntry>(
+      TraceType.SCREEN_RECORDING,
+    );
+    const timestampConverter = this.loadedFileData.getTimestampConverter();
 
     try {
       await this.timelineData.initialize(
-        this.tracePipeline.getTraces(),
-        await this.tracePipeline.getScreenRecordingVideo(),
-        this.tracePipeline.getTimestampConverter(),
+        traces,
+        screenRecordingTrace,
+        timestampConverter,
       );
     } catch {
       this.currentProgressListener?.onOperationFinished(false);
-      UserNotifier.add(new FailedToInitializeTimelineData());
+      UserNotifier.add(makeWarningFailedToInitializeTimelineData());
       return;
     }
 
     this.viewers = new ViewerFactory().createViewers(
-      this.tracePipeline.getTraces(),
+      traces,
       this.storage,
-      this.tracePipeline.getTimestampConverter(),
+      timestampConverter,
     );
-    this.viewers.forEach((viewer) =>
-      viewer.setEmitEvent(async (event) => {
-        await this.onWinscopeEvent(event);
-      }),
-    );
+    this.viewers.forEach((viewer) => {
+      this.setEmitEvent(viewer);
+    });
 
     // Set initial trace position as soon as UI is created
     const initialPosition = this.getInitialTracePosition();
@@ -656,9 +714,9 @@ export class Mediator {
     await this.propagateTracePosition(initialPosition, true, source);
     Analytics.Memory.logUsage('viewers_initialized');
 
-    this.focusedTabView = this.viewers
-      .find((v) => v.getViews()[0].type === ViewType.TRACE_TAB)
-      ?.getViews()[0];
+    this.focusedTabView = this.viewers.find(
+      (v) => v.getViewType() === ViewType.TRACE_TAB,
+    );
     this.areViewersLoaded = true;
 
     // Notify app component (i.e. render viewers), only after all viewers have been initialized
@@ -675,9 +733,78 @@ export class Mediator {
     // "trace position update" could be processed concurrently within the same viewer.
     // Meaning the viewer could perform twice the initial heavy pre-processing,
     // thus increasing UI initialization times.
-    this.initialTimelineTabTraceType = this.focusedTabView?.traces[0]?.type;
-    await this.appComponent.onWinscopeEvent(new ViewersLoaded(this.viewers));
+    const initialTimelineTabTraceType =
+      this.focusedTabView?.getTraces()[0]?.type;
+    await this.appComponent.onWinscopeEvent(
+      new ViewersLoaded(this.viewers, initialTimelineTabTraceType),
+    );
     Analytics.Loading.logLoadViewersTime(Date.now() - e2eStartTimeMs);
+  }
+
+  private async handlePlaybackPlayRequest(
+    viewer: Viewer,
+    event: PlaybackStateChangeRequest,
+  ) {
+    const visible = this.isViewerVisible(viewer);
+    if (!visible) {
+      return;
+    }
+
+    const traces = this.loadedFileData.getTraces();
+    if (!this.screenRecordingTrace) {
+      this.screenRecordingTrace = traces.getTrace(TraceType.SCREEN_RECORDING);
+    }
+
+    const eventTrace = traces.getTrace(event.traceType);
+    const traceGeometryData = this.loadedFileData.getTraceGeometryData();
+    const trace = this.screenRecordingTrace ?? eventTrace;
+
+    if (trace === undefined) {
+      return;
+    }
+
+    // The Screen Recording parsers decode and cache video frames using a background
+    // worker to avoid latency in other UI interactions. This must complete operations
+    // before playback can start.
+    for (const srTrace of traces.getTraces(TraceType.SCREEN_RECORDING)) {
+      await srTrace.getAllEntryValues();
+    }
+
+    const playbackStatePropagate = new PlaybackStateChangePropagate(
+      event.state,
+      assertDefined(event.currentTraceIndex),
+      traceGeometryData,
+    );
+    this.timelineData.trySetActiveTrace(trace);
+    await viewer.onWinscopeEvent(playbackStatePropagate);
+  }
+
+  private async handlePlaybackPauseRequest(
+    viewer: Viewer,
+    event: PlaybackStateChangeRequest,
+  ) {
+    await viewer.onWinscopeEvent(event);
+  }
+
+  private async onPlaybackStateChangeHandled(
+    event: PlaybackStateChangeHandled,
+  ) {
+    if (event.traceType !== undefined) {
+      const viewer = this.findViewerByType(event.traceType);
+      if (viewer === undefined) {
+        return;
+      }
+      viewer.onWinscopeEvent(event);
+    }
+    this.propagateToOverlays(event);
+    return this.timelineComponent?.onWinscopeEvent(event);
+  }
+
+  private async handlePlaybackSpeedChange(event: PlaybackSpeedChange) {
+    const viewer = this.findViewerByType(event.traceType);
+    if (viewer) {
+      await viewer.onWinscopeEvent(event);
+    }
   }
 
   private getInitialTracePosition(): TracePosition | undefined {
@@ -699,7 +826,7 @@ export class Mediator {
     // TimelineData might not provide a TracePosition because all the loaded traces are
     // dumps with invalid timestamps (value zero). In this case let's create a TracePosition
     // out of any entry from the loaded traces (if available).
-    const firstEntries = this.tracePipeline
+    const firstEntries = this.loadedFileData
       .getTraces()
       .mapTrace((trace) => {
         if (trace.lengthEntries > 0) {
@@ -709,7 +836,7 @@ export class Mediator {
       })
       .filter((entry) => {
         return entry !== undefined;
-      }) as Array<TraceEntry<object>>;
+      });
 
     if (firstEntries.length > 0) {
       return TracePosition.fromTraceEntry(firstEntries[0]);
@@ -719,19 +846,15 @@ export class Mediator {
   }
 
   private async resetAppToInitialState() {
-    this.tracePipeline.clear();
-    this.timelineData.clear();
-    this.viewers = [];
-    this.areViewersLoaded = false;
-    this.lastRemoteToolDeferredTimestampReceived = undefined;
-    this.focusedTabView = undefined;
-    this.initialTimelineTabTraceType = undefined;
+    this.viewers.forEach((viewer) => {
+      viewer.onDestroy();
+    });
     await this.appComponent.onWinscopeEvent(new ViewersUnloaded());
   }
 
-  private async propagateToOverlays(event: ExpandedTimelineToggled) {
-    const overlayViewers = this.viewers.filter((viewer) =>
-      viewer.getViews().some((view) => view.type === ViewType.OVERLAY),
+  private async propagateToOverlays(event: WinscopeEvent) {
+    const overlayViewers = this.viewers.filter(
+      (viewer) => viewer.getViewType() === ViewType.OVERLAY,
     );
     for (const overlay of overlayViewers) {
       await overlay.onWinscopeEvent(event);
@@ -742,5 +865,11 @@ export class Mediator {
     return this.viewers.find(
       (viewer) => viewer.getTraces().at(0)?.type === type,
     );
+  }
+
+  private setEmitEvent(emitter: WinscopeEventEmitter) {
+    emitter.setEmitEvent(async (event: WinscopeEvent) => {
+      await this.onWinscopeEvent(event);
+    });
   }
 }

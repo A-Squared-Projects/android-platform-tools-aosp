@@ -14,9 +14,10 @@
  * limitations under the License.
  */
 
-import {PropertyTreeBuilder} from 'test/unit/property_tree_builder';
-import {WindowType, WindowTypePrefix} from 'trace/window_manager/window_type';
-import {PropertySource} from 'tree_node/property_tree_node';
+import {WindowType, WindowTypePrefix} from '@trace/window_manager/window_type';
+import {PropertySource} from '@tree_node/property_tree_node';
+import {PropertyTreeBuilder} from '@tree_node/testing/property_tree_builder';
+
 import {AddWindowType} from './add_window_type';
 
 describe('AddWindowType', () => {
@@ -79,7 +80,9 @@ describe('AddWindowType', () => {
       .setRootId('test node')
       .setIsRoot(true)
       .setName('state')
-      .setChildren([{name: 'animatingExit', value: undefined}])
+      .setChildren([
+        {name: 'window', children: [{name: 'animatingExit', value: undefined}]},
+      ])
       .build();
 
     const expectedRoot = new PropertyTreeBuilder()
@@ -87,7 +90,7 @@ describe('AddWindowType', () => {
       .setIsRoot(true)
       .setName('state')
       .setChildren([
-        {name: 'animatingExit', value: undefined},
+        {name: 'window', children: [{name: 'animatingExit', value: undefined}]},
         {
           name: 'windowType',
           value: WindowType.EXITING,
@@ -105,7 +108,9 @@ describe('AddWindowType', () => {
       .setRootId('test node')
       .setIsRoot(true)
       .setName(WindowTypePrefix.DEBUGGER)
-      .setChildren([{name: 'animatingExit', value: undefined}])
+      .setChildren([
+        {name: 'window', children: [{name: 'animatingExit', value: undefined}]},
+      ])
       .build();
 
     const expectedRoot = new PropertyTreeBuilder()
@@ -113,7 +118,7 @@ describe('AddWindowType', () => {
       .setIsRoot(true)
       .setName(WindowTypePrefix.DEBUGGER)
       .setChildren([
-        {name: 'animatingExit', value: undefined},
+        {name: 'window', children: [{name: 'animatingExit', value: undefined}]},
         {
           name: 'windowType',
           value: WindowType.EXITING,

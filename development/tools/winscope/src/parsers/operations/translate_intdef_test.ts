@@ -13,12 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import {assertDefined} from '@common/assert';
+import {getIntdefDescriptors} from '@compat/test/protobuf';
+import {Registry, TamperedMessageType,} from '@trace/proto_utils/tampered_message_type';
+import {PropertyTreeNode} from '@tree_node/property_tree_node';
+import {PropertyTreeBuilder} from '@tree_node/testing/property_tree_builder';
 
-import {assertDefined} from 'common/assert';
-import root from 'protos/test/intdef_translation/json';
-import {PropertyTreeBuilder} from 'test/unit/property_tree_builder';
-import {TamperedMessageType} from 'trace/proto_utils/tampered_message_type';
-import {PropertyTreeNode} from 'tree_node/property_tree_node';
 import {TranslateIntDef} from './translate_intdef';
 
 describe('TranslateIntDef', () => {
@@ -26,8 +26,10 @@ describe('TranslateIntDef', () => {
   let operation: TranslateIntDef;
   let rootType: TamperedMessageType;
 
-  beforeAll(() => {
-    rootType = TamperedMessageType.tamper(root.lookupType('RootMessage'));
+  beforeAll(async () => {
+    const registry = Registry.getInstance();
+    registry.parseDescriptors(await getIntdefDescriptors());
+    rootType = assertDefined(registry.getType('winscope.test2.RootMessage'));
   });
 
   it('translates intdef from stored mapping', () => {

@@ -14,19 +14,14 @@
  * limitations under the License.
  */
 
-import {assertDefined} from 'common/assert';
-import {TraceSearchQueryFailed} from 'messaging/user_warnings';
-import {ParserSurfaceFlinger} from 'parsers/surface_flinger/perfetto/parser_surface_flinger';
-import {getPerfettoParser} from 'test/unit/fixture_utils';
-import {UserNotifierChecker} from 'test/unit/user_notifier_checker';
-import {
-  getTimestampConverter,
-  makeElapsedTimestamp,
-  makeZeroTimestamp,
-  timestampEqualityTester,
-} from 'test/unit/time_test_helpers';
-import {CoarseVersion} from 'trace_api/coarse_version';
-import {TraceType} from 'trace_api/trace_type';
+import {makeConverterNoRteOffsets, makeElapsedTimestamp, makeZeroTimestamp, timestampEqualityTester,} from '@common/time/testing/test_helpers';
+import {getPerfettoParser} from '@parsers/fixture_utils';
+import {makeWarningTraceSearchQueryFailed} from '@parsers/helpers/warnings';
+import {ParserSurfaceFlinger} from '@parsers/surface_flinger/parser_surface_flinger';
+import {UserNotifierChecker} from '@services/testing/user_notifier_checker';
+import {CoarseVersion} from '@trace_api/coarse_version';
+import {TraceType} from '@trace_api/trace_type';
+
 import {ParserSearch} from './parser_search';
 
 describe('ParserSearch', () => {
@@ -77,7 +72,7 @@ describe('ParserSearch', () => {
         makeElapsedTimestamp(14631249355n),
         makeElapsedTimestamp(15403446377n),
       ];
-      const actual = assertDefined(parser.getTimestamps()).slice(0, 3);
+      const actual = parser.getTimestamps().slice(0, 3);
       expect(actual).toEqual(expected);
       userNotifierChecker.expectNone();
     });
@@ -157,19 +152,21 @@ describe('ParserSearch', () => {
       parser = await createFailingParser();
     } catch (e) {
       userNotifierChecker.expectNotified([
-        new TraceSearchQueryFailed((e as Error).message),
+        makeWarningTraceSearchQueryFailed((e as Error).message),
       ]);
     }
   });
 
   async function createParser(query: string): Promise<ParserSearch> {
     await (
-      (await getPerfettoParser(
-        TraceType.SURFACE_FLINGER,
-        'traces/perfetto/layers_trace.perfetto-trace',
-      )) as ParserSurfaceFlinger
+      (
+        await getPerfettoParser(
+          TraceType.SURFACE_FLINGER,
+          'traces/perfetto/layers_trace.perfetto-trace',
+        )
+      ).parser as ParserSurfaceFlinger
     ).parse();
-    parser = new ParserSearch(query, getTimestampConverter());
+    parser = new ParserSearch(query, makeConverterNoRteOffsets());
     await parser.parse();
     return parser;
   }

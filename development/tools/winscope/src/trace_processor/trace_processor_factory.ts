@@ -14,23 +14,23 @@
  * limitations under the License.
  */
 
-import {globalConfig} from 'common/global_config';
-import {getRootUrl} from 'common/window';
-import {initWasm} from './perfetto/wasm_engine_proxy';
-import {TraceProcessor} from './trace_processor';
+import {getRootUrl} from '@common/window';
+import {globalConfig} from '@compat/global_config';
+import {initWasm} from '@trace_processor/perfetto/wasm_engine_proxy';
+
+import {TraceProcessor, TraceProcessorProxy} from './trace_processor';
 
 export class TraceProcessorFactory {
   private static tp?: TraceProcessor;
 
   static getSingleInstance(): TraceProcessor {
     if (!TraceProcessorFactory.tp) {
-      const traceProcessorRootUrl =
-        globalConfig.MODE === 'KARMA_TEST'
-          ? getRootUrl() + 'base/deps_build/trace_processor/to_be_served/'
-          : getRootUrl();
+      const traceProcessorRootUrl = globalConfig.isTestMode()
+        ? location.origin + '/'
+        : getRootUrl();
       initWasm(traceProcessorRootUrl);
       const engineId = 'random-id';
-      TraceProcessorFactory.tp = new TraceProcessor(engineId);
+      TraceProcessorFactory.tp = new TraceProcessorProxy(engineId);
     }
     return TraceProcessorFactory.tp;
   }

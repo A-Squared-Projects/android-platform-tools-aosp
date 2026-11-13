@@ -14,24 +14,18 @@
  * limitations under the License.
  */
 
-import {ResizableBuffer} from 'common/buffer';
-import {binaryEncode, utf8Decode} from 'common/string_helpers';
-import {showPopupWindow} from 'common/window';
-import {
-  ProxyTracingErrors,
-  ProxyTracingWarnings,
-} from 'messaging/user_warnings';
-import {UserNotifier} from 'services/user_notifier';
-import {
-  AdbDeviceConnection,
-  AdbDeviceConnectionListener,
-  AdbDeviceState,
-} from 'trace_collection/adb/adb_device_connection';
-import {TraceTarget} from 'trace_collection/trace_target';
+import {ResizableBuffer} from '@common/buffer';
+import {binaryEncode, utf8Decode} from '@common/string_helpers';
+import {showPopupWindow} from '@common/window';
+import {getLogger, Logger} from '@compat/logging';
+import {UserNotifier} from '@services/user_notifier';
+import {AdbDeviceConnection, AdbDeviceConnectionListener, AdbDeviceState,} from '@trace_collection/adb_device_connection';
+import {TraceTarget} from '@trace_collection/trace_target';
+import {makeWarningProxyTracingErrors, makeWarningProxyTracingWarnings,} from '@trace_collection/warnings';
+
 import {DataListener} from './adb_websocket_stream';
 import {ShellStream} from './shell_stream';
 import {StreamProvider} from './stream_provider';
-import {ErrorListener} from './websocket_stream';
 
 export class WdpDeviceConnection extends AdbDeviceConnection {
   private static readonly WDP_ADB_URL = 'ws://localhost:9167/adb-json';
@@ -44,8 +38,9 @@ export class WdpDeviceConnection extends AdbDeviceConnection {
     listener: AdbDeviceConnectionListener,
     private approveUrl?: string,
     private showWindow: (url: string) => boolean = showPopupWindow,
+    logger: Logger = getLogger('WdpDeviceConnection'),
   ) {
-    super(id, listener);
+    super(id, listener, logger);
   }
 
   override onDestroy() {
@@ -69,10 +64,7 @@ export class WdpDeviceConnection extends AdbDeviceConnection {
     const dataListener = (data: Uint8Array) => {
       cmdOut.append(data);
     };
-    const errorListener = async (msg: string) => {
-      this.listener.onError(msg);
-    };
-    const stream = this.createShellStream(dataListener, errorListener);
+    const stream = this.createShellStream(dataListener);
     await stream.connect(cmd);
     await stream.complete;
     const output = utf8Decode(cmdOut.get()).trimEnd();
@@ -81,7 +73,7 @@ export class WdpDeviceConnection extends AdbDeviceConnection {
   }
 
   override async startTrace(target: TraceTarget): Promise<void> {
-    console.debug(`Starting trace for ${target.traceName} on ${this.id}`);
+    this.logger.debug(`Starting trace for ${target.traceName} on ${this.id}`);
     if (target.isScreenRecording) {
       await this.startScreenRecording(target);
     } else {
@@ -96,10 +88,10 @@ export class WdpDeviceConnection extends AdbDeviceConnection {
         warning = msg.length > 0 ? msg.trim() : undefined;
       }
       if (warning) {
-        UserNotifier.add(new ProxyTracingWarnings([warning])).notify();
+        UserNotifier.add(makeWarningProxyTracingWarnings([warning])).notify();
       }
     }
-    console.debug(`Started trace for ${target.traceName} on ${this.id}`);
+    this.logger.debug(`Started trace for ${target.traceName} on ${this.id}`);
   }
 
   override async endTrace(target: TraceTarget) {
@@ -109,9 +101,9 @@ export class WdpDeviceConnection extends AdbDeviceConnection {
       stream?.close();
       this.screenRecordingStreams.delete(target.traceName);
     }
-    console.debug(`Ending trace for ${target.traceName}.`);
+    this.logger.debug(`Ending trace for ${target.traceName}.`);
     const output = await this.runShellCommand(target.stopCmd);
-    console.debug(`Ended trace for ${target.traceName}. Output: ${output}`);
+    this.logger.debug(`Ended trace for ${target.traceName}. Output: ${output}`);
   }
 
   protected override async updatePropertiesFromResponse(
@@ -145,7 +137,7 @@ export class WdpDeviceConnection extends AdbDeviceConnection {
       this.id,
       sock,
       async (msg: string) => {
-        console.error(msg);
+        this.logger.error(msg);
         await this.listener.onError(msg);
       },
     );
@@ -174,24 +166,23 @@ export class WdpDeviceConnection extends AdbDeviceConnection {
         'please check your display state',
         'please check your display state (must be on at start of trace)',
       );
-      UserNotifier.add(new ProxyTracingErrors([output])).notify();
+      UserNotifier.add(makeWarningProxyTracingErrors([output])).notify();
     });
     await stream.connect();
     await stream.write(binaryEncode(target.startCmd));
   }
 
-  private createShellStream(
-    dataListener: DataListener,
-    errorListener: ErrorListener = async (msg: string) =>
-      this.listener.onError(msg),
-  ): ShellStream {
+  private createShellStream(dataListener: DataListener): ShellStream {
+    const errorListener = async (msg: string) => {
+      this.listener.onError(msg);
+    };
     const sock = new WebSocket(WdpDeviceConnection.WDP_ADB_URL);
     return this.streamProvider.createShellStream(
       this.id,
       sock,
       dataListener,
       async (msg: string) => {
-        console.error(msg);
+        this.logger.error(msg);
         errorListener(msg);
       },
     );

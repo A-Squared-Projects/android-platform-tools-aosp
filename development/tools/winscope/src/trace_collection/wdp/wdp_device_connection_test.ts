@@ -14,30 +14,19 @@
  * limitations under the License.
  */
 
-import {ArrayBufferBuilder} from 'common/buffer';
-import {binaryEncode} from 'common/string_helpers';
-import {
-  ProxyTracingErrors,
-  ProxyTracingWarnings,
-} from 'messaging/user_warnings';
-import {UserNotifierChecker} from 'test/unit/user_notifier_checker';
-import {
-  makeFakeWebSocket,
-  makeFakeWebSocketMessage,
-} from 'test/unit/web_socket_utils';
-import {
-  AdbDeviceConnectionListener,
-  AdbDeviceState,
-} from 'trace_collection/adb/adb_device_connection';
-import {TraceTarget} from 'trace_collection/trace_target';
+import {ArrayBufferBuilder} from '@common/buffer';
+import {binaryEncode} from '@common/string_helpers';
+import {UserNotifierChecker} from '@services/testing/user_notifier_checker';
+import {AdbDeviceConnectionListener, AdbDeviceState,} from '@trace_collection/adb_device_connection';
+import {TraceTarget} from '@trace_collection/trace_target';
+import {makeWarningProxyTracingErrors, makeWarningProxyTracingWarnings,} from '@trace_collection/warnings';
+import {makeFakeWebSocket, makeFakeWebSocketMessage,} from '@trace_collection/wdp/testing/web_socket_test_helpers';
+
 import {AdbWebSocketStream} from './adb_websocket_stream';
 import {ShellStream} from './shell_stream';
 import {StreamProvider} from './stream_provider';
 import {SyncStream} from './sync_stream';
-import {
-  WdpDeviceConnection,
-  WdpDeviceConnectionResponse,
-} from './wdp_device_connection';
+import {WdpDeviceConnection, WdpDeviceConnectionResponse,} from './wdp_device_connection';
 
 describe('WdpDeviceConnection', () => {
   const listener = jasmine.createSpyObj<AdbDeviceConnectionListener>(
@@ -289,7 +278,7 @@ describe('WdpDeviceConnection', () => {
       await connection.startTrace(mockTarget);
       expect(runShellCmdSpy).toHaveBeenCalledWith(startCmd);
       userNotifierChecker.expectNotified([
-        new ProxyTracingWarnings(['Error starting trace.']),
+        makeWarningProxyTracingWarnings(['Error starting trace.']),
       ]);
       userNotifierChecker.reset();
     });
@@ -302,7 +291,7 @@ describe('WdpDeviceConnection', () => {
       await connection.startTrace(mockTarget);
       expect(runShellCmdSpy).toHaveBeenCalledWith(startCmd);
       userNotifierChecker.expectNotified([
-        new ProxyTracingWarnings(['Error starting trace.']),
+        makeWarningProxyTracingWarnings(['Error starting trace.']),
       ]);
       userNotifierChecker.reset();
     });
@@ -381,7 +370,7 @@ describe('WdpDeviceConnection', () => {
       expect(openStream?.isOpen()).toBeFalse();
       expect(runShellCmdSpy).toHaveBeenCalledWith(stopCmd);
       userNotifierChecker.expectNotified([
-        new ProxyTracingErrors([
+        makeWarningProxyTracingErrors([
           'Error ending screen recording on device: ' +
             'ERROR: please check your display state (must be on at start of trace)',
         ]),

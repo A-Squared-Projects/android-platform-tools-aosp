@@ -15,20 +15,8 @@
  */
 
 import {browser, by, element} from 'protractor';
-import {
-  changeRealTimestampInWinscope,
-  checkFinalRealTimestamp,
-  checkInitialRealTimestamp,
-  checkItemInPropertiesTree,
-  checkScrollPresent,
-  checkSelectFilter,
-  checkTimelineTraceSelector,
-  checkTotalScrollEntries,
-  checkWinscopeRealTimestamp,
-  loadTraceAndCheckViewer,
-  setTimeouts,
-  WINSCOPE_URL,
-} from './utils';
+
+import {changeRealTimestampInWinscope, checkFinalRealTimestamp, checkInitialRealTimestamp, checkItemInPropertiesTreeByName, checkScrollPresent, checkSelectFilter, checkTimelineTraceSelector, checkTotalScrollEntries, checkWinscopeRealTimestamp, loadTraceAndCheckViewer, setTimeouts, WINSCOPE_URL,} from './helpers';
 
 describe('Viewer Transactions', () => {
   const viewerSelector = 'viewer-transactions';
@@ -41,7 +29,7 @@ describe('Viewer Transactions', () => {
 
   it('processes trace from zip and navigates correctly', async () => {
     await loadTraceAndCheckViewer(
-      'archives/deployment_full_trace_phone.zip',
+      'archives/deployment_full_trace_phone_perfetto.zip',
       'Transactions',
       viewerSelector,
     );
@@ -56,14 +44,22 @@ describe('Viewer Transactions', () => {
 
     await changeRealTimestampInWinscope('2022-11-21, 18:05:17.505');
     await checkWinscopeRealTimestamp('18:05:17.505');
-    await checkSelectedEntry();
-    await checkSelectFilter(viewerSelector, '.pid', ['6914'], 2, totalEntries);
+    await checkCurrentEntry();
+    await checkSelectFilter(
+      viewerSelector,
+      '.pid',
+      ['6914'],
+      2,
+      totalEntries,
+      true,
+    );
     await checkSelectFilter(
       viewerSelector,
       '.uid',
       ['10161'],
       16,
       totalEntries,
+      true,
     );
     await checkSelectFilter(
       viewerSelector,
@@ -71,47 +67,52 @@ describe('Viewer Transactions', () => {
       ['eBackgroundBlurRadiusChanged'],
       10,
       totalEntries,
+      true,
     );
   });
 
-  async function checkSelectedEntry() {
-    const selectedEntry = element(by.css(`${viewerSelector} .scroll .current`));
-    expect(await selectedEntry.isPresent()).toBeTruthy();
+  async function checkCurrentEntry() {
+    const currentEntry = element(by.css(`${viewerSelector} .scroll .current`));
+    expect(await currentEntry.isPresent()).toBeTruthy();
 
-    const transactionId = selectedEntry.element(by.css('.transaction-id'));
+    const transactionId = currentEntry.element(by.css('.transaction-id'));
     expect(await transactionId.getText()).toBe('7975754272149');
 
-    const vsyncId = selectedEntry.element(by.css('.vsyncid'));
+    const vsyncId = currentEntry.element(by.css('.vsyncid'));
     expect(await vsyncId.getText()).toBe('93389');
 
-    const pid = selectedEntry.element(by.css('.pid'));
+    const pid = currentEntry.element(by.css('.pid'));
     expect(await pid.getText()).toBe('1857');
 
-    const uid = selectedEntry.element(by.css('.uid'));
+    const uid = currentEntry.element(by.css('.uid'));
     expect(await uid.getText()).toBe('1000');
 
-    const type = selectedEntry.element(by.css('.transaction-type'));
+    const type = currentEntry.element(by.css('.transaction-type'));
     expect(await type.getText()).toBe('LAYER_CHANGED');
 
-    const layerOrDisplayId = selectedEntry.element(
+    const layerOrDisplayId = currentEntry.element(
       by.css('.layer-or-display-id'),
     );
     expect(await layerOrDisplayId.getText()).toBe('798');
 
     const whatString =
       'eLayerChanged | eAlphaChanged | eFlagsChanged | eReparent | eColorChanged | eHasListenerCallbacksChanged';
-    const what = selectedEntry.element(by.css('.flags'));
+    const what = currentEntry.element(by.css('.flags'));
     expect(await what.getText()).toEqual(whatString);
 
-    await checkItemInPropertiesTree(
+    await checkItemInPropertiesTreeByName(
       viewerSelector,
       'what',
       'what:\n' + whatString,
+      undefined,
+      false,
     );
-    await checkItemInPropertiesTree(
+    await checkItemInPropertiesTreeByName(
       viewerSelector,
       'color',
       'color:\n(0.106, 0.106, 0.106)',
+      undefined,
+      false,
     );
   }
 });

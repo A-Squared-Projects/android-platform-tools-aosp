@@ -35,7 +35,7 @@ export function divideAndRound(ns: bigint, div: bigint): bigint {
  * @param values The array of bigints.
  * @return The maximum value in the array, or undefined if the array is empty.
  */
-export function getMax(values: Array<bigint>): bigint | undefined {
+export function getMax(values: bigint[]): bigint | undefined {
   let max: bigint | undefined;
   for (const value of values) {
     if (max === undefined || value > max) {
@@ -43,4 +43,20 @@ export function getMax(values: Array<bigint>): bigint | undefined {
     }
   }
   return max;
+}
+
+/**
+ * Gets the minimum value in an array of bigints.
+ *
+ * @param values The array of bigints.
+ * @return The minimum value in the array, or undefined if the array is empty.
+ */
+export function getMin(values: bigint[]): bigint | undefined {
+  let min: bigint | undefined;
+  for (const value of values) {
+    if (min === undefined || value < min) {
+      min = value;
+    }
+  }
+  return min;
 }

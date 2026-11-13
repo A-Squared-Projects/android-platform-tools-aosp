@@ -14,23 +14,14 @@
  * limitations under the License.
  */
 
-import {
-  RemoteToolDownloadStart,
-  RemoteToolFilesReceived,
-  WinscopeEvent,
-  WinscopeEventType,
-} from 'messaging/winscope_event';
-import {
-  EmitEvent,
-  WinscopeEventEmitter,
-} from 'messaging/winscope_event_emitter';
-import {WinscopeEventListener} from 'messaging/winscope_event_listener';
-import {
-  MessageType,
-  OpenBuganizerResponse,
-  OpenRequest,
-  WebCommandMessage,
-} from './messages';
+import {getLogger, Logger} from '@compat/logging';
+import {RemoteToolDownloadStart, RemoteToolFilesReceived, RemoteToolInitialized, RemoteToolWaitingForFiles,} from '@cross_tool/remote_tool_events';
+import {WinscopeEvent} from '@messaging/winscope_event';
+import {EmitEvent, WinscopeEventEmitter,} from '@messaging/winscope_event_emitter';
+import {WinscopeEventListener} from '@messaging/winscope_event_listener';
+import {AppInitialized} from '@ui/shared/events/app_events';
+
+import {MessageType, OpenBuganizerResponse, OpenRequest, WebCommandMessage,} from './messages';
 
 /**
  * Protocol for communication between Winscope and the ABT Chrome extension.
@@ -44,36 +35,45 @@ export class AbtChromeExtensionProtocol
 
   private emitEvent: EmitEvent = () => Promise.resolve();
 
+  constructor(
+    private readonly logger: Logger = getLogger('AbtChromeExtensionProtocol'),
+  ) {}
+
   setEmitEvent(callback: EmitEvent) {
     this.emitEvent = callback;
   }
 
   async onWinscopeEvent(event: WinscopeEvent) {
-    await event.visit(WinscopeEventType.APP_INITIALIZED, async () => {
-      const urlParams = new URLSearchParams(window.location.search);
-      if (urlParams.get('source') !== 'openFromExtension' || !chrome) {
-        return;
-      }
+    if (event instanceof AppInitialized) {
+      return await this.onAppInitialized();
+    }
+  }
 
-      await this.emitEvent(new RemoteToolDownloadStart());
+  private async onAppInitialized() {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('source') !== 'openFromExtension' || !chrome) {
+      return;
+    }
 
-      const openRequestMessage: OpenRequest = {
-        action: MessageType.OPEN_REQUEST,
-      };
+    await this.emitEvent(new RemoteToolInitialized());
+    await this.emitEvent(new RemoteToolWaitingForFiles());
 
-      chrome.runtime.sendMessage(
-        AbtChromeExtensionProtocol.ABT_EXTENSION_ID,
-        openRequestMessage,
-        async (message) => await this.onMessageReceived(message),
-      );
-    });
+    const openRequestMessage: OpenRequest = {
+      action: MessageType.OPEN_REQUEST,
+    };
+
+    chrome.runtime.sendMessage(
+      AbtChromeExtensionProtocol.ABT_EXTENSION_ID,
+      openRequestMessage,
+      async (message) => await this.onMessageReceived(message),
+    );
   }
 
   private async onMessageReceived(message: WebCommandMessage) {
     if (this.isOpenFromBuganizerResponseMessage(message)) {
       await this.onOpenFromBuganizerResponseMessageReceived(message);
     } else {
-      console.warn(
+      this.logger.warn(
         'ABT chrome extension protocol received unexpected message:',
         message,
       );
@@ -83,14 +83,16 @@ export class AbtChromeExtensionProtocol
   private async onOpenFromBuganizerResponseMessageReceived(
     message: OpenBuganizerResponse,
   ) {
-    console.log(
+    this.logger.info(
       'ABT chrome extension protocol received OpenBuganizerResponse message:',
       message,
     );
 
     if (message.attachments.length === 0) {
-      console.warn('ABT chrome extension protocol received no attachments');
+      this.logger.warn('ABT chrome extension protocol received no attachments');
     }
+
+    await this.emitEvent(new RemoteToolDownloadStart());
 
     const filesBlobPromises = message.attachments.map(async (attachment) => {
       const fileQueryResponse = await fetch(attachment.objectUrl);

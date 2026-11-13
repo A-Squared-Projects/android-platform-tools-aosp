@@ -14,21 +14,24 @@
  * limitations under the License.
  */
 
-import {assertDefined} from 'common/assert';
-import {LegacyParserProvider} from 'test/unit/fixture_utils';
-import {makeElapsedTimestamp} from 'test/unit/time_test_helpers';
-import {CoarseVersion} from 'trace_api/coarse_version';
-import {MediaBasedTraceEntry} from 'trace_api/media_based_trace_entry';
-import {Parser} from 'trace_api/parser';
-import {TraceType} from 'trace_api/trace_type';
+import {makeElapsedTimestamp} from '@common/time/testing/test_helpers';
+import {NonPerfettoParserProvider} from '@parsers/fixture_utils';
+import {CoarseVersion} from '@trace_api/coarse_version';
+import {Parser} from '@trace_api/parser';
+import {TraceType} from '@trace_api/trace_type';
+import {MediaBasedTraceEntry, VideoEntry,} from '@trace/media_based/media_based_trace_entry';
+
+import {spyOnThumbnailGenerator, waitForThumbnailGeneration,} from './test_helpers';
 
 describe('ParserScreenRecordingLegacy', () => {
   let parser: Parser<MediaBasedTraceEntry>;
+  let thumbnailSpy: jasmine.Spy;
 
   beforeAll(async () => {
-    parser = await new LegacyParserProvider()
+    thumbnailSpy = spyOnThumbnailGenerator();
+    parser = (await new NonPerfettoParserProvider()
       .addFile('traces/elapsed_timestamp/screen_recording.mp4')
-      .getParser<MediaBasedTraceEntry>();
+      .get()) as Parser<MediaBasedTraceEntry>;
   });
 
   it('has expected trace type', () => {
@@ -40,7 +43,7 @@ describe('ParserScreenRecordingLegacy', () => {
   });
 
   it('provides timestamps', () => {
-    const timestamps = assertDefined(parser.getTimestamps());
+    const timestamps = parser.getTimestamps();
 
     expect(timestamps.length).toBe(85);
 
@@ -64,13 +67,21 @@ describe('ParserScreenRecordingLegacy', () => {
   it('retrieves trace entry', async () => {
     {
       const entry = await parser.getEntry(0);
-      expect(entry).toBeInstanceOf(MediaBasedTraceEntry);
+      expect(entry).toBeInstanceOf(VideoEntry);
       expect(Number(entry.videoTimeSeconds)).toBeCloseTo(0);
     }
     {
       const entry = await parser.getEntry(parser.getLengthEntries() - 1);
-      expect(entry).toBeInstanceOf(MediaBasedTraceEntry);
+      expect(entry).toBeInstanceOf(VideoEntry);
       expect(Number(entry.videoTimeSeconds)).toBeCloseTo(2.37, 0.001);
     }
+  });
+
+  it('generates thumbnail', async () => {
+    await waitForThumbnailGeneration(thumbnailSpy);
+    const entry0 = await parser.getEntry(0);
+    expect(entry0.thumbnail).toBeDefined();
+    const entry1 = await parser.getEntry(1);
+    expect(entry1.thumbnail).toEqual(entry0.thumbnail);
   });
 });

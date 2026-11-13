@@ -77,6 +77,11 @@ enum Cmd {
         #[arg(long, default_value_t = false)]
         metadata_only: bool,
 
+        /// If true, update the imports section of TEST_MAPPING. This is slow because it requires
+        /// searching Android.bp files for targets that depend on this crate.
+        #[arg(long, default_value_t = false)]
+        update_imports: bool,
+
         #[command(flatten)]
         crates: CrateList,
     },
@@ -104,6 +109,10 @@ enum Cmd {
         #[arg(long, value_enum, default_value_t = SemverCompatibilityRule::Loose)]
         semver_compatibility: SemverCompatibilityRule,
 
+        /// How strict to be about enforcing semver compatibility for dependencies.
+        #[arg(long, value_enum, default_value_t = SemverCompatibilityRule::Ignore)]
+        dep_semver_compatibility: SemverCompatibilityRule,
+
         #[arg(long, default_value_t = false)]
         json: bool,
     },
@@ -114,6 +123,9 @@ enum Cmd {
 
         /// The crate version.
         version: String,
+
+        #[arg(long, default_value_t = false)]
+        allow_older: bool,
     },
     /// Initialize a new managed repo.
     Init {},
@@ -122,6 +134,8 @@ enum Cmd {
         #[command(flatten)]
         crates: CrateList,
     },
+    /// Count the number of update-based commits submitted
+    CountUpdates {},
 }
 
 #[derive(Args)]
@@ -163,13 +177,18 @@ fn main() -> Result<()> {
 
     let managed_repo = ManagedRepo::new(
         RootedPath::new(args.android_root, args.managed_repo_path)?,
-        args.offline,
+        args.offline
+            || matches!(args.command, Cmd::SuggestUpdates { .. } | Cmd::UpdatableCrates { .. }),
     )?;
 
     match args.command {
-        Cmd::Regenerate { crates, metadata_only } => {
+        Cmd::Regenerate { crates, metadata_only, update_imports } => {
             let run_cargo_embargo = !metadata_only;
-            managed_repo.regenerate(crates.to_list(&managed_repo)?.into_iter(), run_cargo_embargo)
+            managed_repo.regenerate(
+                crates.to_list(&managed_repo)?.into_iter(),
+                run_cargo_embargo,
+                update_imports,
+            )
         }
         Cmd::PreuploadCheck { files } => managed_repo.preupload_check(&files),
         Cmd::AnalyzeImport { crate_name } => managed_repo.analyze_import(&crate_name),
@@ -181,13 +200,21 @@ fn main() -> Result<()> {
         }
         Cmd::UpdatableCrates {} => managed_repo.updatable_crates(),
         Cmd::AnalyzeUpdates { crate_name } => managed_repo.analyze_updates(crate_name),
-        Cmd::SuggestUpdates { patches, semver_compatibility, json } => {
-            managed_repo.suggest_updates(patches, semver_compatibility, json)
+        Cmd::SuggestUpdates { patches, semver_compatibility, dep_semver_compatibility, json } => {
+            managed_repo.suggest_updates(
+                patches,
+                semver_compatibility,
+                dep_semver_compatibility,
+                json,
+            )
         }
-        Cmd::Update { crate_name, version } => managed_repo.update(crate_name, version),
+        Cmd::Update { crate_name, version, allow_older } => {
+            managed_repo.update(crate_name, version, allow_older)
+        }
         Cmd::Init {} => managed_repo.init(),
         Cmd::VerifyChecksum { crates } => {
             managed_repo.verify_checksums(crates.to_list(&managed_repo)?.into_iter())
         }
+        Cmd::CountUpdates {} => managed_repo.count_updates(),
     }
 }

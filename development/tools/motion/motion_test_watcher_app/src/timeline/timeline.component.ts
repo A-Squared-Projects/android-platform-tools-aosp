@@ -10,15 +10,19 @@ import {
 import { GoldensService } from '../service/goldens.service';
 import { PreviewService } from '../service/preview.service';
 import { NgFor, NgIf } from '@angular/common';
-import { forkJoin } from 'rxjs';
+import { forkJoin, of } from 'rxjs';
 import { GraphComponent } from './graph/graph.component';
-import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatDialogModule } from '@angular/material/dialog';
 import { MatDialog } from '@angular/material/dialog';
+import { MatButtonModule } from '@angular/material/button';
+import { MatIconModule } from '@angular/material/icon';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { FilterComponent, SelectOption } from '../filter/filter.component';
 import { FilterService } from '../service/filter.service';
 import { Subscription } from 'rxjs';
 import { TestModes } from '../model/test_mode';
+import { GoldenActionService } from '../service/golden-action.service';
 
 @Component({
   selector: 'app-timeline',
@@ -26,15 +30,20 @@ import { TestModes } from '../model/test_mode';
     NgIf,
     NgFor,
     GraphComponent,
-    MatDialogModule],
+    MatDialogModule,
+    MatButtonModule,
+    MatIconModule,
+    MatProgressSpinnerModule,
+    MatTooltipModule
+  ],
   templateUrl: './timeline.component.html',
   styleUrl: './timeline.component.css',
 })
 export class TimelineComponent implements OnChanges {
   constructor(
     private goldenService: GoldensService,
-    private snackBar: MatSnackBar,
-    private preivewService: PreviewService,
+    private goldenActionService: GoldenActionService,
+    private previewService: PreviewService,
     private dialog: MatDialog,
     private filterService: FilterService
   ) { }
@@ -65,7 +74,11 @@ export class TimelineComponent implements OnChanges {
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['selectedGolden']) {
       this.receivedSelectedOptions = [];
-      if(this.selectedGolden?.dataSource === DataSource.GERRIT){
+      console.log('Selected Golden changed:', this.selectedGolden);
+      console.log('DataSource:', this.selectedGolden?.dataSource);
+      if (this.selectedGolden?.dataSource === DataSource.GERRIT ||
+        this.selectedGolden?.dataSource === DataSource.CODESEARCH ||
+        this.selectedGolden?.dataSource === DataSource.USER) {
         this.updatePageFromData(
           this.selectedGolden.actualData,
           this.selectedGolden.expectedData
@@ -91,11 +104,20 @@ export class TimelineComponent implements OnChanges {
     if (!this.selectedGolden) return;
     this.loading = true;
 
-    forkJoin([
-      this.goldenService.getActualGoldenData(this.selectedGolden),
-      this.goldenService.getExpectedGoldenData(this.selectedGolden),
-    ]).subscribe({
-      next: ([actualData, expectedData]) => {
+    const observables: any[] = [
+      this.goldenService.getActualGoldenData(this.selectedGolden)
+    ];
+
+    if (this.selectedGolden.expectedUrl) {
+      observables.push(this.goldenService.getExpectedGoldenData(this.selectedGolden));
+    } else {
+      observables.push(of({}));
+    }
+
+    forkJoin(observables).subscribe({
+      next: (results: any[]) => {
+        const actualData = results[0];
+        const expectedData = results.length > 1 ? results[1] : undefined;
         this.loading = false;
         this.updatePageFromData(actualData, expectedData)
       },
@@ -107,63 +129,59 @@ export class TimelineComponent implements OnChanges {
     });
   }
 
-  updatePageFromData(actualData: MotionGoldenData, expectedData: MotionGoldenData){
+  updatePageFromData(actualData: MotionGoldenData, expectedData: MotionGoldenData) {
     this.expectedData = expectedData
     this.actualData = actualData
-    this.preivewService.updateFrames(this.actualData.frame_ids)
+    if (this.actualData) {
+      this.previewService.updateFrames(this.actualData.frame_ids)
+    }
     this.buildUi();
     this.populateFeatureOptions();
   }
 
   buildUi() {
     if (!this.selectedGolden) return;
-    if(this.actualData
+    if (this.actualData
       && Object.keys(this.actualData).length > 0) {
-        this.processData(this.actualData)
-      }
-    if(this.expectedData
+      this.processData(this.actualData)
+    }
+    if (this.expectedData
       && Object.keys(this.expectedData).length > 0) {
-        this.processData(this.expectedData)
-      }
+      this.processData(this.expectedData)
+    }
     this.featureCount = this.actualData?.features.length ?? this.expectedData?.features?.length ?? 0
   }
 
   processData(data: MotionGoldenData) {
-    const newFeatures: MotionGoldenFeature[] = [];
+    data.features = this.flattenFeatures(data.features);
+  }
 
-    data.features.forEach((feature) => {
-      if (
-        feature.data_points &&
-        Array.isArray(feature.data_points) &&
-        feature.data_points.length > 0
-      ) {
-        let firstValidDataPoint: any = null;
-        for (const dataPoint of feature.data_points) {
-          if (typeof dataPoint === 'object' && !isNotFound(dataPoint)) {
-            firstValidDataPoint = dataPoint;
-            break;
-          }
+  private flattenFeatures(features: MotionGoldenFeature[]): MotionGoldenFeature[] {
+    const result: MotionGoldenFeature[] = [];
+    features.forEach(feature => {
+      let firstValidObject: any = null;
+      for (const point of feature.data_points) {
+        if (point && typeof point === 'object' && !isNotFound(point) && !Array.isArray(point) && Object.keys(point).length > 0) {
+          firstValidObject = point;
+          break;
         }
+      }
 
-        if (firstValidDataPoint) {
-          const keys = Object.keys(firstValidDataPoint);
-          keys.forEach((key) => {
-            newFeatures.push({
-              name: `${feature.name}.${key}`,
-              type: feature.type,
-              data_points: feature.data_points.map((point: any) =>
-                point && typeof point === 'object' ? point[key] : undefined
-              ),
-            });
-          });
-        } else {
-          newFeatures.push(feature);
-        }
+      if (firstValidObject) {
+        const keys = Object.keys(firstValidObject);
+        const subFeatures: MotionGoldenFeature[] = keys.map(key => ({
+          name: `${feature.name}.${key}`,
+          type: feature.type,
+          data_points: feature.data_points.map((point: any) =>
+            point && typeof point === 'object' && !isNotFound(point) ? point[key] : undefined
+          )
+        }));
+        result.push(...this.flattenFeatures(subFeatures));
       } else {
-        newFeatures.push(feature);
+        result.push(feature);
       }
     });
-    data.features = newFeatures;
+    return result;
   }
 
   toggleGraph(name: string) {
@@ -189,42 +207,7 @@ export class TimelineComponent implements OnChanges {
 
   updateGolden() {
     if (!this.selectedGolden) return;
-    this.selectedGolden.status = 'UPDATING';
-    this.goldenService.updateGolden(this.selectedGolden).subscribe({
-      next: (rawResult: Record<string, string>) => {
-        const statusString = Object.values(rawResult)[0];
-        if (this.selectedGolden) {
-          if (statusString == 'Updated') {
-            this.selectedGolden.status = 'PASSED_UPDATE';
-            this.selectedGolden.error = undefined;
-            this.snackBar.open(`Golden updated successfully!`, 'Close', {
-              duration: 3000,
-              panelClass: 'success-snackbar'
-            });
-          }
-          else {
-            this.selectedGolden.status = 'FAILED_UPDATE';
-            const match = statusString.match(/Failed with exception: (.+)/);
-            this.selectedGolden.error = match ? match[1] : statusString;
-            this.snackBar.open(`Retry failed. Error: ${this.selectedGolden.error || ''}`, 'Close', {
-              duration: 5000,
-              panelClass: 'error-snackbar'
-            });
-          }
-        }
-      },
-      error: (err) => {
-        console.error(err);
-        this.snackBar.open(
-          'Error updating golden. See console for details.',
-          'Close',
-          {
-            duration: 5000,
-            panelClass: 'error-snackbar',
-          }
-        );
-      },
-    });
+    this.goldenActionService.updateGolden(this.selectedGolden).subscribe();
   }
 
   getSelectedFeatureName(): string | undefined {
@@ -262,7 +245,7 @@ export class TimelineComponent implements OnChanges {
       this.actualData.features.forEach((feature) => {
         const featureName = feature.name;
         const expectedDataPoints = this.expectedData?.features.find(
-         (f) => f.name === featureName
+          (f) => f.name === featureName
         )?.data_points;
         const actualDataPoints = feature.data_points;
         const isFeaturePassing = this.areArraysEqual(actualDataPoints, expectedDataPoints);
@@ -294,7 +277,8 @@ export class TimelineComponent implements OnChanges {
   }
 
   get showUpdateButton(): boolean {
-    return this.testMode != TestModes.PRESUBMIT
-      && this.testMode != TestModes.GERRIT;
+    return this.testMode != TestModes.GERRIT
+      && this.testMode != TestModes.CODESEARCH
+      && this.testMode != TestModes.USER;
   }
 }

@@ -45,6 +45,7 @@
 #include "adb_auth.h"
 #include "adb_io.h"
 #include "daemon/adbd_wifi.h"
+#include "daemon/mdns.h"
 #include "fdevent/fdevent.h"
 #include "transport.h"
 #include "types.h"
@@ -241,34 +242,33 @@ static void adbd_key_removed(const char* public_key, size_t len) {
 }
 
 void adbd_auth_init() {
-    // TODO: We have reached the point where we need to refactor this.
-    // Create a Framework class to abstract all this. Pass that object to each
-    // auth and wifi component so they can assign their own callbacks without having
-    // to expose their internals.
-    auto version = adbd_auth_get_max_version();
-    switch (version) {
-        case 1: {
-            AdbdAuthCallbacksV1 cb;
-            cb.version = 1;
-            cb.key_authorized = adbd_auth_key_authorized;
-            cb.key_removed = adbd_key_removed;
-            auth_ctx = adbd_auth_new(&cb);
-            break;
-        }
-        case 2: {
-            AdbdAuthCallbacksV2 cb;
-            cb.version = 2;
-            cb.key_authorized = adbd_auth_key_authorized;
-            cb.key_removed = adbd_key_removed;
-            cb.start_adbd_wifi = enable_wifi_debugging;
-            cb.stop_adbd_wifi = disable_wifi_debugging;
-            auth_ctx = adbd_auth_new(&cb);
-            break;
-        }
-        default: {
-            LOG(WARNING) << "Unknown libadbd_auth version";
-            break;
-        }
+    auto adbd_auth_version = adbd_auth_get_max_version();
+    auto max_handled_version = 3u;
+    LOG(INFO) << std::format("adbd_auth detected v={} (max_handled={})", adbd_auth_version,
+                             max_handled_version);
+    if (adbd_auth_version >= max_handled_version) {
+        AdbdAuthCallbacksV3 cb{};
+        cb.version = 3;
+        cb.key_authorized = adbd_auth_key_authorized;
+        cb.key_removed = adbd_key_removed;
+        cb.start_adbd_wifi = enable_wifi_debugging;
+        cb.stop_adbd_wifi = disable_wifi_debugging;
+        cb.on_framework_connected = on_framework_connected;
+        auth_ctx = adbd_auth_new(&cb);
+    } else if (adbd_auth_version == 2) {
+        AdbdAuthCallbacksV2 cb{};
+        cb.version = 2;
+        cb.key_authorized = adbd_auth_key_authorized;
+        cb.key_removed = adbd_key_removed;
+        cb.start_adbd_wifi = enable_wifi_debugging;
+        cb.stop_adbd_wifi = disable_wifi_debugging;
+        auth_ctx = adbd_auth_new(&cb);
+    } else {
+        AdbdAuthCallbacksV1 cb{};
+        cb.version = 1;
+        cb.key_authorized = adbd_auth_key_authorized;
+        cb.key_removed = adbd_key_removed;
+        auth_ctx = adbd_auth_new(&cb);
     }
 
     std::thread([]() {
@@ -278,6 +278,7 @@ void adbd_auth_init() {
     }).detach();
 
     adbd_wifi_init(auth_ctx);
+    adbd_mdns_init(auth_ctx);
 }
 
 void send_auth_request(atransport* t) {
@@ -362,11 +363,13 @@ int adbd_tls_verify_cert(X509_STORE_CTX* ctx, std::string* auth_key) {
         bool verified = false;
         bssl::UniquePtr<EVP_PKEY> known_evp(EVP_PKEY_new());
         EVP_PKEY_set1_RSA(known_evp.get(), key);
-        if (EVP_PKEY_cmp(known_evp.get(), evp_pkey.get())) {
+        int cmp_result = EVP_PKEY_cmp(known_evp.get(), evp_pkey.get());
+        if (cmp_result == 1) {
             VLOG(AUTH) << "Matched auth_key=" << public_key;
             verified = true;
         } else {
-            VLOG(AUTH) << "auth_key doesn't match [" << public_key << "]";
+            VLOG(AUTH) << "auth_key doesn't match [" << public_key << "] EVP_PKEY_cmp returned "
+                       << cmp_result;
         }
         RSA_free(key);
         if (verified) {

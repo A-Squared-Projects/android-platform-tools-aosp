@@ -80,7 +80,7 @@ static auto& kLocalSocketTypes = *new std::unordered_map<std::string, LocalSocke
 });
 
 bool parse_tcp_socket_spec(std::string_view spec, std::string* hostname, int* port,
-                           std::string* serial, std::string* error) {
+                           std::string* canonical_address, std::string* error) {
     if (!spec.starts_with("tcp:")) {
         *error = "specification is not tcp: ";
         *error += spec;
@@ -90,9 +90,15 @@ bool parse_tcp_socket_spec(std::string_view spec, std::string* hostname, int* po
     std::string hostname_value;
     int port_value;
 
+    std::string after_tcp{spec.substr(4)};
+    if (after_tcp.empty()) {
+        *error = "string after tcp specification is empty";
+        return false;
+    }
+
     // If the spec is tcp:<port>, parse it ourselves.
     // Otherwise, delegate to android::base::ParseNetAddress.
-    if (android::base::ParseInt(&spec[4], &port_value)) {
+    if (android::base::ParseInt(&after_tcp[0], &port_value)) {
         // Do the range checking ourselves, because ParseInt rejects 'tcp:65536' and 'tcp:foo:1234'
         // identically.
         if (port_value < 0 || port_value > 65535) {
@@ -100,12 +106,12 @@ bool parse_tcp_socket_spec(std::string_view spec, std::string* hostname, int* po
             return false;
         }
     } else {
-        std::string addr(spec.substr(4));
         port_value = DEFAULT_ADB_LOCAL_TRANSPORT_PORT;
 
         // FIXME: ParseNetAddress rejects port 0. This currently doesn't hurt, because listening
         //        on an address that isn't 'localhost' is unsupported.
-        if (!android::base::ParseNetAddress(addr, &hostname_value, &port_value, serial, error)) {
+        if (!android::base::ParseNetAddress(after_tcp, &hostname_value, &port_value,
+                                            canonical_address, error)) {
             return false;
         }
     }
@@ -201,8 +207,8 @@ bool check_adb_vsock_cid_port(int cid, int port, std::string* error) {
 #endif
 }
 
-bool socket_spec_connect(unique_fd* fd, std::string_view address, int* port, std::string* serial,
-                         std::string* error) {
+bool socket_spec_connect(unique_fd* fd, std::string_view address, int* port,
+                         std::string* transport_name, std::string* error) {
 #if !ADB_HOST
     if (!socket_access_allowed) {  // Check whether this security suppression is
         // active (initiated from minadbd), and if so disable socket communications
@@ -215,7 +221,7 @@ bool socket_spec_connect(unique_fd* fd, std::string_view address, int* port, std
     if (address.starts_with("tcp:")) {
         std::string hostname;
         int port_value = port ? *port : 0;
-        if (!parse_tcp_socket_spec(address, &hostname, &port_value, serial, error)) {
+        if (!parse_tcp_socket_spec(address, &hostname, &port_value, transport_name, error)) {
             return false;
         }
 
@@ -233,8 +239,9 @@ bool socket_spec_connect(unique_fd* fd, std::string_view address, int* port, std
                     // use the mdns instance name, so we can adjust to address changes on
                     // reconnects.
                     port_value = mdns_info->port;
-                    if (serial) {
-                        *serial = std::format("{}.{}", mdns_info->instance, mdns_info->service);
+                    if (transport_name) {
+                        *transport_name =
+                                std::format("{}.{}", mdns_info->instance, mdns_info->service);
                     }
                 }
             } else {
@@ -303,8 +310,8 @@ bool socket_spec_connect(unique_fd* fd, std::string_view address, int* port, std
         addr.svm_family = AF_VSOCK;
         addr.svm_port = port_value;
         addr.svm_cid = cid;
-        if (serial) {
-            *serial = android::base::StringPrintf("vsock:%u:%d", cid, port_value);
+        if (transport_name) {
+            *transport_name = android::base::StringPrintf("vsock:%u:%d", cid, port_value);
         }
         if (connect(fd->get(), reinterpret_cast<sockaddr*>(&addr), sizeof(addr))) {
             int error_num = errno;
@@ -339,14 +346,14 @@ bool socket_spec_connect(unique_fd* fd, std::string_view address, int* port, std
                                            SOCK_STREAM, error));
 
             if (fd->get() < 0) {
-                *error =
-                        android::base::StringPrintf("could not connect to %s address '%s'",
-                                                    it.first.c_str(), std::string(address).c_str());
+                *error = android::base::StringPrintf("could not connect to %s address '%s' (%s)",
+                                                     it.first.c_str(), std::string(address).c_str(),
+                                                     error->c_str());
                 return false;
             }
 
-            if (serial) {
-                *serial = address;
+            if (transport_name) {
+                *transport_name = address;
             }
             return true;
         }

@@ -116,7 +116,7 @@ impl PseudoCrate<CargoVendorClean> {
                 return Ok(krate.path());
             }
         }
-        Err(anyhow!("Couldn't find vendored directory for {} v{}", crate_name, version.to_string()))
+        Err(anyhow!("Couldn't find vendored directory for {} v{}", crate_name, version))
     }
     fn crates(&self) -> &CrateCollection {
         self.extra.crates.get_or_init(|| {
@@ -224,6 +224,16 @@ license = "Apache-2.0"
     pub fn remove(&self, crate_name: impl AsRef<str>) -> Result<()> {
         Command::new("cargo")
             .args(["remove", crate_name.as_ref()])
+            .current_dir(&self.path)
+            .run_quiet_and_expect_success()?;
+        Ok(())
+    }
+    // Run `cargo update --dry-run` on the pseudo-crate. This has the effect of fetching the latest data from
+    // crates.io, so we can do it once in bulk, rather than one crate at a time, which makes
+    // suggest-updates much faster.
+    pub fn cargo_update(&self) -> Result<()> {
+        Command::new("cargo")
+            .args(["update", "--dry-run"])
             .current_dir(&self.path)
             .run_quiet_and_expect_success()?;
         Ok(())

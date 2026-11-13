@@ -7,17 +7,15 @@ export class LineGraphVisualization implements Visualization {
   minValue: number;
   maxValue: number;
   graphId: string;
+  valueOfUndefinedNumber: number;
   dataSource: DataSource | null = null;
   viewSelectedCurrentFrame: number = 0;
-  // TODO Can't seem to select the graph with id while updating the marker.
-  // Using a global variable of type `any` is ofc a bad idea for this. Using this
-  // as temp fix. Hope I don't still see this here in 6 months
   graph: any;
 
   margin = { top: 20, right: 20, bottom: 30, left: 50 };
   chartWidth = 0;
   chartHeight = 0;
-  legendMarginBottom = 30;
+  legendMarginBottom = 50;
   xScale = d3.scaleLinear();
   yScale = d3.scaleLinear();
   solidLineLegend: string = '';
@@ -36,6 +34,7 @@ export class LineGraphVisualization implements Visualization {
   ) {
     this.minValue = minValue;
     this.maxValue = maxValue;
+    this.valueOfUndefinedNumber = minValue - (Math.abs(maxValue - minValue) / 5); // one tick below the minValue
     this.graphId = graphId;
     this.dataSource = dataSource;
     this.previewService.currentFrameFromView$.subscribe((frame) => {
@@ -84,7 +83,7 @@ export class LineGraphVisualization implements Visualization {
     this.drawAxes(g);
     this.drawExpected(g, data);
     this.drawActual(g, data);
-    this.drawLegend(g);
+    this.drawLegend(g, data);
     this.drawHover(g, data);
     if (this.currentShowMarkerState) {
       this.addMarker(g, this.xScale(this.firstValidDataPoint));
@@ -137,7 +136,7 @@ export class LineGraphVisualization implements Visualization {
       .append('circle')
       .attr('class', 'dot-expected')
       .attr('cx', (d) => this.xScale(d.x))
-      .attr('cy', (d) => this.yScale(d.expectedValue || this.minValue))
+      .attr('cy', (d) => this.yScale(d.expectedValue ?? this.valueOfUndefinedNumber))
       .attr('r', 5)
       .attr('fill', 'none')
       .attr('stroke', (d) => d.expectedValue != undefined ? COLORS.green : COLORS.dark_gray)
@@ -168,9 +167,9 @@ export class LineGraphVisualization implements Visualization {
 
       g.append('line')
         .attr('x1', this.xScale(p1.x))
-        .attr('y1', this.yScale(p1.actualValue || this.minValue))
+        .attr('y1', this.yScale(p1.actualValue ?? this.valueOfUndefinedNumber))
         .attr('x2', this.xScale(p2.x))
-        .attr('y2', this.yScale(p2.actualValue || this.minValue))
+        .attr('y2', this.yScale(p2.actualValue ?? this.valueOfUndefinedNumber))
         .attr('stroke', segmentColor)
         .attr('stroke-width', 2.5)
     }
@@ -180,7 +179,7 @@ export class LineGraphVisualization implements Visualization {
       .append('circle')
       .attr('class', 'dot-actual')
       .attr('cx', (d) => this.xScale(d.x))
-      .attr('cy', (d) => this.yScale(d.actualValue || this.minValue))
+      .attr('cy', (d) => this.yScale(d.actualValue ?? this.valueOfUndefinedNumber))
       .attr('r', (d) => { return isActualDifferentFromExpected(d) ? 4 : 3 })
       .attr('fill', (d) => {
         if (d.actualValue != undefined) {
@@ -190,7 +189,7 @@ export class LineGraphVisualization implements Visualization {
       })
   }
 
-  private drawLegend(g: d3.Selection<SVGGElement, unknown, null, undefined>) {
+  private drawLegend(g: d3.Selection<SVGGElement, unknown, null, undefined>, data: DataPoint[]) {
     this.updateLegend();
     const legend = g
       .append('g')
@@ -354,7 +353,7 @@ export class LineGraphVisualization implements Visualization {
 
           tooltip.attr(
             'transform',
-            `translate(${tooltipX},${this.yScale(dataPoint.actualValue || this.minValue)})`
+            `translate(${tooltipX},${this.yScale(dataPoint.actualValue ?? this.valueOfUndefinedNumber)})`
           );
 
           tooltip.style('display', 'block');

@@ -107,6 +107,7 @@ specified outside of a package.
 | `license_text`          | list of paths             | -       | no          | Files to use for `license_text` in `license` module.                                                               |
 | `alloc`                 | boolean                   | `false` | yes         | Link against `alloc`. Only valid if `no_std` is also true.                                                         |
 | `device_supported`      | boolean                   | `true`  | yes         | Whether to compile for device. Defaults to true.                                                                   |
+| `enabled`               | boolean                   | `true`  | yes         | Whether this module should be enabled. Defaults to true.                                                           |
 | `host_supported`        | boolean                   | `true`  | yes         | Whether to compile for host. Defaults to true.                                                                     |
 | `host_first_multilib`   | boolean                   | `false` | yes         | Add a `compile_multilib: "first"` property to host modules.                                                        |
 | `force_rlib`            | boolean                   | `false` | yes         | Generate "rust_library_rlib" instead of "rust_library".                                                            |
@@ -119,7 +120,7 @@ specified outside of a package.
 | `target_windows`        | boolean                   | `false` | yes         | Add a `target: { windows: { enabled: true } }` property to modules.
 | `whole_static_libs`     | list of strings           | `[]`    | yes         | Static libraries in this list will instead be added as whole_static_libs.                                          |
 | `exported_c_header_dir` | list of paths             | `[]`    | yes         | Directories with headers to export for C usage.                                                                    |
-| `extra_srcs`            | list of paths             | `[]`    | yes         | Additional sources that should be listed as inputs in `srcs`.                                                      |
+| `srcs`                  | list of paths             | -       | yes         | Sources that should be listed as inputs in `srcs`. If not provided, a default glob of rs files will be used.       |
 
 ## Auto-config
 

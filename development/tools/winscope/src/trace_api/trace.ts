@@ -14,34 +14,29 @@
  * limitations under the License.
  */
 
-import {
-  binarySearchFirstGreater,
-  binarySearchFirstGreaterOrEqual,
-} from 'common/typed_array';
-import {assertDefined} from 'common/assert';
-import {NOT_IMPLEMENTED_ERROR} from 'common/errors';
-import {INVALID_TIME_NS, Timestamp} from 'common/time/time';
-import {UserTimestamp} from 'common/time/user_timestamp';
-import {
-  CustomQueryParamTypeMap,
-  CustomQueryParserResultTypeMap,
-  CustomQueryResultTypeMap,
-  CustomQueryType,
-  ProcessCustomQueryParserResult,
-} from './custom_query';
+import {assertDefined, assertTrue} from '@common/assert';
+import {NOT_IMPLEMENTED_ERROR} from '@common/errors';
+import {INVALID_TIME_NS, Timestamp} from '@common/time/time';
+import {UserTimestamp} from '@common/time/user_timestamp';
+import {binarySearchFirstGreater, binarySearchFirstGreaterOrEqual,} from '@common/typed_array';
+import {getLogger, Logger} from '@compat/logging';
+import {RectsForTrace} from '@tree_node/rect_extractor_result';
+
+import {CustomQueryParamTypeMap, CustomQueryParserResultTypeMap, CustomQueryResultTypeMap, CustomQueryType, PROCESS_CUSTOM_QUERY_PARSER_RESULT,} from './custom_query';
 import {FrameMap} from './frame_map';
-import {
-  AbsoluteEntryIndex,
-  AbsoluteFrameIndex,
-  EntriesRange,
-  FramesRange,
-  RelativeEntryIndex,
-} from './index_types';
+import {AbsoluteEntryIndex, AbsoluteFrameIndex, EntriesRange, FramesRange, RelativeEntryIndex,} from './index_types';
 import {Parser} from './parser';
 import {TRACE_INFO} from './trace_info';
 import {TraceType} from './trace_type';
 
-export abstract class TraceEntry<T> {
+/**
+ * Represents a single entry within a trace. This abstract class provides
+ * common properties and methods for accessing entry information like timestamp,
+ * index, and associated frame range.
+ * @template T The type of the full trace entry's value.
+ * @template U The type of this specific entry's value.
+ */
+export abstract class TraceEntry<T, U = Promise<T>> {
   constructor(
     protected readonly fullTrace: Trace<T>,
     protected readonly parser: Parser<T>,
@@ -77,9 +72,14 @@ export abstract class TraceEntry<T> {
     return this.framesRange;
   }
 
-  abstract getValue(): any;
+  abstract getValue(): U;
 }
 
+/**
+ * Represents a trace entry whose value is loaded lazily when requested.
+ * This is useful for large traces where not all entries are needed at once.
+ * @template T The type of the trace entry's value.
+ */
 export class TraceEntryLazy<T> extends TraceEntry<T> {
   constructor(
     fullTrace: Trace<T>,
@@ -104,7 +104,36 @@ export class TraceEntryLazy<T> extends TraceEntry<T> {
   }
 }
 
-export class TraceEntryEager<T, U> extends TraceEntry<T> {
+/**
+ * Represents a trace entry whose value is loaded lazily when requested.
+ * Used when the type of the entry does not match the full trace's value.
+ * @template T The type of the full trace entry's value.
+ * @template U The type of this specific lazy trace entry's value.
+ */
+export class CustomTraceEntryLazy<T, U> extends TraceEntry<T, Promise<U>> {
+  constructor(
+    fullTrace: Trace<T>,
+    parser: Parser<T>,
+    index: AbsoluteEntryIndex,
+    timestamp: Timestamp,
+    framesRange: FramesRange | undefined,
+    private readonly getCustomValue: () => Promise<U>,
+  ) {
+    super(fullTrace, parser, index, timestamp, framesRange);
+  }
+
+  override async getValue(): Promise<U> {
+    return this.getCustomValue();
+  }
+}
+
+/**
+ * Represents a trace entry whose value is loaded eagerly upon creation.
+ * The value is available immediately without requiring an asynchronous operation.
+ * @template T The type of the full trace entry's value.
+ * @template U The type of this specific eager entry's value.
+ */
+export class TraceEntryEager<T, U> extends TraceEntry<T, U> {
   private readonly value: U;
 
   constructor(
@@ -124,6 +153,12 @@ export class TraceEntryEager<T, U> extends TraceEntry<T> {
   }
 }
 
+/**
+ * Represents a trace, which is a collection of `TraceEntry` objects.
+ * This class provides methods to access, slice, and query trace data,
+ * including functionality to handle frame-based access if frame information is available.
+ * @template T The type of the trace entries' values.
+ */
 export class Trace<T> {
   readonly type: TraceType;
   readonly lengthEntries: number;
@@ -153,6 +188,7 @@ export class Trace<T> {
     descriptors: string[],
     fullTrace: Trace<T> | undefined,
     entriesRange: EntriesRange | undefined,
+    private readonly logger: Logger = getLogger('Trace'),
   ) {
     this.type = type;
     this.parser = parser;
@@ -169,8 +205,8 @@ export class Trace<T> {
     return this.parser.getDescriptors();
   }
 
-  getParser(): Parser<T> {
-    return this.parser;
+  async getRectsMap(): Promise<RectsForTrace | undefined> {
+    return this.parser.getRectsMap?.();
   }
 
   isPerfetto(): boolean {
@@ -205,12 +241,41 @@ export class Trace<T> {
     });
   }
 
+  createLazyEntry<U>(
+    index: number,
+    getValue: () => Promise<U>,
+  ): CustomTraceEntryLazy<T, U> {
+    const fullEntry = this.getEntry(index);
+    return new CustomTraceEntryLazy(
+      this,
+      this.parser,
+      index,
+      fullEntry.getTimestamp(),
+      this.hasFrameInfo() ? fullEntry.getFramesRange() : undefined,
+      getValue,
+    );
+  }
+
+  createEagerEntriesFromValues(
+    entriesRange: EntriesRange,
+    values: T[],
+  ): Array<TraceEntryEager<T, T>> {
+    assertTrue(entriesRange.end - entriesRange.start === values.length);
+    const eagerEntries: Array<TraceEntryEager<T, T>> = values.map(
+      (entryValue, i) => {
+        const absoluteIndex = entriesRange.start + i;
+        return this.createEagerEntry<T>(absoluteIndex, entryValue);
+      },
+    );
+    return eagerEntries;
+  }
+
   async getAllEntryValues(): Promise<Array<T | undefined>> {
     try {
       return await this.parser.getAllEntries();
     } catch (e) {
       if (e !== NOT_IMPLEMENTED_ERROR) {
-        console.error(e);
+        this.logger.error((e as Error).message);
       }
       return await Promise.all(this.mapEntry((entry) => entry.getValue()));
     }
@@ -218,18 +283,18 @@ export class Trace<T> {
 
   async getRangeEntryValues(
     entriesRange: EntriesRange,
-  ): Promise<Array<TraceEntryEager<T, T | undefined>>> {
+  ): Promise<Array<TraceEntryEager<T, T>>> {
     try {
       const entries = await this.parser.getRangeOfEntries(entriesRange);
 
       const eagerEntries = entries.map((entryValue, i) => {
         const absoluteIndex = entriesRange.start + i;
-        return this.createEagerEntry<T | undefined>(absoluteIndex, entryValue);
+        return this.createEagerEntry<T>(absoluteIndex, entryValue);
       });
 
       return eagerEntries;
-    } catch (e) {
-      const result: Array<Promise<TraceEntryEager<T, T | undefined>>> = [];
+    } catch {
+      const result: Array<Promise<TraceEntryEager<T, T>>> = [];
       for (
         let absoluteIndex = entriesRange.start;
         absoluteIndex < entriesRange.end;
@@ -238,10 +303,7 @@ export class Trace<T> {
         const entryPromise = this.parser
           .getEntry(absoluteIndex)
           .then((entryValue) => {
-            return this.createEagerEntry<T | undefined>(
-              absoluteIndex,
-              entryValue,
-            );
+            return this.createEagerEntry<T>(absoluteIndex, entryValue);
           });
         result.push(entryPromise);
       }
@@ -249,10 +311,14 @@ export class Trace<T> {
     }
   }
 
+  async getQueryResults(entriesRange: EntriesRange, queryRawData: boolean) {
+    return await this.parser.getQueryResults(entriesRange, queryRawData);
+  }
+
   async customQuery<Q extends CustomQueryType>(
     type: Q,
     param?: CustomQueryParamTypeMap[Q],
-  ): Promise<CustomQueryResultTypeMap<T>[Q]> {
+  ): Promise<CustomQueryResultTypeMap[Q]> {
     const makeTraceEntry = <U>(
       index: RelativeEntryIndex,
       value: U,
@@ -260,10 +326,10 @@ export class Trace<T> {
       return this.createEagerEntry(index, value);
     };
 
-    const processParserResult = ProcessCustomQueryParserResult[type] as (
+    const processParserResult = PROCESS_CUSTOM_QUERY_PARSER_RESULT[type] as (
       parserResult: CustomQueryParserResultTypeMap[Q],
       make: typeof makeTraceEntry,
-    ) => CustomQueryResultTypeMap<T>[Q];
+    ) => CustomQueryResultTypeMap[Q];
 
     const parserResult = await this.parser.customQuery<Q>(
       type,
@@ -542,6 +608,10 @@ export class Trace<T> {
     return false;
   }
 
+  onDestroy() {
+    this.parser.onDestroy?.();
+  }
+
   private getEntryInternal<
     EntryType extends TraceEntryLazy<T> | TraceEntryEager<T, unknown>,
   >(
@@ -591,15 +661,16 @@ export class Trace<T> {
   }
 
   private getFullTraceTimestamps(): Timestamp[] {
-    const timestamps = this.parser.getTimestamps();
-    if (!timestamps) {
+    try {
+      return this.parser.getTimestamps();
+    } catch (e) {
+      this.logger.error('Failed to get timestamps for trace', e);
       throw new Error(
         `Timestamps expected to be available for this ${
           TRACE_INFO[this.type].name
         } trace.`,
       );
     }
-    return timestamps;
   }
 
   private convertToAbsoluteEntryIndex(

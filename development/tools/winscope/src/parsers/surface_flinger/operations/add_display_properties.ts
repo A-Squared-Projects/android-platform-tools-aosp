@@ -14,10 +14,11 @@
  * limitations under the License.
  */
 
-import {assertDefined, assertTrue} from 'common/assert';
-import {Operation} from 'tree_node/operation';
-import {PropertyTreeNode} from 'tree_node/property_tree_node';
-import {DEFAULT_PROPERTY_TREE_NODE_FACTORY} from 'tree_node/property_tree_node_factory';
+import {assertDefined, assertTrue} from '@common/assert';
+import {UINT32_MAX} from '@common/math';
+import {Operation} from '@tree_node/operation';
+import {PropertyTreeNode} from '@tree_node/property_tree_node';
+import {DEFAULT_PROPERTY_TREE_NODE_FACTORY} from '@tree_node/property_tree_node_factory';
 
 export class AddDisplayProperties implements Operation<PropertyTreeNode> {
   apply(value: PropertyTreeNode): void {
@@ -26,47 +27,51 @@ export class AddDisplayProperties implements Operation<PropertyTreeNode> {
     if (!displays) return;
 
     for (const display of displays.getAllChildren()) {
-      const dpiX = display.getChildByName('dpiX');
-      const dpiY = display.getChildByName('dpiY');
-
-      if (!(dpiX && dpiY)) continue;
-
-      const size = assertDefined(display.getChildByName('size'));
-      const width = assertDefined(size.getChildByName('w')?.getValue<number>());
-      const height = assertDefined(
-        size.getChildByName('h')?.getValue<number>(),
-      );
-      const smallestWidth = this.dpiFromPx(
-        Math.min(width, height),
-        Number(dpiX.getValue()),
-      );
-
-      display.addOrReplaceChild(
-        DEFAULT_PROPERTY_TREE_NODE_FACTORY.makeCalculatedProperty(
-          display.id,
-          'isLargeScreen',
-          smallestWidth >= AddDisplayProperties.TABLET_MIN_DPS,
-        ),
-      );
-
-      const layerStack = Number(
-        assertDefined(display.getChildByName('layerStack')).getValue(),
-      );
-
-      assertTrue(
-        layerStack !== -1,
-        () =>
-          'layerStack = -1; false assumption that layerStack is always unsigned',
-      );
-
-      display.addOrReplaceChild(
-        DEFAULT_PROPERTY_TREE_NODE_FACTORY.makeCalculatedProperty(
-          display.id,
-          'isOn',
-          layerStack !== UINT32_MAX,
-        ),
-      );
+      this.addIsLargeScreenProperty(display);
+      this.addIsOnProperty(display);
     }
+  }
+
+  private addIsOnProperty(display: PropertyTreeNode) {
+    const layerStack = Number(
+      assertDefined(display.getChildByName('layerStack')?.getValue() ?? 0),
+    );
+
+    assertTrue(
+      layerStack !== -1,
+      () =>
+        'layerStack = -1; false assumption that layerStack is always unsigned',
+    );
+
+    display.addOrReplaceChild(
+      DEFAULT_PROPERTY_TREE_NODE_FACTORY.makeCalculatedProperty(
+        display.id,
+        'isOn',
+        layerStack !== UINT32_MAX,
+      ),
+    );
+  }
+
+  private addIsLargeScreenProperty(display: PropertyTreeNode) {
+    const dpiX = Number(display.getChildByName('dpiX')?.getValue() ?? 0);
+
+    const size = display.getChildByName('size');
+    const width = assertDefined(
+      size?.getChildByName('w')?.getValue<number>() ?? 0,
+    );
+    const height = assertDefined(
+      size?.getChildByName('h')?.getValue<number>() ?? 0,
+    );
+    const smallestWidth = this.dpiFromPx(Math.min(width, height), dpiX);
+    const isLargeScreen = smallestWidth >= AddDisplayProperties.TABLET_MIN_DPS;
+
+    display.addOrReplaceChild(
+      DEFAULT_PROPERTY_TREE_NODE_FACTORY.makeCalculatedProperty(
+        display.id,
+        'isLargeScreen',
+        isLargeScreen,
+      ),
+    );
   }
 
   private dpiFromPx(size: number, densityDpi: number): number {
@@ -77,8 +82,3 @@ export class AddDisplayProperties implements Operation<PropertyTreeNode> {
   private static readonly TABLET_MIN_DPS = 600;
   private static readonly DENSITY_DEFAULT = 160;
 }
-
-/**
- * The maximum value of a 32-bit unsigned integer.
- */
-const UINT32_MAX = 4294967295;

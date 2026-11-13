@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-import {TimeDuration} from 'common/time/time_duration';
-import Long from 'long';
-import {PropertyTreeBuilder} from 'test/unit/property_tree_builder';
-import {PropertySource} from 'tree_node/property_tree_node';
+import {TimeDuration} from '@common/time/time_duration';
+import {PropertySource} from '@tree_node/property_tree_node';
+import {PropertyTreeBuilder} from '@tree_node/testing/property_tree_builder';
+
 import {TransformDuration} from './transform_duration';
 
 describe('TransformDuration', () => {
@@ -50,7 +50,7 @@ describe('TransformDuration', () => {
       .setIsRoot(true)
       .setRootId('TransitionsTraceEntry')
       .setName('transition')
-      .setChildren([{name: 'durationNs', value: Long.fromNumber(123456)}])
+      .setChildren([{name: 'durationNs', value: 123456n}])
       .build();
 
     new TransformDuration().apply(propertyRoot);

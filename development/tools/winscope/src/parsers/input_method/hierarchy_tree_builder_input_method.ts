@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-import {HierarchyTreeBuilder} from 'parsers/hierarchy_tree_builder';
-import {HierarchyTreeNode} from 'tree_node/hierarchy_tree_node';
-import {PropertiesProvider} from 'tree_node/properties_provider';
+import {HierarchyTreeBuilder} from '@parsers/helpers/hierarchy_tree_builder';
+import {HierarchyTreeNode} from '@tree_node/hierarchy_tree_node';
+import {PropertiesProvider} from '@tree_node/properties_provider';
 
-export class HierarchyTreeBuilderInputMethod extends HierarchyTreeBuilder {
+export class HierarchyTreeBuilderInputMethod extends HierarchyTreeBuilder<string> {
   private childIdentifier = 'child';
 
   protected override buildIdentifierToChildrenMap(
@@ -39,8 +39,7 @@ export class HierarchyTreeBuilderInputMethod extends HierarchyTreeBuilder {
 
   protected override assignParentChildRelationships(
     node: HierarchyTreeNode,
-    identifierToChildren: Map<string | number, HierarchyTreeNode[]>,
-    isRoot?: boolean,
+    identifierToChildren: Map<string, HierarchyTreeNode[]>,
   ): void {
     // only ever one child
     const child: HierarchyTreeNode | undefined = identifierToChildren

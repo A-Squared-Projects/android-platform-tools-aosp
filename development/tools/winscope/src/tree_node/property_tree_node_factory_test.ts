@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-import {PropertyTreeBuilder} from 'test/unit/property_tree_builder';
+import {PropertyTreeBuilder} from '@tree_node/testing/property_tree_builder';
+
 import {PropertySource, PropertyTreeNode} from './property_tree_node';
 import {PropertyTreeNodeFactory} from './property_tree_node_factory';
 

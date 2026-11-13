@@ -52,7 +52,9 @@ class RegsRiscv64 : public RegsImpl<uint64_t> {
 
   uint16_t Convert(uint16_t reg) override;
 
-  static Regs* Read(const void* data, pid_t pid = 0);
+  static const uint16_t kDwarfVlenbReg = 0x1c22;
+
+  static Regs* Read(const void* data, pid_t pid = -1);
 
   static Regs* CreateFromUcontext(void* ucontext);
 

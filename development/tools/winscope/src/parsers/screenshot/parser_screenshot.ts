@@ -14,26 +14,32 @@
  * limitations under the License.
  */
 
-import {Timestamp} from 'common/time/time';
-import {AbstractParser} from 'parsers/legacy/abstract_parser';
-import {CoarseVersion} from 'trace_api/coarse_version';
-import {MediaBasedTraceEntry} from 'trace_api/media_based_trace_entry';
-import {TraceType} from 'trace_api/trace_type';
+import {Timestamp} from '@common/time/time';
+import {AbstractParser} from '@parsers/non_perfetto/abstract_parser';
+import {CoarseVersion} from '@trace_api/coarse_version';
+import {TraceType} from '@trace_api/trace_type';
+import {CanvasEntry, MediaBasedTraceEntry,} from '@trace/media_based/media_based_trace_entry';
 
-class ParserScreenshot extends AbstractParser<MediaBasedTraceEntry, number> {
+export class ParserScreenshot extends AbstractParser<
+  number,
+  MediaBasedTraceEntry
+> {
+  static readonly TRACE_TYPE = TraceType.SCREENSHOT;
   private static readonly MAGIC_NUMBER = [
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
   ]; // currently only support png files
 
+  private imageBitmap: ImageBitmap | undefined;
+
   override getTraceType(): TraceType {
-    return TraceType.SCREENSHOT;
+    return ParserScreenshot.TRACE_TYPE;
   }
 
   override getCoarseVersion(): CoarseVersion {
     return CoarseVersion.LATEST;
   }
 
-  override getMagicNumber(): number[] | undefined {
+  override getMagicNumber(): number[] {
     return ParserScreenshot.MAGIC_NUMBER;
   }
 
@@ -45,21 +51,20 @@ class ParserScreenshot extends AbstractParser<MediaBasedTraceEntry, number> {
     return undefined;
   }
 
-  protected override getTimestamp(decodedEntry: number): Timestamp {
+  protected override getTimestamp(_: number): Timestamp {
     return this.timestampConverter.makeZeroTimestamp();
   }
 
-  override decodeTrace(screenshotData: Uint8Array): number[] {
+  override decodeTrace(_: Uint8Array): readonly number[] {
     return [0]; // require a non-empty array to be returned so trace can provide timestamps
   }
 
-  override processDecodedEntry(
-    index: number,
-    entry: number,
-  ): MediaBasedTraceEntry {
-    const screenshotData = this.traceFile.file;
-    return new MediaBasedTraceEntry(0, screenshotData, true);
+  protected override async processDecodedEntry(
+    _: number,
+  ): Promise<MediaBasedTraceEntry> {
+    if (!this.imageBitmap) {
+      this.imageBitmap = await createImageBitmap(this.getFiles()[0].file);
+    }
+    return new CanvasEntry(this.imageBitmap);
   }
 }
-
-export {ParserScreenshot};

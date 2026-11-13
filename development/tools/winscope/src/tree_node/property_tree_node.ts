@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-import {Rect} from 'common/geometry/rect';
+import {Rect} from '@common/geometry/rect';
+
 import {TreeNode} from './tree_node';
 
 /**
@@ -30,7 +31,7 @@ export type PropertyValue =
   | boolean
   | object
   | string[]
-  | Array<bigint>
+  | bigint[]
   | number[]
   | boolean[]
   | object[];

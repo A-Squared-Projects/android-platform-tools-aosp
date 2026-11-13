@@ -11,6 +11,7 @@ libnativehelper              platform/libnativehelper
 packages/modules/adb         platform/packages/modules/adb
 system/core                  platform/system/core
 system/extras                platform/system/extras
+system/fs/fs_mgr             platform/system/fs/fs_mgr
 system/incremental_delivery  platform/system/incremental_delivery
 system/libbase               platform/system/libbase
 system/libprocinfo           platform/system/libprocinfo

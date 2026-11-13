@@ -37,6 +37,8 @@
 #include "adb_trace.h"
 #include "adb_utils.h"
 #include "adb_wifi.h"
+#include "client/adbmdns/adbmdns.h"
+#include "client/adbmdns/adbmdns_bridge.h"
 #include "client/discovered_services.h"
 #include "client/mdns_utils.h"
 #include "client/openscreen/mdns_service.h"
@@ -61,14 +63,17 @@ static void RequestConnectToDevice(const ServiceInfo& info) {
 
 void AttemptAutoConnect(const std::reference_wrapper<const ServiceInfo> info) {
     if (!adb_DNSServiceShouldAutoConnect(info.get().service, info.get().instance)) {
+        VLOG(MDNS) << "Don't auto-connect to " << info.get().instance << "." << info.get().service;
         return;
     }
+
     if (!info.get().v4_address.has_value()) {
         return;
     }
 
     const auto index = adb_DNSServiceIndexByName(info.get().service);
     if (!index) {
+        VLOG(MDNS) << "Unknown service" << info.get().service;
         return;
     }
 
@@ -99,11 +104,13 @@ void OnServiceReceiverResult(const ServiceInfo& info, ServiceInfoState state) {
     bool updated = true;
     switch (state) {
         case Created: {
+            VLOG(MDNS) << "mdns stack reported service created " << info;
             mdns::discovered_services.ServiceCreated(info);
             AttemptAutoConnect(info);
             break;
         }
         case Updated: {
+            VLOG(MDNS) << "mdns stack reported service updated " << info;
             updated = mdns::discovered_services.ServiceUpdated(info);
             if (updated) {
                 AttemptAutoConnect(info);
@@ -111,6 +118,7 @@ void OnServiceReceiverResult(const ServiceInfo& info, ServiceInfoState state) {
             break;
         }
         case Deleted: {
+            VLOG(MDNS) << "mdns stack reported service deleted " << info;
             mdns::discovered_services.ServiceDeleted(info);
             break;
         }
@@ -124,12 +132,10 @@ void OnServiceReceiverResult(const ServiceInfo& info, ServiceInfoState state) {
 /////////////////////////////////////////////////////////////////////////////////
 
 void init_mdns_transport_discovery() {
-    const char* mdns_osp = getenv("ADB_MDNS_OPENSCREEN");
-    if (mdns_osp && strcmp(mdns_osp, "0") == 0) {
-        LOG(WARNING) << "Environment variable ADB_MDNS_OPENSCREEN disregarded";
-    } else {
-        VLOG(MDNS) << "Openscreen mdns discovery enabled";
+    if (mdns::should_use_openscreen()) {
         StartOpenScreenDiscovery();
+    } else {
+        StartAdbMdnsDiscovery();
     }
 }
 
@@ -142,11 +148,15 @@ bool adb_secure_connect_by_service_name(const std::string& instance_name) {
 }
 
 std::string mdns_check() {
-    if (!IsOpenScreenStarted()) {
+    if (!mdns::is_enabled()) {
         return "ERROR: mdns discovery disabled";
     }
 
-    return "mdns daemon version [Openscreen discovery 0.0.0]";
+    if (mdns::should_use_openscreen()) {
+        return "mdns daemon version [Openscreen discovery 0.0.0]";
+    }
+
+    return "mdns daemon version [adb discovery 0.0.0]";
 }
 
 std::string mdns_list_discovered_services() {

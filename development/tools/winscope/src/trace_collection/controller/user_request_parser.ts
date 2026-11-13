@@ -14,10 +14,11 @@
  * limitations under the License.
  */
 
-import {assertDefined} from 'common/assert';
-import {AdbFileIdentifier, TraceTarget} from 'trace_collection/trace_target';
-import {UiTraceTarget} from 'trace_collection/ui/ui_trace_target';
-import {UserRequest, UserRequestConfig} from 'trace_collection/user_request';
+import {assertDefined} from '@common/assert';
+import {AdbFileIdentifier, TraceTarget} from '@trace_collection/trace_target';
+import {UiTraceTarget} from '@trace_collection/ui_trace_target';
+import {UserRequest, UserRequestConfig} from '@trace_collection/user_request';
+
 import {PerfettoSessionModerator} from './perfetto_session_moderator';
 import {TracingSession} from './tracing_session';
 
@@ -157,12 +158,12 @@ export class UserRequestParser {
 
   private getSfTracePerfettoConfigDataSource(req: UserRequest): string {
     const flagsMap: {[key: string]: string} = {
-      'input': 'TRACE_FLAG_INPUT',
-      'composition': 'TRACE_FLAG_COMPOSITION',
-      'metadata': 'TRACE_FLAG_EXTRA',
-      'hwc': 'TRACE_FLAG_HWC',
-      'tracebuffers': 'TRACE_FLAG_BUFFERS',
-      'virtualdisplays': 'TRACE_FLAG_VIRTUAL_DISPLAYS',
+      input: 'TRACE_FLAG_INPUT',
+      composition: 'TRACE_FLAG_COMPOSITION',
+      metadata: 'TRACE_FLAG_EXTRA',
+      hwc: 'TRACE_FLAG_HWC',
+      tracebuffers: 'TRACE_FLAG_BUFFERS',
+      virtualdisplays: 'TRACE_FLAG_VIRTUAL_DISPLAYS',
     };
     const {flags} = new SfRequestConfigParser(flagsMap).parse(req.config);
 
@@ -182,12 +183,12 @@ export class UserRequestParser {
 
   private getSfTraceLegacyTarget(req: UserRequest): TraceTarget {
     const flagsMap: {[key: string]: number} = {
-      'input': 1 << 1,
-      'composition': 1 << 2,
-      'metadata': 1 << 3,
-      'hwc': 1 << 4,
-      'tracebuffers': 1 << 5,
-      'virtualdisplays': 1 << 6,
+      input: 1 << 1,
+      composition: 1 << 2,
+      metadata: 1 << 3,
+      hwc: 1 << 4,
+      tracebuffers: 1 << 5,
+      virtualdisplays: 1 << 6,
     };
     const {flags, selectedConfigs} = new SfRequestConfigParser(flagsMap).parse(
       req.config,
@@ -222,14 +223,14 @@ export class UserRequestParser {
     const selectedConfigs = new WmRequestConfigParser().parse(req.config);
 
     const logLevelMap: {[key: string]: string} = {
-      'verbose': 'LOG_LEVEL_VERBOSE',
-      'debug': 'LOG_LEVEL_DEBUG',
-      'critical': 'LOG_LEVEL_CRITICAL',
+      verbose: 'LOG_LEVEL_VERBOSE',
+      debug: 'LOG_LEVEL_DEBUG',
+      critical: 'LOG_LEVEL_CRITICAL',
     };
 
     const frequencyMap: {[key: string]: string} = {
-      'frame': 'LOG_FREQUENCY_FRAME',
-      'transaction': 'LOG_FREQUENCY_TRANSACTION',
+      frame: 'LOG_FREQUENCY_FRAME',
+      transaction: 'LOG_FREQUENCY_TRANSACTION',
     };
 
     const logLevel = logLevelMap[selectedConfigs['tracinglevel']];
@@ -330,6 +331,7 @@ export class UserRequestParser {
       group_overrides {
         group_name: "${group.name}"
         collect_stacktrace: ${group.stacktrace}
+        log_from: PROTOLOG_LEVEL_VERBOSE
       }`;
       })
       .join('');
@@ -571,7 +573,7 @@ export class UserRequestParser {
 
 class SfRequestConfigParser {
   private readonly configs: {[key: string]: string} = {
-    'sfbuffersize': '16000',
+    sfbuffersize: '16000',
   };
 
   constructor(private readonly flagsMap: object) {}
@@ -594,9 +596,9 @@ class SfRequestConfigParser {
 
 class WmRequestConfigParser {
   private readonly configs: {[key: string]: string} = {
-    'wmbuffersize': '16000',
-    'tracinglevel': 'debug',
-    'tracingtype': 'frame',
+    wmbuffersize: '16000',
+    tracinglevel: 'debug',
+    tracingtype: 'frame',
   };
 
   parse(req: UserRequestConfig[]) {

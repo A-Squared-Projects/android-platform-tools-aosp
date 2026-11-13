@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-import {WindowType, WindowTypePrefix} from 'trace/window_manager/window_type';
-import {AddOperation} from 'tree_node/add_operation';
-import {PropertyTreeNode} from 'tree_node/property_tree_node';
-import {DEFAULT_PROPERTY_TREE_NODE_FACTORY} from 'tree_node/property_tree_node_factory';
+import {WindowType, WindowTypePrefix} from '@trace/window_manager/window_type';
+import {AddOperation} from '@tree_node/add_operation';
+import {PropertyTreeNode} from '@tree_node/property_tree_node';
+import {DEFAULT_PROPERTY_TREE_NODE_FACTORY} from '@tree_node/property_tree_node_factory';
 
 /**
  * Adds a calculated `windowType` property to a PropertyTreeNode representing a
@@ -31,7 +31,9 @@ export class AddWindowType extends AddOperation<PropertyTreeNode> {
 
     if (windowState.name.startsWith(WindowTypePrefix.STARTING)) {
       windowType = WindowType.STARTING;
-    } else if (windowState.getChildByName('animatingExit')) {
+    } else if (
+      windowState.getChildByName('window')?.getChildByName('animatingExit')
+    ) {
       windowType = WindowType.EXITING;
     } else if (windowState.name.startsWith(WindowTypePrefix.DEBUGGER)) {
       windowType = WindowType.STARTING;

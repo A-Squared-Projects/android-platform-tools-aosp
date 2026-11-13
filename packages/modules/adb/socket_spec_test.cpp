@@ -59,6 +59,18 @@ TEST(socket_spec, parse_tcp_socket_spec_bad_ports_failure) {
     EXPECT_FALSE(parse_tcp_socket_spec("tcp:65536", &hostname, &port, &serial, &error));
 }
 
+// Ensure that parsing doesn't overread the string_view that's passed in.
+TEST(socket_spec, parse_tcp_socket_string_view_overread) {
+    std::string hostname, error, serial;
+    int port;
+
+    std::string_view partial_port("tcp:5037", 4);
+    EXPECT_FALSE(parse_tcp_socket_spec(partial_port, &hostname, &port, &serial, &error));
+
+    std::string_view partial_spec("tcp:localhost:1234", 4);
+    EXPECT_FALSE(parse_tcp_socket_spec(partial_spec, &hostname, &port, &serial, &error));
+}
+
 TEST(socket_spec, parse_tcp_socket_spec_host_and_port_success) {
     std::string hostname, error, serial;
     int port;
@@ -224,6 +236,12 @@ TEST(socket_spec, socket_spec_listen_connect_tcp) {
     EXPECT_NE(client_fd.get(), -1);
 }
 
+#ifdef __linux__
+bool vsockUnsupportedByKernel() {
+    return errno == ENODEV || errno == EPFNOSUPPORT || errno == EAFNOSUPPORT;
+}
+#endif
+
 TEST(socket_spec, socket_spec_listen_connect_vsock_success) {
 #ifndef __linux__
     GTEST_SKIP() << "vsock is only supported on Linux";
@@ -245,7 +263,10 @@ TEST(socket_spec, socket_spec_listen_connect_vsock_success) {
 #endif
     socklen_t addr_len = sizeof(addr);
     unique_fd check_fd(socket(AF_VSOCK, SOCK_STREAM, 0));
-    EXPECT_TRUE(check_fd.get() != -1);
+    if (check_fd.get() == -1 && vsockUnsupportedByKernel()) {
+        GTEST_SKIP() << "vsock not supported on this kernel";
+    }
+    EXPECT_NE(check_fd.get(), -1);
     if (!bind(check_fd.get(), reinterpret_cast<struct sockaddr*>(&addr), addr_len)) {
         check_fd.reset();
         // No existing vsock server on port 5555, so create one (testing on a physical device).
@@ -293,7 +314,7 @@ TEST(socket_spec, socket_spec_listen_connect_vsock_success) {
     // case since it's not possible on the device under test.
     bool connected = socket_spec_connect(&client_fd, "vsock:1", &port, &serial, &error);
     if (!connected) {
-      if (errno == ENODEV || errno == EPFNOSUPPORT || errno == EAFNOSUPPORT) {
+      if (vsockUnsupportedByKernel()) {
         GTEST_SKIP() << "vsock not supported on this kernel";
       }
       if (errno == ECONNREFUSED) {
@@ -333,6 +354,9 @@ TEST(socket_spec, socket_spec_listen_connect_vsock_failure) {
     unique_fd server_fd, client_fd;
 
     server_fd.reset(socket_spec_listen("vsock:1234", &error, &port));
+    if (server_fd.get() == -1 && vsockUnsupportedByKernel()) {
+        GTEST_SKIP() << "vsock not supported on this kernel";
+    }
     ASSERT_NE(server_fd.get(), -1) << error;
     ASSERT_EQ(port, 1234);
 

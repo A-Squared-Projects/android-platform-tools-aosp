@@ -47,16 +47,18 @@
 // the next batch (if any) within the QueryResultImpl.
 // This object is part of the API exposed to tracks / controllers.
 
-import protobuf from 'protobufjs/minimal';
+import {getLogger, Logger} from "@compat/logging";
+
 import {defer, Deferred} from './deferred';
 import {assertExists, assertFalse, assertTrue} from './logging';
+import {ProtoReader} from './proto_reader';
 import {utf8Decode} from './string_utils';
-import {duration, Time, time} from './time';
+import {duration, time, Time} from './time';
 
 export type SqlValue = string | number | bigint | null | Uint8Array;
 export type ColumnType = SqlValue;
 
-export const UNKNOWN: ColumnType = null;
+export const UNKNOWN: ColumnType | null = null;
 export const NUM = 0;
 export const STR = 'str';
 export const NUM_NULL: number | null = 1;
@@ -155,7 +157,7 @@ export class QueryError extends Error {
 
 // One row extracted from an SQL result:
 export interface Row {
-  [key: string]: ColumnType;
+  [key: string]: ColumnType | null;
 }
 
 // The methods that any iterator has to implement.
@@ -169,8 +171,8 @@ export interface RowIteratorBase {
   // Example usage:
   // for (const it = queryResult.iter({}); it.valid(); it.next()) {
   //   for (const columnName : queryResult.columns()) {
-  //      console.log(it.get(columnName));
-  get(columnName: string): ColumnType;
+  //      this.logger.debug(it.get(columnName));
+  get(columnName: string): ColumnType | null;
 }
 
 // A RowIterator is a type that has all the fields defined in the query spec
@@ -179,10 +181,10 @@ export interface RowIteratorBase {
 // const result = await engine.query("select name, surname, id from people;");
 // const iter = queryResult.iter({name: STR, surname: STR, id: NUM});
 // for (; iter.valid(); iter.next())
-//  console.log(iter.name, iter.surname);
+//  this.logger.debug(iter.name, iter.surname);
 export type RowIterator<T extends Row> = RowIteratorBase & T;
 
-function columnTypeToString(t: ColumnType): string {
+function columnTypeToString(t: ColumnType | null): string {
   switch (t) {
     case NUM:
       return 'NUM';
@@ -207,7 +209,7 @@ function columnTypeToString(t: ColumnType): string {
   }
 }
 
-function isCompatible(actual: CellType, expected: ColumnType): boolean {
+function isCompatible(actual: CellType, expected: ColumnType | null): boolean {
   switch (actual) {
     case CellType.CELL_NULL:
       return (
@@ -320,7 +322,7 @@ export interface QueryResult {
 }
 
 // Interface exposed to engine.ts to pump in the data as new row batches arrive.
-export interface WritableQueryResult extends QueryResult {
+export interface WritableQueryResult {
   // |resBytes| is a proto-encoded trace_processor.QueryResult message.
   //  The overall flow looks as follows:
   // - The user calls engine.query('select ...') and gets a QueryResult back.
@@ -333,6 +335,10 @@ export interface WritableQueryResult extends QueryResult {
   //   queryResult.waitAllRows()), this call will awake them (if this is the
   //   last batch).
   appendResultBatch(resBytes: Uint8Array): void;
+
+  // If true all rows have been fetched. If false, more appendResultBatch()
+  // calls are expected.
+  isComplete(): boolean;
 }
 
 // The actual implementation, which bridges together the reader side and the
@@ -349,7 +355,10 @@ class QueryResultImpl implements QueryResult, WritableQueryResult {
   private _statementWithOutputCount = 0;
   private _lastStatementSql = '';
 
-  constructor(errorInfo: QueryErrorInfo) {
+  constructor(
+    errorInfo: QueryErrorInfo,
+    private readonly logger: Logger = getLogger('QueryResultImpl'),
+  ) {
     this._errorInfo = errorInfo;
   }
 
@@ -447,7 +456,7 @@ class QueryResultImpl implements QueryResult, WritableQueryResult {
   // ProtoRingBuffer does the slice() for us (or passes through the buffer
   // coming from postMessage() (Wasm case) of fetch() (HTTP+RPC case).
   appendResultBatch(resBytes: Uint8Array) {
-    const reader = protobuf.Reader.create(resBytes);
+    const reader = ProtoReader.create(resBytes);
     assertTrue(reader.pos === 0);
     const columnNamesEmptyAtStartOfBatch = this.columnNames.length === 0;
     const columnNamesSet = new Set<string>();
@@ -516,7 +525,7 @@ class QueryResultImpl implements QueryResult, WritableQueryResult {
           break;
 
         default:
-          console.warn(`Unexpected QueryResult field ${tag >>> 3}`);
+          this.logger.trace(`Unexpected QueryResult field ${tag >>> 3}`);
           reader.skipType(tag & 7);
           break;
       } // switch (tag)
@@ -575,9 +584,12 @@ class ResultBatch {
   readonly stringCells: string[] = [];
 
   // batchBytes is a trace_processor.QueryResult.CellsBatch proto.
-  constructor(batchBytes: Uint8Array) {
+  constructor(
+    batchBytes: Uint8Array,
+    private readonly logger: Logger = getLogger('ResultBatch'),
+  ) {
     this.batchBytes = batchBytes;
-    const reader = protobuf.Reader.create(batchBytes);
+    const reader = ProtoReader.create(batchBytes);
     assertTrue(reader.pos === 0);
     const end = reader.len;
 
@@ -622,7 +634,7 @@ class ResultBatch {
           const f64Off = batchBytes.byteOffset + reader.pos;
           if (f64Off % 8 === 0) {
             this.float64Cells = new Float64Array(
-              batchBytes.buffer,
+              batchBytes.buffer as ArrayBuffer,
               f64Off,
               f64Words,
             );
@@ -630,7 +642,7 @@ class ResultBatch {
             // When using the production code in trace_processor's rpc.cc, the
             // float64 should be 8-bytes aligned. The slow-path case is only for
             // tests.
-            const slice = batchBytes.buffer.slice(f64Off, f64Off + f64Len);
+            const slice = (batchBytes.buffer as ArrayBuffer).slice(f64Off, f64Off + f64Len);
             this.float64Cells = new Float64Array(slice);
           }
           reader.pos += f64Len;
@@ -665,7 +677,7 @@ class ResultBatch {
           break;
 
         default:
-          console.warn(`Unexpected QueryResult.CellsBatch field ${tag >>> 3}`);
+          this.logger.trace(`Unexpected QueryResult.CellsBatch field ${tag >>> 3}`);
           reader.skipType(tag & 7);
           break;
       } // switch(tag)
@@ -697,12 +709,12 @@ class RowIteratorImpl implements RowIteratorBase {
   // this.resultObj.batch[this.batchIdx].float64Cells.
   // These are re-set every time tryMoveToNextBatch() is called (and succeeds).
   private batchIdx = -1; // The batch index within |result.batches[]|.
-  private batchBytes = new Uint8Array();
+  private batchBytes: Uint8Array = new Uint8Array();
   private columnNames: string[] = [];
   private numColumns = 0;
   private cellTypesEnd = -1; // -1 so the 1st next() hits tryMoveToNextBatch().
   private float64Cells = new Float64Array();
-  private varIntReader = protobuf.Reader.create(this.batchBytes);
+  private varIntReader = ProtoReader.create(this.batchBytes);
   private blobCells: Uint8Array[] = [];
   private stringCells: string[] = [];
 
@@ -730,7 +742,7 @@ class RowIteratorImpl implements RowIteratorBase {
     return new QueryError(message, this.resultObj.errorInfo);
   }
 
-  get(columnName: string): ColumnType {
+  get(columnName: string): ColumnType | null {
     const res = this.rowData[columnName];
     if (res === undefined) {
       throw this.makeError(
@@ -794,7 +806,7 @@ class RowIteratorImpl implements RowIteratorBase {
               this.varIntReader.pos,
             );
             rowData[colName] = value;
-            this.varIntReader.skip(); // Skips a varint
+            this.varIntReader.skipVarint(); // Skips a varint
           }
           break;
 
@@ -835,7 +847,7 @@ class RowIteratorImpl implements RowIteratorBase {
     this.float64Cells = batch.float64Cells;
     this.blobCells = batch.blobCells;
     this.stringCells = batch.stringCells;
-    this.varIntReader = protobuf.Reader.create(batch.batchBytes);
+    this.varIntReader = ProtoReader.create(batch.batchBytes);
     this.varIntReader.pos = batch.varintOff;
     this.varIntReader.len = batch.varintOff + batch.varintLen;
     this.nextFloat64Cell = 0;
@@ -982,6 +994,7 @@ class WaitableQueryResultImpl
 
   // PromiseLike<QueryResult> implementation.
 
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   then(onfulfilled: any, onrejected: any): any {
     assertFalse(this.thenCalled);
@@ -989,10 +1002,12 @@ class WaitableQueryResultImpl
     return this.impl.ensureAllRowsPromise().then(onfulfilled, onrejected);
   }
 
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   catch(error: any): any {
     return this.impl.ensureAllRowsPromise().catch(error);
   }
+
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   finally(callback: () => void): any {
@@ -1014,7 +1029,7 @@ export function createQueryResult(
 
 // Throws if the value cannot be reasonably converted to a bigint.
 // Assumes value is in native time units.
-export function timeFromSql(value: ColumnType): time {
+export function timeFromSql(value: ColumnType | null): time {
   if (typeof value === 'bigint') {
     return Time.fromRaw(value);
   } else if (typeof value === 'number') {
@@ -1028,7 +1043,7 @@ export function timeFromSql(value: ColumnType): time {
 
 // Throws if the value cannot be reasonably converted to a bigint.
 // Assumes value is in nanoseconds.
-export function durationFromSql(value: ColumnType): duration {
+export function durationFromSql(value: ColumnType | null): duration {
   if (typeof value === 'bigint') {
     return value;
   } else if (typeof value === 'number') {

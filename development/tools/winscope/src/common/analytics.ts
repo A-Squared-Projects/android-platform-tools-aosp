@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import {globalConfig} from './global_config';
+import {globalConfig} from '@compat/global_config';
 
 /**
  * Logs an analytics event.
@@ -28,7 +28,7 @@ export function analyticsLogEvent(
   eventName: Gtag.EventNames | (string & {}),
   eventParams?: Gtag.ControlParams | Gtag.EventParams | Gtag.CustomParams,
 ) {
-  if (globalConfig.MODE === 'PROD') {
+  if (globalConfig.isProdMode()) {
     gtag('event', eventName, eventParams);
   }
 }

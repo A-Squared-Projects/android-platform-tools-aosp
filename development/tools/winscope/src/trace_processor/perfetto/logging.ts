@@ -12,10 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {
-  SCM_REVISION,
-  VERSION,
-} from '../../../deps_build/trace_processor/ui/tsc/gen/perfetto_version';
+import {getLogger} from "@compat/logging";
 
 export type ErrorHandler = (err: string) => void;
 
@@ -44,7 +41,7 @@ export function setErrorHandler(handler: ErrorHandler) {
 
 export function reportError(err: ErrorEvent | PromiseRejectionEvent | {}) {
   let errLog = '';
-  let errorObj = undefined;
+  let errorObj;
 
   if (err instanceof ErrorEvent) {
     errLog = err.message;
@@ -61,10 +58,9 @@ export function reportError(err: ErrorEvent | PromiseRejectionEvent | {}) {
     errLog += errStack !== undefined ? errStack : JSON.stringify(errorObj);
   }
   errLog += '\n\n';
-  errLog += `${VERSION} ${SCM_REVISION}\n`;
   errLog += `UA: ${navigator.userAgent}\n`;
 
-  console.error(errLog, err);
+  getLogger('logging').error(errLog, err);
   errorHandler(errLog);
 }
 

@@ -16,10 +16,11 @@ import { LineGraphVisualization } from './line-graph-visualization';
 import * as d3 from 'd3';
 import { NgIf } from '@angular/common';
 import { MatIconModule } from '@angular/material/icon';
+import { MatTooltipModule } from '@angular/material/tooltip';
 
 @Component({
   selector: 'app-graph',
-  imports: [NgIf, MatIconModule],
+  imports: [NgIf, MatIconModule, MatTooltipModule],
   templateUrl: './graph.component.html',
   styleUrl: './graph.component.css',
 })
@@ -158,6 +159,9 @@ export class GraphComponent implements AfterViewInit, OnChanges {
     const name = actualFeature?.name;
     const type = actualFeature?.type;
 
+    const actualDataPoints = actualFeature?.data_points ?? [];
+    const expectedDataPoints = expectedFeature?.data_points ?? [];
+
     let numericValues: number[] = [];
     if (actualFeature?.data_points) {
       numericValues = numericValues.concat(actualFeature.data_points.filter(
@@ -197,5 +201,41 @@ export class GraphComponent implements AfterViewInit, OnChanges {
       .attr('width', this.width)
       .attr('height', this.height);
     this.visualization.render(this.svg, this.data, this.width, this.height);
+  }
+
+  downloadGraph(): void {
+    if (!this.chartContainer || !this.chartContainer.nativeElement) return;
+
+    const svgElement = this.chartContainer.nativeElement.querySelector('svg');
+    if (!svgElement) return;
+
+    const serializer = new XMLSerializer();
+    const svgString = serializer.serializeToString(svgElement);
+    const canvas = document.createElement('canvas');
+    canvas.width = this.width;
+    canvas.height = this.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const img = new Image();
+    const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+
+    img.onload = () => {
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+
+      const pngUrl = canvas.toDataURL('image/png');
+      const downloadLink = document.createElement('a');
+      downloadLink.href = pngUrl;
+      downloadLink.download = `${this.featureName || 'graph'}.png`;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+    };
+
+    img.src = url;
   }
 }

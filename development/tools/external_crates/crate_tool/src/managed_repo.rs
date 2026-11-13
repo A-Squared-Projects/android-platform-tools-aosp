@@ -14,10 +14,11 @@
 
 use std::{
     cell::OnceCell,
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap},
     env,
     fs::{create_dir_all, read_dir, write},
     path::Path,
+    process::Command,
 };
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -31,6 +32,7 @@ use itertools::Itertools;
 use license_checker::find_licenses;
 use log::{debug, error};
 use name_and_version::{NameAndVersion, NameAndVersionRef, NamedAndVersioned};
+use regex::Regex;
 use repo_config::RepoConfig;
 use rooted_path::RootedPath;
 use semver::{Version, VersionReq};
@@ -334,7 +336,7 @@ We apologize for the inconvenience."#,
                 krate.name()
             );
         } else {
-            self.regenerate([&crate_name].iter(), true)?;
+            self.regenerate([&crate_name].iter(), true, false)?;
             println!(
                 "Please edit {} and run 'regenerate' for this crate",
                 managed_dir.rel().join("cargo_embargo.json").display()
@@ -349,13 +351,14 @@ We apologize for the inconvenience."#,
         &self,
         crates: impl Iterator<Item = T>,
         run_cargo_embargo: bool,
+        update_imports: bool,
     ) -> Result<()> {
         let pseudo_crate = self.pseudo_crate().vendor()?;
         for crate_name in crates {
             println!("Regenerating {}", crate_name.as_ref());
             let mc = self.managed_crate_for(crate_name.as_ref())?;
             // TODO: Don't give up if there's a failure.
-            mc.regenerate(&pseudo_crate, run_cargo_embargo)?;
+            mc.regenerate(&pseudo_crate, run_cargo_embargo, update_imports)?;
         }
 
         pseudo_crate.regenerate_crate_list()?;
@@ -429,6 +432,8 @@ We apologize for the inconvenience."#,
     pub fn updatable_crates(&self) -> Result<()> {
         let mut cc = self.new_cc();
         cc.add_from(self.managed_dir().rel())?;
+
+        self.pseudo_crate().cargo_update()?;
 
         for krate in cc.values() {
             let cio_crate = self.crates_io.get_crate(krate.name())?;
@@ -560,12 +565,15 @@ We apologize for the inconvenience."#,
         &self,
         consider_patched_crates: bool,
         semver_compatibility: SemverCompatibilityRule,
+        dep_semver_compatibility: SemverCompatibilityRule,
         json: bool,
     ) -> Result<()> {
         let mut suggestions = UpdateSuggestions::default();
         let mut managed_crates = self.new_cc();
         managed_crates.add_from(self.managed_dir().rel())?;
         let legacy_crates = self.legacy_crates()?;
+
+        self.pseudo_crate().cargo_update()?;
 
         for krate in managed_crates.values() {
             debug!("Checking for updates to {}", krate.name());
@@ -625,7 +633,7 @@ We apologize for the inconvenience."#,
                     for (_, dep_crate) in cc.get_versions(dep.crate_name()) {
                         if req.matches_with_compatibility_rule(
                             dep_crate.version(),
-                            SemverCompatibilityRule::Loose,
+                            dep_semver_compatibility,
                         ) {
                             return false;
                         }
@@ -656,12 +664,23 @@ We apologize for the inconvenience."#,
         Ok(())
     }
     /// Update a crate to a newer version.
-    pub fn update(&self, crate_name: impl AsRef<str>, version: impl AsRef<str>) -> Result<()> {
+    pub fn update(
+        &self,
+        crate_name: impl AsRef<str>,
+        version: impl AsRef<str>,
+        allow_older: bool,
+    ) -> Result<()> {
         let crate_name = crate_name.as_ref();
         let version = Version::parse(version.as_ref())?;
 
         let pseudo_crate = self.pseudo_crate();
         let managed_crate = self.managed_crate_for(crate_name)?;
+        let android_version = managed_crate.android_version();
+
+        if !allow_older && *android_version >= version {
+            return Err(anyhow!("The requested version {version} of {crate_name} is not younger than the current version {android_version}. If this is intentional, please pass the flag --allow-older."));
+        }
+
         let mut crate_updates = vec![NameAndVersion::new(crate_name.to_string(), version.clone())];
 
         let cio_crate = self.crates_io.get_crate(crate_name)?;
@@ -705,7 +724,7 @@ We apologize for the inconvenience."#,
         for nv in &crate_updates {
             pseudo_crate.cargo_add(nv)?;
         }
-        self.regenerate(crate_updates.iter().map(|nv| nv.name()), true)?;
+        self.regenerate(crate_updates.iter().map(|nv| nv.name()), true, false)?;
         Ok(())
     }
     /// Initialize a new managed repository by creating the necessary directories,
@@ -725,6 +744,34 @@ We apologize for the inconvenience."#,
         for krate in crates {
             println!("Verifying checksums for {}", krate.as_ref());
             checksum::verify(self.managed_dir_for(krate.as_ref()).abs())?;
+        }
+        Ok(())
+    }
+
+    /// Count the number of commits made with Updates
+    pub fn count_updates(&self) -> Result<()> {
+        let output = Command::new("git")
+            .args(["log", "--pretty=format:%ad:%s", "--date=format:%m+%y"])
+            .current_dir(self.path.abs())
+            .output()?
+            .success_or_error()?;
+        let result = String::from_utf8(output.stdout)?;
+        let mut updates: HashMap<String, i32> = HashMap::new();
+        let re_update = Regex::new(r"[uU]pdate|[Uu]pgrade").unwrap();
+        let re_badwords = Regex::new(r"Merge|METADATA|[Rr]evert|cargo_embargo").unwrap();
+        for line in result.lines() {
+            let (date, desc) =
+                line.split_once(':').ok_or(anyhow!("failed to parse git log output"))?;
+            let (month, year) =
+                date.split_once('+').ok_or(anyhow!("failed to parse git log date output"))?;
+            let quarter = (month.trim().parse::<i32>()? - 1) / 3 + 1;
+            if re_update.is_match(desc) & !re_badwords.is_match(desc) {
+                let key = format!("Key_{year}_Q{quarter}");
+                *updates.entry(key).or_insert(1) += 1;
+            }
+        }
+        for (key, value) in updates {
+            println!("{:?}, {:?}", key, value);
         }
         Ok(())
     }

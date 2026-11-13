@@ -14,21 +14,14 @@
  * limitations under the License.
  */
 
-import {assertUnreachable} from 'common/assert';
-import {
-  HttpRequest,
-  HttpRequestHeaderType,
-  HttpRequestStatus,
-  HttpResponse,
-} from 'common/http_request';
-import {
-  AdbResponse,
-  OnRequestSuccessCallback,
-} from 'trace_collection/adb/adb_host_connection';
-import {ConnectionState} from 'trace_collection/connection_state';
+import {assertUnreachable} from '@common/assert';
+import {HttpRequest, HttpRequestHeaderType, HttpRequestStatus, HttpResponse,} from '@common/http_request';
+import {AdbResponse, OnRequestSuccessCallback,} from '@trace_collection/adb_host_connection';
+import {ConnectionState} from '@trace_collection/connection_state';
 
 export const WINSCOPE_PROXY_URL = 'http://localhost:5544';
-export const VERSION = '6.0.1';
+// Keep in sync with VERSION in src/adb/winscope_proxy.py
+export const VERSION = '6.0.2';
 
 type StateChangeCallbackType = (
   newState: ConnectionState,
@@ -91,7 +84,7 @@ async function processProxyResponse(
   }
   try {
     return `${JSON.parse(response.body)}`;
-  } catch (e) {
+  } catch {
     return typeof response.body === 'string' ? response.body : '';
   }
 }

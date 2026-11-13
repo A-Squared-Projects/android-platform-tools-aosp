@@ -24,4 +24,11 @@ void register_adb_tcp_service(int tcp_port);
 void register_adb_tls_service(int tls_port);
 void unregister_adb_tls_service();
 
+struct AdbdAuthContext;
+// Pass the adbd_auth context so mdns operation can be requested from framework
+void adbd_mdns_init(AdbdAuthContext* ctx);
+
+// Callback for adbd_auth when the framework connects
+void on_framework_connected();
+
 #endif  // _DAEMON_MDNS_H_

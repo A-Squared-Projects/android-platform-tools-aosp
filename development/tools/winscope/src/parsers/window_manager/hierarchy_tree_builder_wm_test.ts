@@ -14,12 +14,14 @@
  * limitations under the License.
  */
 
-import {PropertyTreeBuilder} from 'test/unit/property_tree_builder';
-import {treeNodeEqualityTester} from 'test/unit/ui_tree_node_utils';
-import {HierarchyTreeNode} from 'tree_node/hierarchy_tree_node';
-import {OperationChain} from 'tree_node/operation_chain';
-import {PropertiesProvider} from 'tree_node/properties_provider';
-import {PropertyTreeNode} from 'tree_node/property_tree_node';
+import {HierarchyTreeNode} from '@tree_node/hierarchy_tree_node';
+import {OperationChain} from '@tree_node/operation_chain';
+import {PropertiesProvider} from '@tree_node/properties_provider';
+import {PropertyTreeNode} from '@tree_node/property_tree_node';
+import {PropertyTreeBuilder} from '@tree_node/testing/property_tree_builder';
+import {treeNodeEqualityTester} from '@tree_node/testing/tree_node_test_helpers';
+
+import {ContainerType} from './container_type';
 import {HierarchyTreeBuilderWm} from './hierarchy_tree_builder_wm';
 
 describe('HierarchyTreeBuilderWm', () => {
@@ -38,6 +40,7 @@ describe('HierarchyTreeBuilderWm', () => {
     entry = new PropertiesProvider(
       entryPropertiesTree,
       async () => entryPropertiesTree,
+      undefined,
       OperationChain.emptyChain<PropertyTreeNode>(),
       OperationChain.emptyChain<PropertyTreeNode>(),
       OperationChain.emptyChain<PropertyTreeNode>(),
@@ -63,6 +66,7 @@ describe('HierarchyTreeBuilderWm', () => {
       new PropertiesProvider(
         entryPropertiesTree,
         async () => entryPropertiesTree,
+        undefined,
         OperationChain.emptyChain<PropertyTreeNode>(),
         OperationChain.emptyChain<PropertyTreeNode>(),
         OperationChain.emptyChain<PropertyTreeNode>(),
@@ -78,15 +82,16 @@ describe('HierarchyTreeBuilderWm', () => {
       .setName('1234567 container1')
       .setIsRoot(true)
       .setChildren([
-        {name: 'id', value: 1},
-        {name: 'token', value: '1234567'},
-        {name: 'children', children: [{name: '0', value: '7654321'}]},
+        {name: 'token', value: 1234567},
+        {name: 'parentToken', value: undefined},
+        {name: 'containerType', value: ContainerType.RootWindowContainer},
       ])
       .build();
 
     const container1Provider = new PropertiesProvider(
       container1Props,
       async () => container1Props,
+      undefined,
       OperationChain.emptyChain<PropertyTreeNode>(),
       OperationChain.emptyChain<PropertyTreeNode>(),
       OperationChain.emptyChain<PropertyTreeNode>(),
@@ -97,15 +102,16 @@ describe('HierarchyTreeBuilderWm', () => {
       .setName('7654321 container2')
       .setIsRoot(true)
       .setChildren([
-        {name: 'id', value: 2},
-        {name: 'token', value: '7654321'},
-        {name: 'children', value: []},
+        {name: 'token', value: 7654321},
+        {name: 'parentToken', value: 1234567},
+        {name: 'containerType', value: ContainerType.DisplayContent},
       ])
       .build();
 
     const container2Provider = new PropertiesProvider(
       container2Props,
       async () => container2Props,
+      undefined,
       OperationChain.emptyChain<PropertyTreeNode>(),
       OperationChain.emptyChain<PropertyTreeNode>(),
       OperationChain.emptyChain<PropertyTreeNode>(),
@@ -122,6 +128,7 @@ describe('HierarchyTreeBuilderWm', () => {
       new PropertiesProvider(
         entryPropertiesTree,
         async () => entryPropertiesTree,
+        undefined,
         OperationChain.emptyChain<PropertyTreeNode>(),
         OperationChain.emptyChain<PropertyTreeNode>(),
         OperationChain.emptyChain<PropertyTreeNode>(),
@@ -144,15 +151,16 @@ describe('HierarchyTreeBuilderWm', () => {
       .setName('1234567 container1')
       .setIsRoot(true)
       .setChildren([
-        {name: 'id', value: 1},
-        {name: 'token', value: '1234567'},
-        {name: 'children', children: [{name: '0', value: '7654321'}]},
+        {name: 'token', value: 1234567},
+        {name: 'parentToken', value: undefined},
+        {name: 'containerType', value: ContainerType.RootWindowContainer},
       ])
       .build();
 
     const container1Provider = new PropertiesProvider(
       container1Props,
       async () => container1Props,
+      undefined,
       OperationChain.emptyChain<PropertyTreeNode>(),
       OperationChain.emptyChain<PropertyTreeNode>(),
       OperationChain.emptyChain<PropertyTreeNode>(),
@@ -163,15 +171,16 @@ describe('HierarchyTreeBuilderWm', () => {
       .setName('7654321 container2')
       .setIsRoot(true)
       .setChildren([
-        {name: 'id', value: 2},
-        {name: 'token', value: '7654321'},
-        {name: 'children', children: [{name: '0', value: '4646464'}]},
+        {name: 'token', value: 7654321},
+        {name: 'parentToken', value: 1234567},
+        {name: 'containerType', value: ContainerType.DisplayContent},
       ])
       .build();
 
     const container2Provider = new PropertiesProvider(
       container2Props,
       async () => container2Props,
+      undefined,
       OperationChain.emptyChain<PropertyTreeNode>(),
       OperationChain.emptyChain<PropertyTreeNode>(),
       OperationChain.emptyChain<PropertyTreeNode>(),
@@ -182,15 +191,16 @@ describe('HierarchyTreeBuilderWm', () => {
       .setName('4646464 container3')
       .setIsRoot(true)
       .setChildren([
-        {name: 'id', value: 3},
-        {name: 'token', value: '4646464'},
-        {name: 'children', value: []},
+        {name: 'token', value: 4646464},
+        {name: 'parentToken', value: 7654321},
+        {name: 'containerType', value: ContainerType.DisplayArea},
       ])
       .build();
 
     const container3Provider = new PropertiesProvider(
       container3Props,
       async () => container3Props,
+      undefined,
       OperationChain.emptyChain<PropertyTreeNode>(),
       OperationChain.emptyChain<PropertyTreeNode>(),
       OperationChain.emptyChain<PropertyTreeNode>(),
@@ -207,6 +217,7 @@ describe('HierarchyTreeBuilderWm', () => {
       new PropertiesProvider(
         entryPropertiesTree,
         async () => entryPropertiesTree,
+        undefined,
         OperationChain.emptyChain<PropertyTreeNode>(),
         OperationChain.emptyChain<PropertyTreeNode>(),
         OperationChain.emptyChain<PropertyTreeNode>(),

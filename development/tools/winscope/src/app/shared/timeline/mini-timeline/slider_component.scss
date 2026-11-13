@@ -1,0 +1,74 @@
+/*
+ * Copyright (C) 2025 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#timeline-slider-box {
+  position: relative;
+  margin-bottom: 5px;
+}
+
+#timeline-slider-box,
+.slider {
+  height: 10px;
+}
+
+.line {
+  height: 3px;
+  position: absolute;
+  margin: auto;
+  top: 0;
+  bottom: 0;
+  margin: auto 0;
+}
+
+.background.line {
+  width: 100%;
+  background: var(--guide-bar-color);
+}
+
+.selection.line {
+  background: var(--slider-border-color);
+}
+
+.slider {
+  display: flex;
+  justify-content: space-between;
+  cursor: grab;
+  position: absolute;
+}
+
+.handle {
+  flex-grow: 1;
+  background: var(--slider-background-color);
+  cursor: grab;
+}
+
+.cropper {
+  width: 5px;
+  background: var(--slider-border-color);
+}
+
+.cropper.left,
+.cropper.right {
+  cursor: ew-resize;
+}
+
+.cursor {
+  width: 2px;
+  height: 100%;
+  position: absolute;
+  pointer-events: none;
+  background: var(--active-pointer-color);
+}

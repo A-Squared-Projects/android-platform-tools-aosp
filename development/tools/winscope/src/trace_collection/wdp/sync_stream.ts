@@ -14,8 +14,10 @@
  * limitations under the License.
  */
 
-import {ArrayBufferBuilder, BufferToken, ResizableBuffer} from 'common/buffer';
-import {utf8Decode} from 'common/string_helpers';
+import {ArrayBufferBuilder, BufferToken, ResizableBuffer} from '@common/buffer';
+import {utf8Decode} from '@common/string_helpers';
+import {getLogger, Logger} from '@compat/logging';
+
 import {AdbWebSocketStream} from './adb_websocket_stream';
 import {ErrorListener} from './websocket_stream';
 
@@ -30,8 +32,9 @@ export class SyncStream extends AdbWebSocketStream {
     sock: WebSocket,
     deviceSerialNumber: string,
     errorListener: ErrorListener,
+    logger: Logger = getLogger('SyncStream'),
   ) {
-    super(sock, deviceSerialNumber, 'sync', errorListener);
+    super(sock, deviceSerialNumber, 'sync', errorListener, logger);
   }
 
   async pullFile(filepath: string): Promise<Uint8Array> {
@@ -58,7 +61,7 @@ export class SyncStream extends AdbWebSocketStream {
       return;
     }
     if (data.length < 8) {
-      console.error('Remaining data too small', data);
+      this.logger.error('Remaining data too small', data);
       this.close();
       return;
     }
@@ -71,7 +74,7 @@ export class SyncStream extends AdbWebSocketStream {
       return;
     }
     if (startId !== SyncStream.DATA_ID) {
-      console.error("expected 'DATA' id, received", startId);
+      this.logger.error("expected 'DATA' id, received", startId);
       this.close();
       return;
     }

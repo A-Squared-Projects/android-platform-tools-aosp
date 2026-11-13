@@ -12,11 +12,13 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { FormsModule } from '@angular/forms';
 import { GoldensService } from '../service/goldens.service';
-import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatButtonModule } from '@angular/material/button';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatCheckboxModule } from '@angular/material/checkbox';
 import { TestModes } from '../model/test_mode';
+import { GoldenActionService } from '../service/golden-action.service';
+import { GoldenStatus, TestResult } from '../model/enums';
 
 @Component({
   selector: 'app-test-list',
@@ -30,6 +32,7 @@ import { TestModes } from '../model/test_mode';
     MatButtonModule,
     MatProgressSpinnerModule,
     MatTooltipModule,
+    MatCheckboxModule
   ],
   templateUrl: './test-list.component.html',
   styleUrl: './test-list.component.css',
@@ -49,31 +52,50 @@ export class TestListComponent implements OnChanges {
   selectedGoldenIds: Set<string> = new Set<string>();
   isUpdating: boolean = false;
 
+  // Expose Enums to template
+  public GoldenStatus = GoldenStatus;
+  public TestResult = TestResult;
+
   constructor(
     private goldenService: GoldensService,
-    private snackBar: MatSnackBar,
+    private goldenActionService: GoldenActionService,
   ) { }
 
 
   filterStatus: 'all' | 'pass' | 'fail' = 'all';
+  searchTerm: string = '';
+  filteredPresubmitTests: PresubmitTest[] = [];
 
   totalTestCount = 0;
   passingTestCount = 0;
   failingTestCount = 0;
 
   ngOnChanges(changes: SimpleChanges): void {
+    let shouldUpdateGoldens = false;
     if (changes['goldens']) {
       this.totalTestCount = this.goldens.length;
       this.failingTestCount = this.goldens.filter(
-        (golden) => golden.result !== 'PASSED'
+        (golden) => golden.result !== TestResult.Passed
       ).length;
       this.passingTestCount = this.totalTestCount - this.failingTestCount;
-      this.updateAndGroupGoldens()
+      shouldUpdateGoldens = true;
+    }
+
+    if (shouldUpdateGoldens || changes['presubmitTests']) {
+      console.log('TestListComponent: Updating goldens. Mode:', this.testMode, 'Count:', this.goldens.length);
+      this.updateAndGroupGoldens();
+      this.filterPresubmitTests();
     }
   }
 
   onFilterStatusChange(): void {
     this.updateAndGroupGoldens();
+    this.filterPresubmitTests();;
+  }
+
+  onSearchTermChange(): void {
+    this.updateAndGroupGoldens();
+    this.filterPresubmitTests();
   }
 
   triggerRefresh(clear: boolean): void {
@@ -122,16 +144,26 @@ export class TestListComponent implements OnChanges {
     if (this.filterStatus === 'all') {
       filteredGoldens = this.goldens;
     } else if (this.filterStatus === 'pass') {
-      filteredGoldens = this.goldens.filter((golden) => golden.result === 'PASSED');
+      filteredGoldens = this.goldens.filter((golden) => golden.result === TestResult.Passed);
     } else {
-      filteredGoldens = this.goldens.filter((golden) => golden.result !== 'PASSED');
+      filteredGoldens = this.goldens.filter((golden) => golden.result !== TestResult.Passed);
+    }
+
+    if (this.searchTerm && this.searchTerm.trim() !== '') {
+      const lowerSearchTerm = this.searchTerm.toLowerCase();
+      filteredGoldens = filteredGoldens.filter(golden =>
+        golden.testMethodName.toLowerCase().includes(lowerSearchTerm) ||
+        golden.testClassName.toLowerCase().includes(lowerSearchTerm)
+      );
     }
     this.sortGoldensBasedOnFetchTime(filteredGoldens)
     this.filteredGoldens = this.groupGoldensByTime(filteredGoldens);
+    console.log('TestListComponent: Filtered goldens:', this.filteredGoldens);
   }
 
   ngOnInit(): void {
     this.updateAndGroupGoldens();
+    this.filterPresubmitTests();;
   }
 
   private sortGoldensBasedOnFetchTime(goldens: MotionGolden[]): void {
@@ -159,24 +191,28 @@ export class TestListComponent implements OnChanges {
   }
 
   getResultClass(golden: MotionGolden): string {
-    const result = golden.result.trim().toUpperCase();
-    if (result === 'MISSING_REFERENCE') {
-      return 'border-l-4 border-yellow-500';
-    } else if (result === 'FAILED') {
-      return 'border-l-4 border-red-500';
-    } else if (result === 'PASSED') {
-      return 'border-l-4 border-green-500';
-    } else {
-      return '';
+    switch (golden.result) {
+      case TestResult.MissingReference:
+        return 'border-l-4 border-yellow-500';
+      case TestResult.Failed:
+        return 'border-l-4 border-red-500';
+      case TestResult.Passed:
+        return 'border-l-4 border-green-500';
+      default:
+        return '';
     }
+  }
+
+  isGoldenOpened(golden: MotionGolden): boolean {
+    return this.selectedGolden?.testMethodName == golden.testMethodName;
   }
 
   isGoldenSelected(golden: MotionGolden): boolean {
     return this.selectedGoldenIds.has(golden.id);
   }
 
-  toggleGoldenSelection(golden: MotionGolden, event: Event): void {
-    const isChecked = (event.target as HTMLInputElement).checked;
+  toggleGoldenSelection(golden: MotionGolden, event: any): void {
+    const isChecked = event.checked;
     if (isChecked) {
       if (!this.isGoldenSelected(golden)) {
         this.selectedGoldenIds.add(golden.id);
@@ -195,8 +231,8 @@ export class TestListComponent implements OnChanges {
     return visibleGoldens.every(golden => this.isGoldenSelected(golden));
   }
 
-  toggleAllBoxesSelection(event: Event): void {
-    const isChecked = (event.target as HTMLInputElement).checked;
+  toggleAllBoxesSelection(event: any): void {
+    const isChecked = event.target.checked;
     if (isChecked) {
       this.selectedGoldenIds = new Set(this.filteredGoldens.flatMap((item) => item.value.map((golden) => golden.id)));
     } else {
@@ -205,66 +241,14 @@ export class TestListComponent implements OnChanges {
   }
 
   updateSelectedGoldens(): void {
-    if (this.selectedGoldenIds.size === 0) {
-      this.snackBar.open(
-        'Please select at least one option!',
-        'Dismiss',
-        {
-          duration: 3000,
-          horizontalPosition: 'center',
-          verticalPosition: 'top',
-          panelClass: ['snackbar-error-message']
-        }
-      );
+    const goldensToUpdate = this.goldens.filter(g => this.selectedGoldenIds.has(g.id));
+    if (goldensToUpdate.length === 0) {
+      this.goldenActionService.updateSelectedGoldens([]).subscribe();
       return;
     }
+
     this.isUpdating = true;
-    const idsToUpdate = [...this.selectedGoldenIds];
-    idsToUpdate.forEach(id => {
-      const golden = this.goldens.find(g => g.id === id);
-      if (golden) {
-        golden.status = 'UPDATING';
-      }
-    });
-    this.goldenService.updateSelectedGoldens(idsToUpdate).subscribe({
-      next: (rawResults: Record<string, string>) => {
-        const { passedCount, failedCount } = this.updateGoldenStatuses(rawResults);
-        const totalCount = passedCount + failedCount;
-        if (failedCount > 0) {
-          let message = `${passedCount} golden(s) updated successfully.`;
-          message += ` ${failedCount} golden(s) failed to update.`;
-          this.snackBar.open(message, 'Close', {
-            duration: 8000,
-            panelClass: 'warning-snackbar',
-          });
-        } else {
-          this.snackBar.open(
-            `${totalCount} golden(s) updated successfully!`,
-            'Close',
-            {
-              duration: 3000,
-              panelClass: 'success-snackbar',
-            }
-          );
-        }
-      },
-      error: (err) => {
-        console.error('Error updating goldens:', err);
-        idsToUpdate.forEach(id => {
-          const golden = this.goldens.find(g => g.id === id);
-          if (golden) {
-            golden.status = 'IDLE';
-          }
-        });
-        this.snackBar.open(
-          'Error updating golden. See console for details.',
-          'Close',
-          {
-            duration: 5000,
-            panelClass: 'error-snackbar',
-          }
-        );
-      },
+    this.goldenActionService.updateSelectedGoldens(goldensToUpdate).subscribe({
       complete: () => {
         this.isUpdating = false;
         this.selectedGoldenIds.clear();
@@ -274,70 +258,10 @@ export class TestListComponent implements OnChanges {
     });
   }
 
-  private updateGoldenStatuses(results: Record<string, string>): { passedCount: number, failedCount: number } {
-    let passedCount = 0;
-    let failedCount = 0;
-    Object.entries(results).forEach(([goldenId, statusString]) => {
-      const golden = this.goldens.find(g => g.id === goldenId);
-      if (golden) {
-        if (statusString == 'Updated') {
-          golden.status = 'PASSED_UPDATE';
-          golden.error = undefined;
-          passedCount++;
-        }
-        else {
-          golden.status = 'FAILED_UPDATE';
-          const match = statusString.match(/Failed with exception: (.+)/);
-          golden.error = match ? match[1] : statusString;
-          failedCount++
-        }
-      }
-    });
-    return { passedCount, failedCount };
-  }
-
   retryGolden(goldenId: string): void {
     const goldenToRetry = this.goldens.find(g => g.id === goldenId);
     if (goldenToRetry) {
-      goldenToRetry.status = 'UPDATING';
-      this.goldenService.updateGolden(goldenToRetry).subscribe({
-        next: (rawResult: Record<string, string>) => {
-          const statusString = Object.values(rawResult)[0];
-          if (goldenToRetry) {
-            if (statusString == 'Updated') {
-              goldenToRetry.status = 'PASSED_UPDATE';
-              goldenToRetry.error = undefined;
-              this.snackBar.open(`Golden updated successfully!`, 'Close', {
-                duration: 3000,
-                panelClass: 'success-snackbar'
-              });
-            }
-            else {
-              goldenToRetry.status = 'FAILED_UPDATE';
-              const match = statusString.match(/Failed with exception: (.+)/);
-              goldenToRetry.error = match ? match[1] : statusString;
-              this.snackBar.open(`Retry failed. Error: ${goldenToRetry.error || ''}`, 'Close', {
-                duration: 5000,
-                panelClass: 'error-snackbar'
-              });
-            }
-          }
-        },
-        error: (err) => {
-          console.error(err);
-          if (goldenToRetry) {
-            goldenToRetry.status = 'FAILED_UPDATE';
-          }
-          this.snackBar.open(
-            'Error updating golden. See console for details.',
-            'Close',
-            {
-              duration: 5000,
-              panelClass: 'error-snackbar',
-            }
-          );
-        },
-      });
+      this.goldenActionService.updateGolden(goldenToRetry).subscribe();
     }
   }
 
@@ -345,5 +269,30 @@ export class TestListComponent implements OnChanges {
     return this.testMode !== TestModes.GERRIT
       && this.testMode !== TestModes.PRESUBMIT;
   }
-}
 
+  get shouldShowDeleteButton(): boolean {
+    return this.testMode !== TestModes.ATEST;
+  }
+
+  filterPresubmitTests(): void {
+    if (!this.searchTerm) {
+      this.filteredPresubmitTests = [...this.presubmitTests];
+      return;
+    }
+    const lowerSearchTerm = this.searchTerm.toLowerCase();
+    this.filteredPresubmitTests = this.presubmitTests.filter(test =>
+      test.testname.toLowerCase().includes(lowerSearchTerm)
+    );
+  }
+  get isSimpleMode(): boolean {
+    return this.testMode === TestModes.CODESEARCH || this.testMode === TestModes.USER;
+  }
+
+  get showStandardList(): boolean {
+    return this.totalTestCount > 0 && !this.isSimpleMode;
+  }
+
+  get showSimpleList(): boolean {
+    return this.isSimpleMode && this.goldens.length > 0;
+  }
+}

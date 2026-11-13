@@ -105,6 +105,11 @@ cc_library {
         "MountRegistry.cpp",
         "path.cpp",
     ],
+    min_sdk_version: "apex_inherit",
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.webapp",
+    ],
 }
 
 cc_library_static {
@@ -122,19 +127,22 @@ cc_library_static {
             shared_libs: [
                 "libbase",
                 "libincfs",
-                "libutils",
             ],
         },
         host: {
             static_libs: [
                 "libbase",
-                "libutils",
             ],
         },
         windows: {
             enabled: true,
         },
     },
+    min_sdk_version: "apex_inherit",
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.webapp",
+    ],
 }
 
 cc_library_headers {
@@ -149,6 +157,11 @@ cc_library_headers {
             enabled: true,
         },
     },
+    min_sdk_version: "apex_inherit",
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.webapp",
+    ],
 }
 
 cc_test {
@@ -161,7 +174,6 @@ cc_test {
     ],
     shared_libs: [
         "libbase",
-        "libutils",
     ],
     srcs: [
         "tests/util/map_ptr_test.cpp",

@@ -13,6 +13,7 @@ export interface DataPoint {
   expectedValue?: number;
 }
 
+
 export const COLORS = {
   gray: 'rgb(99, 99, 99)',
   green: 'rgb(76, 199, 45)',

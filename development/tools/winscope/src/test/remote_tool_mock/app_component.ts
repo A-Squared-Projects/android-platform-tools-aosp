@@ -16,80 +16,32 @@
 
 import {CommonModule} from '@angular/common';
 import {ChangeDetectorRef, Component, Inject} from '@angular/core';
-import {assertDefined, assertUnreachable} from 'common/assert';
-import {Timer} from 'common/time/timer';
-import {
-  Message,
-  MessageBugReport,
-  MessageFiles,
-  MessagePing,
-  MessageTimestamp,
-  MessageType,
-  TimestampType,
-} from 'cross_tool/messages';
+import {assertDefined, assertUnreachable} from '@common/assert';
+import {Timer} from '@common/time/timer';
+import {getLogger, Logger} from '@compat/logging';
+import {Message, MessageBugReport, MessageFiles, MessagePing, MessageTimestamp, MessageType, TimestampType,} from '@cross_tool/messages';
 
 @Component({
   selector: 'app-root',
   standalone: true,
   imports: [CommonModule],
-  template: `
-    <span class="app-title">Remote Tool Mock (simulates cross-tool protocol)</span>
-
-    <hr/>
-    <p>Open Winscope tab</p>
-    <input
-        class="button-open-winscope"
-        type="button"
-        value="Open"
-        (click)="onButtonOpenWinscopeClick()"/>
-
-    <hr/>
-    <p>Send bugreport</p>
-    <input
-        class="button-send-bugreport"
-        type="file"
-        value=""
-        (change)="onButtonSendBugreportClick($event)"/>
-
-    <hr/>
-    <p>Send file</p>
-    <input
-        class="button-send-files"
-        type="file"
-        value=""
-        (change)="onButtonSendFilesClick($event)"/>
-
-    <hr/>
-    <p>Send timestamp [ns]</p>
-    <input class="input-timestamp" type="number" id="name" name="name"/>
-    <input
-        class="button-send-realtime-timestamp"
-        type="button"
-        value="Send"
-        (click)="onButtonSendRealtimeTimestampClick()"/>
-    <input
-        class="button-send-boottime-timestamp"
-        type="button"
-        value="Send"
-        (click)="onButtonSendBoottimeTimestampClick()"/>
-    <hr/>
-    <p>Received realtime timestamp:</p>
-    <p class="paragraph-received-realtime-timestamp"></p>
-    <p>Received boottime timestamp:</p>
-    <p class="paragraph-received-boottime-timestamp"></p>
-  `,
+  templateUrl: './app_component.ng.html',
 })
 /**
  * A mock remote tool that can be used to test the cross-tool communication protocol.
  */
 export class AppComponent {
   static readonly TARGET = 'http://localhost:8080';
+  static readonly TARGET_FROM_ABT =
+    'http://localhost:8080?source=openFromExtension'; // for manual testing only
   static readonly TIMESTAMP_IN_BUGREPORT_MESSAGE = 1670509911000000000n;
   static readonly TIMESTAMP_IN_FILES_MESSAGE = 15725894416n;
 
   private winscope: Window | null = null;
+  private target = AppComponent.TARGET;
   private isWinscopeUp = false;
   private onMessagePongReceived: () => void = () => {};
+  private readonly logger: Logger = getLogger('AppComponent');
 
   constructor(
     @Inject(ChangeDetectorRef) private changeDetectorRef: ChangeDetectorRef,
@@ -100,6 +52,13 @@ export class AppComponent {
   }
 
   async onButtonOpenWinscopeClick() {
+    this.target = AppComponent.TARGET;
+    this.openWinscope();
+    await this.waitWinscopeUp();
+  }
+
+  async onButtonOpenWinscopeFromABTClick() {
+    this.target = AppComponent.TARGET_FROM_ABT;
     this.openWinscope();
     await this.waitWinscopeUp();
   }
@@ -116,8 +75,8 @@ export class AppComponent {
 
   onButtonSendRealtimeTimestampClick() {
     const inputTimestampElement = assertDefined(
-      document.querySelector('.input-timestamp'),
-    ) as HTMLInputElement;
+      document.querySelector<HTMLInputElement>('.input-timestamp'),
+    );
     this.sendTimestamp(
       BigInt(inputTimestampElement.value),
       TimestampType.CLOCK_REALTIME,
@@ -126,8 +85,8 @@ export class AppComponent {
 
   onButtonSendBoottimeTimestampClick() {
     const inputTimestampElement = assertDefined(
-      document.querySelector('.input-timestamp'),
-    ) as HTMLInputElement;
+      document.querySelector<HTMLInputElement>('.input-timestamp'),
+    );
     this.sendTimestamp(
       BigInt(inputTimestampElement.value),
       TimestampType.CLOCK_BOOTTIME,
@@ -137,7 +96,7 @@ export class AppComponent {
   private openWinscope() {
     this.printStatus('OPENING WINSCOPE');
 
-    this.winscope = window.open(AppComponent.TARGET);
+    this.winscope = window.open(this.target);
     if (!this.winscope) {
       throw new Error('Failed to open winscope');
     }
@@ -159,7 +118,7 @@ export class AppComponent {
       while (!this.isWinscopeUp) {
         assertDefined(this.winscope).postMessage(
           new MessagePing(),
-          AppComponent.TARGET,
+          this.target,
         );
         await new Timer(10).sleepMs();
       }
@@ -175,7 +134,7 @@ export class AppComponent {
 
     assertDefined(this.winscope).postMessage(
       new MessageBugReport(file, AppComponent.TIMESTAMP_IN_BUGREPORT_MESSAGE),
-      AppComponent.TARGET,
+      this.target,
     );
 
     this.printStatus('SENT BUGREPORT');
@@ -190,7 +149,7 @@ export class AppComponent {
         AppComponent.TIMESTAMP_IN_FILES_MESSAGE,
         TimestampType.CLOCK_BOOTTIME,
       ),
-      AppComponent.TARGET,
+      this.target,
     );
 
     this.printStatus('SENT FILES');
@@ -201,7 +160,7 @@ export class AppComponent {
 
     assertDefined(this.winscope).postMessage(
       new MessageTimestamp(value, type),
-      AppComponent.TARGET,
+      this.target,
     );
 
     this.printStatus('SENT TIMESTAMP');
@@ -210,7 +169,7 @@ export class AppComponent {
   private onMessageReceived(event: MessageEvent) {
     const message = event.data as Message;
     if (!message.type) {
-      console.log(
+      this.logger.warn(
         'Cross-tool protocol received unrecognized message:',
         message,
       );
@@ -219,7 +178,7 @@ export class AppComponent {
 
     switch (message.type) {
       case MessageType.PING:
-        console.log(
+        this.logger.warn(
           'Cross-tool protocol received unexpected ping message:',
           message,
         );
@@ -228,23 +187,26 @@ export class AppComponent {
         this.onMessagePongReceived();
         break;
       case MessageType.BUGREPORT:
-        console.log(
+        this.logger.warn(
           'Cross-tool protocol received unexpected bugreport message:',
           message,
         );
         break;
       case MessageType.TIMESTAMP:
-        console.log('Cross-tool protocol received timestamp message:', message);
+        this.logger.info(
+          'Cross-tool protocol received timestamp message:',
+          message,
+        );
         this.onMessageTimestampReceived(message as MessageTimestamp);
         break;
       case MessageType.FILES:
-        console.log(
+        this.logger.warn(
           'Cross-tool protocol received unexpected files message:',
           message,
         );
         break;
       default:
-        console.log(
+        this.logger.warn(
           'Cross-tool protocol received unrecognized message:',
           message,
         );
@@ -280,7 +242,7 @@ export class AppComponent {
   }
 
   private printStatus(status: string) {
-    console.log('STATUS: ' + status);
+    this.logger.info('STATUS: ' + status);
   }
 
   private async readInputFile(event: Event): Promise<File> {

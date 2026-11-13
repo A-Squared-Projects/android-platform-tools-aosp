@@ -23,10 +23,8 @@ const SCREENSHOT_ICON = 'image';
 const TRANSACTION_ICON = 'show_chart';
 const WAYLAND_ICON = 'filter_none';
 const PROTO_LOG_ICON = 'notes';
-const SYSTEM_UI_ICON = 'filter_none';
 const VIEW_CAPTURE_ICON = 'filter_none';
 const IME_ICON = 'keyboard_alt';
-const EVENT_LOG_ICON = 'description';
 const TRANSITION_ICON = 'animation';
 const CUJ_ICON = 'label';
 const INPUT_ICON = 'touch_app';
@@ -42,6 +40,12 @@ interface TraceInfoMap {
   };
 }
 
+/**
+ * A map containing information and metadata for each `TraceType`.
+ * This includes display properties like name, icon, and color,
+ * as well as practical information like the directory for downloading
+ * archived traces and the legacy file extension.
+ */
 export const TRACE_INFO: TraceInfoMap = {
   [TraceType.WINDOW_MANAGER]: {
     name: 'Window Manager',
@@ -99,13 +103,6 @@ export const TRACE_INFO: TraceInfoMap = {
     downloadArchiveDir: 'protolog',
     legacyExt: '.winscope',
   },
-  [TraceType.SYSTEM_UI]: {
-    name: 'System UI',
-    icon: SYSTEM_UI_ICON,
-    color: '#7A86FF',
-    downloadArchiveDir: 'sysui',
-    legacyExt: '.winscope',
-  },
   [TraceType.VIEW_CAPTURE]: {
     name: 'View Capture',
     icon: VIEW_CAPTURE_ICON,
@@ -132,13 +129,6 @@ export const TRACE_INFO: TraceInfoMap = {
     icon: IME_ICON,
     color: '#FF6B00',
     downloadArchiveDir: 'ime',
-    legacyExt: '.winscope',
-  },
-  [TraceType.EVENT_LOG]: {
-    name: 'Event Log',
-    icon: EVENT_LOG_ICON,
-    color: '#fdd663',
-    downloadArchiveDir: 'eventlog',
     legacyExt: '.winscope',
   },
   [TraceType.WM_TRANSITION]: {

@@ -14,16 +14,12 @@
  * limitations under the License.
  */
 import {browser, by, element} from 'protractor';
-import {
-  clickViewTracesButton,
-  closeSnackBar,
-  setTimeouts,
-  uploadFixture,
-  WINSCOPE_URL,
-} from './utils';
+
+import {clickViewTracesButton, closeSnackBar, setTimeouts, uploadFixture, WINSCOPE_URL,} from './helpers';
 
 describe('Viewer Screenshot', () => {
   const viewerSelector = 'viewer-media-based';
+  const canvasSelector = '#frameCanvasElementOverlay';
 
   beforeEach(async () => {
     await setTimeouts(1000);
@@ -38,9 +34,10 @@ describe('Viewer Screenshot', () => {
     const viewer = element(by.css(viewerSelector));
     expect(await viewer.isPresent()).toBeTruthy();
 
-    const img = element(by.css(`${viewerSelector} img`));
+    const img = element(by.css(`${viewerSelector} ${canvasSelector}`));
     expect(await img.isPresent()).toBeTruthy();
-    expect(await img.getAttribute('src')).toContain('blob:');
+    expect(await img.getAttribute('height')).toBe('2400');
+    expect(await img.getAttribute('width')).toBe('1080');
   });
 
   it('processes files and renders view with multiple screenshots', async () => {
@@ -54,10 +51,10 @@ describe('Viewer Screenshot', () => {
     const viewer = element(by.css(viewerSelector));
     expect(await viewer.isPresent()).toBeTruthy();
 
-    const img = element(by.css(`${viewerSelector} img`));
+    const img = element(by.css(`${viewerSelector} ${canvasSelector}`));
     expect(await img.isPresent()).toBeTruthy();
-    const src = await img.getAttribute('src');
-    expect(src).toContain('blob:');
+    expect(await img.getAttribute('height')).toBe('2400');
+    expect(await img.getAttribute('width')).toBe('1080');
 
     const overlayTitle = element(by.css(`${viewerSelector} .overlay-title`));
     expect(await overlayTitle.getText()).toBe('screenshot');
@@ -71,9 +68,8 @@ describe('Viewer Screenshot', () => {
     await option2.click();
 
     expect(await img.isPresent()).toBeTruthy();
-    const newSrc = await img.getAttribute('src');
-    expect(newSrc).toContain('blob:');
-    expect(newSrc).not.toEqual(src);
+    expect(await img.getAttribute('height')).toBe('2152');
+    expect(await img.getAttribute('width')).toBe('2076');
     expect(await overlayTitle.getText()).toBe('screenshot_2');
   });
 });

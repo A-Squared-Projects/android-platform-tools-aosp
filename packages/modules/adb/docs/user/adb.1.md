@@ -60,6 +60,17 @@ devices [**-l**]
 **-l**
 &nbsp;&nbsp;&nbsp;&nbsp;Use long output.
 
+track-devices [-l][--proto-text][--proto-binary] Same as the 'device' command, but does not return. It sends updates when the list of devices changes.
+
+**-l**
+&nbsp;&nbsp;&nbsp;&nbsp;Use legacy long output.
+
+**-proto-text**
+&nbsp;&nbsp;&nbsp;&nbsp;Use protobuf output.
+
+**-proto-binary**
+&nbsp;&nbsp;&nbsp;&nbsp;Use binary protobuf output.
+
 help
 &nbsp;&nbsp;&nbsp;&nbsp;Show this help message.
 
@@ -129,7 +140,10 @@ mdns **check** | **services**
 &nbsp;&nbsp;&nbsp;&nbsp;List all discovered services.
 
 **track-services**
-&nbsp;&nbsp;&nbsp;&nbsp;Stream discovered services. Supports flags "--proto-text" and "proto-binary".
+&nbsp;&nbsp;&nbsp;&nbsp;Stream discovered services. Supports flags "--proto-text" and "--proto-binary".
+
+**list-known-hosts**
+&nbsp;&nbsp;&nbsp;&nbsp;Show ADB Wifi paired devices. Supports flags "--proto-text" and "--proto-binary".
 
 # FILE TRANSFER:
 
@@ -372,7 +386,7 @@ features
 # ENVIRONMENT VARIABLES
 
 $ADB_TRACE
-&nbsp;&nbsp;&nbsp;&nbsp;Comma (or space) separated list of debug info to log: all,adb,sockets,packets,rwx,usb,sync,sysdeps,transport,jdwp,services,auth,fdevent,shell,incremental, mdns.
+&nbsp;&nbsp;&nbsp;&nbsp;Comma (or space) separated list of debug info to log: all,adb,sockets,packets,rwx,usb,sync,sysdeps,transport,jdwp,services,auth,fdevent,shell,incremental,mdns,mdns-stack.
 
 $ADB_VENDOR_KEYS
 &nbsp;&nbsp;&nbsp;&nbsp;Colon-separated list of keys (files or directories).

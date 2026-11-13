@@ -14,84 +14,61 @@
  * limitations under the License.
  */
 
-import {searchSubarray} from 'common/typed_array';
-import {Timestamp} from 'common/time/time';
-import {TIME_UNIT_TO_NANO} from 'common/time/time_units';
-import {AbstractParser} from 'parsers/legacy/abstract_parser';
-import {timestampToVideoTimeSeconds} from 'trace/screen_recording_utils';
-import {MediaBasedTraceEntry} from 'trace_api/media_based_trace_entry';
-import {TraceType} from 'trace_api/trace_type';
-import {parseIntFromBuffer, parseLongFromBuffer} from './utils';
+import {Timestamp} from '@common/time/time';
+import {TIME_UNIT_TO_NANO} from '@common/time/time_units';
+import {CoarseVersion} from '@trace_api/coarse_version';
 
-export class ParserScreenRecordingLegacy extends AbstractParser<
-  MediaBasedTraceEntry,
-  bigint
-> {
-  override getTraceType(): TraceType {
-    return TraceType.SCREEN_RECORDING;
-  }
+import {AbstractParserScreenRecording} from './abstract_parser_screen_recording';
+import {parseIntFromBuffer, parseLongFromBuffer} from './helpers';
 
+export class ParserScreenRecordingLegacy extends AbstractParserScreenRecording {
   override getMagicNumber(): number[] {
     return ParserScreenRecordingLegacy.MPEG4_MAGIC_NUMBER;
-  }
-
-  override getRealToMonotonicTimeOffsetNs(): bigint | undefined {
-    return undefined;
   }
 
   override getRealToBootTimeOffsetNs(): bigint | undefined {
     return undefined;
   }
 
-  override decodeTrace(videoData: Uint8Array): Array<bigint> {
-    const posCount = this.searchMagicString(videoData);
+  override getCoarseVersion(): CoarseVersion {
+    return CoarseVersion.LEGACY;
+  }
+
+  protected override async decodeTrace(
+    videoData: Uint8Array,
+  ): Promise<readonly bigint[]> {
+    const posCount = this.searchMagicString(
+      videoData,
+      ParserScreenRecordingLegacy.WINSCOPE_META_MAGIC_STRING,
+    );
+    if (posCount === undefined) {
+      throw new TypeError("video data doesn't contain winscope magic string");
+    }
     const [posTimestamps, count] = parseIntFromBuffer(videoData, posCount);
-    return this.parseVideoData(videoData, posTimestamps, count);
+    const timestamps = this.parseVideoData(videoData, posTimestamps, count);
+    this.queueThumbnailGeneration(videoData);
+    return timestamps;
   }
 
   protected override getTimestamp(decodedEntry: bigint): Timestamp {
     return this.timestampConverter.makeTimestampFromMonotonicNs(decodedEntry);
   }
 
-  override processDecodedEntry(
-    index: number,
-    entry: bigint,
-  ): MediaBasedTraceEntry {
-    const videoTimeSeconds = timestampToVideoTimeSeconds(
-      this.decodedEntries[0],
-      entry,
-    );
-    const videoData = this.traceFile.file;
-    return new MediaBasedTraceEntry(videoTimeSeconds, videoData);
-  }
-
-  private searchMagicString(videoData: Uint8Array): number {
-    let pos = searchSubarray(
-      videoData,
-      ParserScreenRecordingLegacy.WINSCOPE_META_MAGIC_STRING,
-    );
-    if (pos === undefined) {
-      throw new TypeError("video data doesn't contain winscope magic string");
-    }
-    pos += ParserScreenRecordingLegacy.WINSCOPE_META_MAGIC_STRING.length;
-    return pos;
-  }
-
   private parseVideoData(
     videoData: Uint8Array,
     pos: number,
     count: number,
-  ): Array<bigint> {
+  ): bigint[] {
     if (pos + count * 8 > videoData.length) {
       throw new TypeError(
         'Failed to parse timestamps. Video data is too short.',
       );
     }
-    const timestamps: Array<bigint> = [];
+    const timestamps: bigint[] = [];
     for (let i = 0; i < count; ++i) {
       const [newPos, timestamp] = parseLongFromBuffer(videoData, pos);
       pos = newPos;
-      timestamps.push(timestamp * BigInt(TIME_UNIT_TO_NANO.us));
+      timestamps.push(timestamp * TIME_UNIT_TO_NANO.us);
     }
     return timestamps;
   }

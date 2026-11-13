@@ -14,13 +14,8 @@
  * limitations under the License.
  */
 import {browser, by, element} from 'protractor';
-import {
-  clickViewTracesButton,
-  closeSnackBar,
-  setTimeouts,
-  uploadFixture,
-  WINSCOPE_URL,
-} from './utils';
+
+import {clickViewTracesButton, closeSnackBar, setTimeouts, uploadFixture, WINSCOPE_URL,} from './helpers';
 
 describe('Viewer ScreenRecording', () => {
   const viewerSelector = 'viewer-media-based';

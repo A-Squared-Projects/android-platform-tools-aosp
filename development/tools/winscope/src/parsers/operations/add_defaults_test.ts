@@ -13,15 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import {assertDefined} from '@common/assert';
+import {getFakeProtoDescriptors} from '@compat/test/protobuf';
+import {DEFAULT_PROPERTY_FORMATTER} from '@trace/formatters';
+import {Registry, TamperedMessageType, TamperedProtoField,} from '@trace/proto_utils/tampered_message_type';
+import {PropertySource, PropertyTreeNode} from '@tree_node/property_tree_node';
+import {PropertyTreeBuilder} from '@tree_node/testing/property_tree_builder';
 
-import {assertDefined} from 'common/assert';
-import root from 'protos/test/fake_proto/json';
-import {PropertyTreeBuilder} from 'test/unit/property_tree_builder';
-import {
-  TamperedMessageType,
-  TamperedProtoField,
-} from 'trace/proto_utils/tampered_message_type';
-import {PropertySource, PropertyTreeNode} from 'tree_node/property_tree_node';
 import {AddDefaults} from './add_defaults';
 
 describe('AddDefaults', () => {
@@ -29,9 +27,15 @@ describe('AddDefaults', () => {
   let operation: AddDefaults;
   let rootField: TamperedProtoField;
 
+  beforeAll(async () => {
+    Registry.getInstance().parseDescriptors(await getFakeProtoDescriptors());
+  });
   beforeEach(() => {
-    rootField = TamperedMessageType.tamper(root.lookupType('RootMessage'))
-      .fields['entry'];
+    rootField = (
+      Registry.getInstance().getType(
+        'winscope.test.RootMessage',
+      ) as TamperedMessageType
+    ).fields['entry'];
     propertyRoot = new PropertyTreeBuilder()
       .setIsRoot(true)
       .setRootId('test')
@@ -46,24 +50,28 @@ describe('AddDefaults', () => {
     const defaultNode = assertDefined(
       propertyRoot.getChildByName('number_32bit'),
     );
-    expect(defaultNode.getValue()).toBe(0);
+    expect(defaultNode.getValue<number>()).toBe(0);
     checkAllNodesAreDefault(propertyRoot);
   });
 
   it('adds all defaults from prototype definition in absence of allowlist', () => {
     operation = new AddDefaults(rootField);
     operation.apply(propertyRoot);
-    expect(propertyRoot.getAllChildren().length).toBe(11);
+    expect(propertyRoot.getAllChildren().length).toBe(24);
     checkAllNodesAreDefault(propertyRoot);
     expect(
-      assertDefined(propertyRoot.getChildByName('array')).getValue(),
+      assertDefined(propertyRoot.getChildByName('array')).getValue<number[]>(),
     ).toEqual([]);
     expect(
-      assertDefined(propertyRoot.getChildByName('number_32bit')).getValue(),
+      assertDefined(
+        propertyRoot.getChildByName('number_32bit'),
+      ).getValue<number>(),
     ).toBe(0);
     expect(
-      assertDefined(propertyRoot.getChildByName('number_64bit')).getValue(),
-    ).toBe(0n);
+      assertDefined(propertyRoot.getChildByName('number_64bit'))
+        .getValue()
+        ?.toString(),
+    ).toBe('0');
     expect(
       assertDefined(propertyRoot.getChildByName('boolValue')).getValue(),
     ).toBeFalse();
@@ -75,8 +83,7 @@ describe('AddDefaults', () => {
       'number_64bit',
     ]);
     operation.apply(propertyRoot);
-
-    expect(propertyRoot.getAllChildren().length).toBe(9);
+    expect(propertyRoot.getAllChildren().length).toBe(22);
     checkAllNodesAreDefault(propertyRoot);
     expect(propertyRoot.getChildByName('number_32bit')).toBeUndefined();
     expect(propertyRoot.getChildByName('number_64bit')).toBeUndefined();
@@ -96,8 +103,22 @@ describe('AddDefaults', () => {
     const defaultNode = assertDefined(
       propertyRoot.getChildByName('number_32bit'),
     );
-    expect(defaultNode.getValue()).toBe(0);
+    expect(defaultNode.getValue<number>()).toBe(0);
     checkAllNodesAreDefault(propertyRoot);
+  });
+
+  it('does not replace node that is already default', () => {
+    operation = new AddDefaults(rootField);
+    operation.apply(propertyRoot);
+    const existingChildren = [...propertyRoot.getAllChildren()];
+    existingChildren.forEach((c) => c.setFormatter(DEFAULT_PROPERTY_FORMATTER));
+
+    operation.apply(propertyRoot);
+    const newChildren = [...propertyRoot.getAllChildren()];
+    expect(newChildren.length).toBe(existingChildren.length);
+    newChildren.forEach((c, i) => {
+      expect(c === existingChildren[i]).toBeTrue();
+    });
   });
 
   function checkAllNodesAreDefault(root: PropertyTreeNode) {

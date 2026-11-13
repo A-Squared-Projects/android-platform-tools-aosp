@@ -15,19 +15,8 @@
  */
 
 import {browser, by, element} from 'protractor';
-import {
-  applyStateToHierarchyOptions,
-  changeRealTimestampInWinscope,
-  checkFinalRealTimestamp,
-  checkInitialRealTimestamp,
-  checkItemInPropertiesTree,
-  checkTimelineTraceSelector,
-  checkWinscopeRealTimestamp,
-  loadTraceAndCheckViewer,
-  selectItemInHierarchy,
-  setTimeouts,
-  WINSCOPE_URL,
-} from './utils';
+
+import {applyStateToHierarchyOptions, changeRealTimestampInWinscope, checkFinalRealTimestamp, checkInitialRealTimestamp, checkItemInPropertiesTreeByName, checkTimelineTraceSelector, checkWinscopeRealTimestamp, collapseAdditionalProperties, loadTraceAndCheckViewer, selectItemInHierarchy, setTimeouts, WINSCOPE_URL,} from './helpers';
 
 describe('Viewer Input Method Service', () => {
   const viewerSelector = 'viewer-input-method';
@@ -39,7 +28,7 @@ describe('Viewer Input Method Service', () => {
 
   it('processes trace from zip and navigates correctly', async () => {
     await loadTraceAndCheckViewer(
-      'archives/deployment_full_trace_phone.zip',
+      'archives/deployment_full_trace_phone_perfetto.zip',
       'IME Service',
       viewerSelector,
     );
@@ -64,42 +53,43 @@ describe('Viewer Input Method Service', () => {
   });
 
   async function checkHierarchy() {
+    await collapseAdditionalProperties(viewerSelector);
     const nodes = await element.all(
       by.css(`${viewerSelector} hierarchy-view .node`),
     );
     expect(nodes.length).toBe(4);
     expect(await nodes[0].getText()).toContain(
-      'InputMethodService - 2022-11-21, 18:05:14.720 - InputMethodService#applyVisibilityInInsetsConsumerIfNecessary',
+      'InputMethodServiceTraceProto - 2022-11-21, 18:05:14.720 - InputMethodService#applyVisibilityInInsetsConsumerIfNecessary',
     );
     expect(await nodes[1].getText()).toContain('253 - SfSubtree - Task=8#253');
     expect(await nodes[2].getText()).toContain(
-      '778 - Letterbox - left#778 GPU V',
+      '778 - Letterbox - left#778GPUV',
     );
     expect(await nodes[3].getText()).toContain(
-      '786 - com.google.(...).ZeroStateSearchActivity#786 GPU V',
+      '786 - com.google.(...).ZeroStateSearchActivity#786GPUV',
     );
   }
 
   async function checkProperties() {
-    await checkItemInPropertiesTree(
+    await checkItemInPropertiesTreeByName(
       viewerSelector,
       'damageRegion',
       'damageRegion:\nSkRegion((398, 42, 615, 1596))',
     );
 
-    await checkItemInPropertiesTree(
+    await checkItemInPropertiesTreeByName(
       viewerSelector,
       'color',
       'color:\n{empty}, alpha: 0.589',
     );
 
-    await checkItemInPropertiesTree(
+    await checkItemInPropertiesTreeByName(
       viewerSelector,
       'destinationFrame',
       'destinationFrame:\n(0, 0) - (2204, 1080)',
     );
 
-    await checkItemInPropertiesTree(
+    await checkItemInPropertiesTreeByName(
       viewerSelector,
       'layoutParamsFlags',
       'layoutParamsFlags:\nFLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS | FLAG_HARDWARE_ACCELERATED | FLAG_SPLIT_TOUCH | FLAG_LAYOUT_INSET_DECOR | FLAG_LAYOUT_IN_SCREEN | FLAG_NOT_TOUCH_MODAL',

@@ -15,18 +15,8 @@
  */
 
 import {browser} from 'protractor';
-import {
-  checkFinalRealTimestamp,
-  checkInitialRealTimestamp,
-  checkScrollPresent,
-  checkSelectFilter,
-  checkTimelineTraceSelector,
-  checkTotalScrollEntries,
-  loadTraceAndCheckViewer,
-  setTimeouts,
-  updateInputField,
-  WINSCOPE_URL,
-} from './utils';
+
+import {checkFinalRealTimestamp, checkInitialRealTimestamp, checkScrollPresent, checkSelectFilter, checkTimelineTraceSelector, checkTotalScrollEntries, loadTraceAndCheckViewer, setTimeouts, updateInputField, WINSCOPE_URL,} from './helpers';
 
 describe('Viewer Protolog', () => {
   const viewerSelector = 'viewer-protolog';
@@ -39,7 +29,7 @@ describe('Viewer Protolog', () => {
 
   it('processes trace from zip and navigates correctly', async () => {
     await loadTraceAndCheckViewer(
-      'archives/deployment_full_trace_phone.zip',
+      'archives/deployment_full_trace_phone_perfetto.zip',
       'ProtoLog',
       viewerSelector,
     );
@@ -58,6 +48,7 @@ describe('Viewer Protolog', () => {
       ['com/android/server/wm/ActivityStarter.java'],
       1,
       totalEntries,
+      true,
     );
 
     await checkSelectFilter(
@@ -69,10 +60,11 @@ describe('Viewer Protolog', () => {
       ],
       4,
       totalEntries,
+      true,
     );
 
     await filterByText('FREEZE');
-    await checkTotalScrollEntries(viewerSelector, 4);
+    await checkTotalScrollEntries(viewerSelector, 4, true);
   });
 
   async function filterByText(filterString: string) {

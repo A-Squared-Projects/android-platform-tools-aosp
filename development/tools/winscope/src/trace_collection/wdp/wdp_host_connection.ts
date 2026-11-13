@@ -14,16 +14,15 @@
  * limitations under the License.
  */
 
-import {showPopupWindow} from 'common/window';
-import {AdbHostConnection} from 'trace_collection/adb/adb_host_connection';
-import {AdbConnectionType} from 'trace_collection/adb_connection_type';
-import {ConnectionState} from 'trace_collection/connection_state';
-import {ConnectionStateListener} from 'trace_collection/connection_state_listener';
+import {showPopupWindow} from '@common/window';
+import {getLogger, Logger} from '@compat/logging';
+import {AdbConnectionType} from '@trace_collection/adb_connection_type';
+import {AdbHostConnection} from '@trace_collection/adb_host_connection';
+import {ConnectionState} from '@trace_collection/connection_state';
+import {ConnectionStateListener} from '@trace_collection/connection_state_listener';
+
 import {StreamProvider} from './stream_provider';
-import {
-  WdpDeviceConnection,
-  WdpDeviceConnectionResponse,
-} from './wdp_device_connection';
+import {WdpDeviceConnection, WdpDeviceConnectionResponse,} from './wdp_device_connection';
 
 /**
  * A connection to the WebDeviceProxy websocket.
@@ -37,6 +36,7 @@ export class WdpHostConnection extends AdbHostConnection<WdpDeviceConnection> {
   constructor(
     listener: ConnectionStateListener,
     private showWindow: (url: string) => boolean = showPopupWindow,
+    private readonly logger: Logger = getLogger('WdpHostConnection'),
   ) {
     super(listener);
   }
@@ -49,7 +49,7 @@ export class WdpHostConnection extends AdbHostConnection<WdpDeviceConnection> {
     this.streamProvider.closeAllStreams();
   }
 
-  override setSecurityToken(token: string) {
+  override setSecurityToken(_: string) {
     // do nothing
   }
 
@@ -85,7 +85,7 @@ export class WdpHostConnection extends AdbHostConnection<WdpDeviceConnection> {
       this.setState(ConnectionState.UNAUTH);
       return;
     } else if (resp.error !== undefined) {
-      console.error(
+      this.logger.error(
         `Invalid WebDeviceProxy response ${data} : ${JSON.stringify(
           resp.error,
         )}`,

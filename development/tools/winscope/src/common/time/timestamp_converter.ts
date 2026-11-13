@@ -14,17 +14,13 @@
  * limitations under the License.
  */
 
-import {assertDefined, assertTrue} from 'common/assert';
-import {INVALID_TIME_NS, Timestamp, TimezoneInfo} from './time';
+import {assertDefined, assertTrue} from '@common/assert';
+
+import {INVALID_TIME_NS, Timestamp} from './time';
 import {TIME_UNIT_TO_NANO, TIME_UNITS} from './time_units';
+import {ELAPSED_TIMESTAMP_FORMATTER, REAL_TIMESTAMP_FORMATTER_UTC, RealTimestampFormatter, TimestampType,} from './timestamp_formatter';
 import {UserTimestamp} from './user_timestamp';
 import {UTCOffset} from './utc_offset';
-import {
-  ELAPSED_TIMESTAMP_FORMATTER,
-  REAL_TIMESTAMP_FORMATTER_UTC,
-  RealTimestampFormatter,
-  TimestampType,
-} from './timestamp_formatter';
 
 /**
  * An interface for converting timestamps for parsers.
@@ -43,6 +39,8 @@ export declare interface ComponentTimestampConverter {
   makeTimestampFromHuman(timestampHuman: string | UserTimestamp): Timestamp;
   getUTCOffset(): string;
   makeTimestampFromNs(valueNs: bigint): Timestamp;
+  makeTimestampFromBootTimeNs(valueNs: bigint): Timestamp;
+  makeTimestampFromRealNs(valueNs: bigint): Timestamp;
   validateHumanInput(timestampHuman: string): boolean;
   canMakeRealTimestamps(): boolean;
 }
@@ -66,49 +64,30 @@ export class TimestampConverter
     ComponentTimestampConverter,
     RemoteToolTimestampConverter
 {
-  private readonly utcOffset = new UTCOffset();
+  private createdTimestampType: TimestampType | undefined;
+  private utcOffset = new UTCOffset();
   private readonly realTimestampFormatter = new RealTimestampFormatter(
     this.utcOffset,
   );
-  private createdTimestampType: TimestampType | undefined;
 
   /**
-   * @param timezoneInfo The timezone information to use.
    * @param realToMonotonicTimeOffsetNs The offset between real and monotonic time.
    * @param realToBootTimeOffsetNs The offset between real and boottime.
-   * @param utcOffset The UTC offset to use. If set at construction use `initializeUTCOffset`.
    */
   constructor(
-    private readonly timezoneInfo: TimezoneInfo,
     private realToMonotonicTimeOffsetNs?: bigint,
     private realToBootTimeOffsetNs?: bigint,
-    utcOffset?: Timestamp,
-  ) {
-    if (utcOffset !== undefined) {
-      this.createdTimestampType = TimestampType.REAL;
-      this.initializeUTCOffset(utcOffset);
-    }
-  }
+  ) {}
 
   /**
-   * Initializes the UTC offset.
+   * Sets the UTC offset.
    *
-   * @param timestamp A timestamp to use for initialization.
+   * @param utcOffset The UTC offset.
    */
-  initializeUTCOffset(timestamp: Timestamp) {
-    if (
-      this.utcOffset.getValueNs() !== undefined ||
-      !this.canMakeRealTimestamps()
-    ) {
-      return;
-    }
-    const utcValueNs = timestamp.getValueNs();
-    const localNs =
-      this.timezoneInfo.timezone !== 'UTC'
-        ? this.addTimezoneOffset(this.timezoneInfo.timezone, utcValueNs)
-        : utcValueNs;
-    const utcOffsetNs = localNs - utcValueNs;
-    this.utcOffset.initialize(utcOffsetNs);
+  setUTCOffset(utcOffset: UTCOffset) {
+    this.utcOffset = utcOffset;
+    this.realTimestampFormatter.setUTCOffset(this.utcOffset);
+    this.createdTimestampType = TimestampType.REAL;
   }
 
   /**
@@ -283,7 +262,7 @@ export class TimestampConverter
     this.createdTimestampType = undefined;
     this.realToBootTimeOffsetNs = undefined;
     this.realToMonotonicTimeOffsetNs = undefined;
-    this.utcOffset.clear();
+    this.utcOffset = new UTCOffset();
   }
 
   canMakeRealTimestamps(): boolean {
@@ -330,8 +309,7 @@ export class TimestampConverter
     timestampHuman += this.utcOffset.format().slice(3);
 
     return this.makeTimestampFromRealNs(
-      BigInt(Date.parse(timestampHuman)) * BigInt(TIME_UNIT_TO_NANO.ms) +
-        BigInt(nanos),
+      BigInt(Date.parse(timestampHuman)) * TIME_UNIT_TO_NANO.ms + nanos,
     );
   }
 
@@ -342,45 +320,16 @@ export class TimestampConverter
       .filter((it) => it !== '')
       .map((it) => Math.floor(Number(it)));
 
-    let ns = BigInt(0);
+    let ns = 0n;
 
     for (let i = 0; i < usedUnits.length; i++) {
       const unit = usedUnits[i];
       const value = usedValues[i];
       const unitData = assertDefined(TIME_UNITS.find((it) => it.unit === unit));
-      ns += BigInt(unitData.nanosInUnit) * BigInt(value);
+      ns += unitData.nanosInUnit * BigInt(value);
     }
 
     return this.makeElapsedTimestamp(ns);
-  }
-
-  private addTimezoneOffset(timezone: string, timestampNs: bigint): bigint {
-    const utcDate = new Date(Number(timestampNs / 1000000n));
-    const timezoneDateFormatted = utcDate.toLocaleString('en-US', {
-      timeZone: timezone,
-    });
-    const timezoneDate = new Date(timezoneDateFormatted);
-
-    let daysDiff = timezoneDate.getDay() - utcDate.getDay(); // day of the week
-    if (daysDiff > 1) {
-      // Saturday in timezone, Sunday in UTC
-      daysDiff = -1;
-    } else if (daysDiff < -1) {
-      // Sunday in timezone, Saturday in UTC
-      daysDiff = 1;
-    }
-
-    const hoursDiff =
-      timezoneDate.getHours() - utcDate.getHours() + daysDiff * 24;
-    const minutesDiff = timezoneDate.getMinutes() - utcDate.getMinutes();
-    const localTimezoneOffsetMinutes = utcDate.getTimezoneOffset();
-
-    return (
-      timestampNs +
-      BigInt(hoursDiff * 3.6e12) +
-      BigInt(minutesDiff * 6e10) -
-      BigInt(localTimezoneOffsetMinutes * 6e10)
-    );
   }
 }
 
