@@ -32,7 +32,7 @@ namespace android {
 
 class StreamSplitterTest : public ::testing::Test {};
 
-struct FakeListener : public BnConsumerListener {
+struct FakeListener : public IConsumerListener {
     virtual void onFrameAvailable(const BufferItem& /* item */) {}
     virtual void onBuffersReleased() {}
     virtual void onSidebandStreamChanged() {}
@@ -67,7 +67,9 @@ TEST_F(StreamSplitterTest, OneInputOneOutput) {
     sp<Fence> fence;
     sp<GraphicBuffer> buffer;
     ASSERT_EQ(IGraphicBufferProducer::BUFFER_NEEDS_REALLOCATION,
-              inputProducer->dequeueBuffer(&slot, &fence, 0, 0, 0, GRALLOC_USAGE_SW_WRITE_OFTEN,
+              inputProducer->dequeueBuffer(&slot, &fence, 0, 0, 0,
+                                           GRALLOC_USAGE_SW_READ_OFTEN |
+                                                   GRALLOC_USAGE_SW_WRITE_OFTEN,
                                            nullptr, nullptr));
     ASSERT_EQ(OK, inputProducer->requestBuffer(slot, &buffer));
 
@@ -95,8 +97,7 @@ TEST_F(StreamSplitterTest, OneInputOneOutput) {
     ASSERT_EQ(*dataOut, TEST_DATA);
     ASSERT_EQ(OK, item.mGraphicBuffer->unlock());
 
-    ASSERT_EQ(OK, outputConsumer->releaseBuffer(item.mSlot, item.mFrameNumber,
-            EGL_NO_DISPLAY, EGL_NO_SYNC_KHR, Fence::NO_FENCE));
+    ASSERT_EQ(OK, outputConsumer->releaseBuffer(item.mSlot, item.mFrameNumber, Fence::NO_FENCE));
 
     // This should succeed even with allocation disabled since it will have
     // received the buffer back from the output BufferQueue
@@ -139,7 +140,9 @@ TEST_F(StreamSplitterTest, OneInputMultipleOutputs) {
     sp<Fence> fence;
     sp<GraphicBuffer> buffer;
     ASSERT_EQ(IGraphicBufferProducer::BUFFER_NEEDS_REALLOCATION,
-              inputProducer->dequeueBuffer(&slot, &fence, 0, 0, 0, GRALLOC_USAGE_SW_WRITE_OFTEN,
+              inputProducer->dequeueBuffer(&slot, &fence, 0, 0, 0,
+                                           GRALLOC_USAGE_SW_READ_OFTEN |
+                                                   GRALLOC_USAGE_SW_WRITE_OFTEN,
                                            nullptr, nullptr));
     ASSERT_EQ(OK, inputProducer->requestBuffer(slot, &buffer));
 
@@ -168,9 +171,9 @@ TEST_F(StreamSplitterTest, OneInputMultipleOutputs) {
         ASSERT_EQ(*dataOut, TEST_DATA);
         ASSERT_EQ(OK, item.mGraphicBuffer->unlock());
 
-        ASSERT_EQ(OK, outputConsumers[output]->releaseBuffer(item.mSlot,
-                    item.mFrameNumber, EGL_NO_DISPLAY, EGL_NO_SYNC_KHR,
-                    Fence::NO_FENCE));
+        ASSERT_EQ(OK,
+                  outputConsumers[output]->releaseBuffer(item.mSlot, item.mFrameNumber,
+                                                         Fence::NO_FENCE));
     }
 
     // This should succeed even with allocation disabled since it will have

@@ -18,7 +18,7 @@ use super::{Crate, CrateType, Extern, ExternType};
 use crate::config::VariantConfig;
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// `cfg` strings for dependencies which should be considered enabled. It would be better to parse
@@ -49,6 +49,8 @@ pub struct PackageMetadata {
     pub features: BTreeMap<String, Vec<String>>,
     pub id: String,
     pub targets: Vec<TargetMetadata>,
+    pub license: Option<String>,
+    pub license_file: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -72,7 +74,7 @@ impl DependencyMetadata {
             }
         }
         let name = self.rename.as_ref().unwrap_or(&self.name);
-        !self.optional || features.contains(&format!("dep:{}", name))
+        !self.optional || features.contains(&format!("dep:{name}"))
     }
 }
 
@@ -107,7 +109,13 @@ pub enum TargetKind {
 pub fn parse_cargo_metadata_str(cargo_metadata: &str, cfg: &VariantConfig) -> Result<Vec<Crate>> {
     let metadata =
         serde_json::from_str(cargo_metadata).context("failed to parse cargo metadata")?;
-    parse_cargo_metadata(&metadata, &cfg.features, &cfg.extra_cfg, cfg.tests)
+    parse_cargo_metadata(
+        &metadata,
+        &cfg.features,
+        &cfg.extra_cfg,
+        cfg.tests,
+        &cfg.workspace_excludes,
+    )
 }
 
 fn parse_cargo_metadata(
@@ -115,10 +123,13 @@ fn parse_cargo_metadata(
     features: &Option<Vec<String>>,
     cfgs: &[String],
     include_tests: bool,
+    workspace_excludes: &[String],
 ) -> Result<Vec<Crate>> {
     let mut crates = Vec::new();
     for package in &metadata.packages {
-        if !metadata.workspace_members.contains(&package.id) {
+        if !metadata.workspace_members.contains(&package.id)
+            || workspace_excludes.contains(&package.name)
+        {
             continue;
         }
 
@@ -169,6 +180,8 @@ fn parse_cargo_metadata(
                     types: target.crate_types.clone(),
                     features: features_without_deps.clone(),
                     edition: package.edition.to_owned(),
+                    license: package.license.clone(),
+                    license_file: package.license_file.clone(),
                     package_dir: package_dir.clone(),
                     main_src: main_src.to_owned(),
                     target: target_triple.clone(),
@@ -193,6 +206,8 @@ fn parse_cargo_metadata(
                     types: vec![CrateType::Test],
                     features: features_without_deps.clone(),
                     edition: package.edition.to_owned(),
+                    license: package.license.clone(),
+                    license_file: package.license_file.clone(),
                     package_dir: package_dir.clone(),
                     main_src: main_src.to_owned(),
                     target: target_triple.clone(),
@@ -268,7 +283,11 @@ fn make_extern(packages: &[PackageMetadata], dependency: &DependencyMetadata) ->
         bail!("Package {} didn't have any library or proc-macro targets", dependency.name);
     };
     let lib_name = target.name.replace('-', "_");
-    let raw_name = target.name.clone();
+    // This is ugly but looking at the source path is the easiest way to tell if the raw
+    // crate name uses a hyphen instead of an underscore. It won't work if it uses both.
+    let raw_name = target.name.replace('_', "-");
+    let src_path = target.src_path.to_str().expect("failed to convert src_path to string");
+    let raw_name = if src_path.contains(&raw_name) { raw_name } else { lib_name.clone() };
     let name =
         if let Some(rename) = &dependency.rename { rename.clone() } else { lib_name.clone() };
 
@@ -279,7 +298,6 @@ fn make_extern(packages: &[PackageMetadata], dependency: &DependencyMetadata) ->
         } else {
             ExternType::Rust
         };
-
     Ok(Extern { name, lib_name, raw_name, extern_type })
 }
 
@@ -325,7 +343,7 @@ fn resolve_features(
         }
     }
 
-    let mut features = Vec::new();
+    let mut features = BTreeSet::new();
     if let Some(chosen_features) = chosen_features {
         for feature in chosen_features {
             add_feature_and_dependencies(&mut features, feature, &package_features);
@@ -334,21 +352,22 @@ fn resolve_features(
         // If there are no chosen features, then enable the default feature.
         add_feature_and_dependencies(&mut features, "default", &package_features);
     }
-    features.sort();
-    features.dedup();
-    features
+    features.into_iter().collect()
 }
 
 /// Adds the given feature and all features it depends on to the given list of features.
 ///
 /// Ignores features of other packages, and features which don't exist.
 fn add_feature_and_dependencies(
-    features: &mut Vec<String>,
+    features: &mut BTreeSet<String>,
     feature: &str,
     package_features: &BTreeMap<String, Vec<String>>,
 ) {
+    if features.contains(&feature.to_string()) {
+        return;
+    }
     if package_features.contains_key(feature) || feature.starts_with("dep:") {
-        features.push(feature.to_owned());
+        features.insert(feature.to_owned());
     }
 
     if let Some(dependencies) = package_features.get(feature) {
@@ -448,6 +467,21 @@ mod tests {
         assert_eq!(
             resolve_features(&None, &package_features, &dependencies),
             vec!["default".to_string(), "dep:optionaldep".to_string(), "optionaldep".to_string()]
+        );
+    }
+
+    #[test]
+    fn resolve_dep_features_recursion() {
+        let chosen = vec!["tokio".to_string()];
+        let package_features = [
+            ("default".to_string(), vec![]),
+            ("tokio".to_string(), vec!["dep:tokio".to_string(), "tokio/net".to_string()]),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            resolve_features(&Some(chosen), &package_features, &[]),
+            vec!["dep:tokio".to_string(), "tokio".to_string(),]
         );
     }
 
@@ -716,7 +750,7 @@ mod tests {
                 .map(|variant_cfg| {
                     parse_cargo_metadata_str(
                         &read_to_string(&cargo_metadata_path)
-                            .with_context(|| format!("Failed to open {:?}", cargo_metadata_path))
+                            .with_context(|| format!("Failed to open {cargo_metadata_path:?}"))
                             .unwrap(),
                         variant_cfg,
                     )
@@ -726,7 +760,7 @@ mod tests {
                     .collect::<Vec<Crate>>()
                 })
                 .collect::<Vec<Vec<Crate>>>();
-            assert_that!(format!("{crates:#?}"), eq(format!("{expected_crates:#?}")));
+            assert_that!(format!("{crates:#?}"), eq(&format!("{expected_crates:#?}")));
         }
     }
 }

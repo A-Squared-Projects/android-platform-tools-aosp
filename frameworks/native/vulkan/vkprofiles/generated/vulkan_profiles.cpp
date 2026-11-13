@@ -2,11 +2,11 @@
 /*
  * Copyright 2024 The Android Open Source Project
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Apache License, Version 2.0 (the "License")
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,6 +14,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
+ * This file is ***GENERATED***.  Do Not Edit.
+ * See scripts/gen_profiles_solution.py for modifications.
  */
 
 // clang-format off
@@ -41,8 +43,8 @@
 #ifndef VP_DEBUG_MESSAGE_CALLBACK
 #if defined(ANDROID) || defined(__ANDROID__)
 #include <android/log.h>
-#define VP_DEBUG_MESSAGE_CALLBACK(MSG)     __android_log_print(ANDROID_LOG_ERROR, "vkprofiles ERROR", "%s", MSG); \
-    __android_log_print(ANDROID_LOG_DEBUG, "vkprofiles WARNING", "%s", MSG)
+#define VP_DEBUG_MESSAGE_CALLBACK(MSG) \
+    __android_log_print(ANDROID_LOG_ERROR, "Profiles ERROR", "%s", MSG)
 #else
 #define VP_DEBUG_MESSAGE_CALLBACK(MSG) fprintf(stderr, "%s\n", MSG)
 #endif
@@ -52,24 +54,8 @@ void VP_DEBUG_MESSAGE_CALLBACK(const char*);
 
 #define VP_DEBUG_MSG(MSG) VP_DEBUG_MESSAGE_CALLBACK(MSG)
 #define VP_DEBUG_MSGF(MSGFMT, ...) { char msg[1024]; snprintf(msg, sizeof(msg) - 1, (MSGFMT), __VA_ARGS__); VP_DEBUG_MESSAGE_CALLBACK(msg); }
-#define VP_DEBUG_COND_MSG(COND, MSG) if (COND) VP_DEBUG_MSG(MSG)
-#define VP_DEBUG_COND_MSGF(COND, MSGFMT, ...) if (COND) VP_DEBUG_MSGF(MSGFMT, __VA_ARGS__)
-
-#include <string>
-
-namespace detail {
-
-VPAPI_ATTR std::string vpGetDeviceAndDriverInfoString(VkPhysicalDevice physicalDevice,
-                                                      PFN_vkGetPhysicalDeviceProperties2KHR pfnGetPhysicalDeviceProperties2) {
-    VkPhysicalDeviceDriverPropertiesKHR driverProps{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES_KHR };
-    VkPhysicalDeviceProperties2KHR deviceProps{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR, &driverProps };
-    pfnGetPhysicalDeviceProperties2(physicalDevice, &deviceProps);
-    return std::string("deviceName=") + std::string(&deviceProps.properties.deviceName[0])
-                    + ", driverName=" + std::string(&driverProps.driverName[0])
-                    + ", driverInfo=" + std::string(&driverProps.driverInfo[0]);
-}
-
-}
+#define VP_DEBUG_COND_MSG(COND, MSG) if (COND) { VP_DEBUG_MSG(MSG); }
+#define VP_DEBUG_COND_MSGF(COND, MSGFMT, ...) if (COND) { VP_DEBUG_MSGF(MSGFMT, __VA_ARGS__); }
 
 namespace detail {
 
@@ -150,7 +136,7 @@ VPAPI_ATTR void GatherStructureTypes(std::vector<VkStructureType>& structureType
 
 VPAPI_ATTR bool isMultiple(double source, double multiple) {
     double mod = std::fmod(source, multiple);
-    return std::abs(mod) < 0.0001; 
+    return std::abs(mod) < 0.0001;
 }
 
 VPAPI_ATTR bool isPowerOfTwo(double source) {
@@ -163,8 +149,10 @@ VPAPI_ATTR bool isPowerOfTwo(double source) {
 
 using PFN_vpStructFiller = void(*)(VkBaseOutStructure* p);
 using PFN_vpStructComparator = bool(*)(VkBaseOutStructure* p);
-using PFN_vpStructChainerCb =  void(*)(VkBaseOutStructure* p, void* pUser);
+using PFN_vpStructChainerCb = void(*)(VkBaseOutStructure* p, void* pUser);
 using PFN_vpStructChainer = void(*)(VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb);
+using PFN_vpStructArrayChainerCb = void(*)(uint32_t count, VkBaseOutStructure* p, void* pUser);
+using PFN_vpStructArrayChainer = void(*)(uint32_t count, VkBaseOutStructure* p, void* pUser, PFN_vpStructArrayChainerCb pfnCb);
 
 struct VpFeatureDesc {
     PFN_vpStructFiller              pfnFiller;
@@ -190,8 +178,48 @@ struct VpFormatDesc {
 struct VpStructChainerDesc {
     PFN_vpStructChainer             pfnFeature;
     PFN_vpStructChainer             pfnProperty;
-    PFN_vpStructChainer             pfnQueueFamily;
+    PFN_vpStructArrayChainer        pfnQueueFamily;
     PFN_vpStructChainer             pfnFormat;
+};
+
+struct VpVideoProfileInfoDesc {
+    PFN_vpStructFiller              pfnFiller;
+    PFN_vpStructComparator          pfnComparator;
+};
+
+struct VpVideoCapabilityDesc {
+    PFN_vpStructFiller              pfnFiller;
+    PFN_vpStructComparator          pfnComparator;
+};
+
+struct VpVideoFormatDesc {
+    PFN_vpStructFiller              pfnFiller;
+    PFN_vpStructComparator          pfnComparator;
+};
+
+struct VpVideoProfileStructChainerDesc {
+    PFN_vpStructChainer             pfnInfo;
+    PFN_vpStructChainer             pfnCapability;
+    PFN_vpStructArrayChainer        pfnFormat;
+};
+
+struct VpVideoProfileDesc {
+    VpVideoProfileProperties properties;
+
+    uint32_t infoStructTypeCount;
+    const VkStructureType* pInfoStructTypes;
+    VpVideoProfileInfoDesc info;
+
+    uint32_t capabilityStructTypeCount;
+    const VkStructureType* pCapabilityStructTypes;
+    VpVideoCapabilityDesc capability;
+
+    uint32_t formatStructTypeCount;
+    const VkStructureType* pFormatStructTypes;
+    uint32_t formatCount;
+    const VpVideoFormatDesc* pFormats;
+
+    VpVideoProfileStructChainerDesc chainers;
 };
 
 struct VpVariantDesc {
@@ -222,6 +250,9 @@ struct VpVariantDesc {
     const VpFormatDesc* pFormats;
 
     VpStructChainerDesc chainers;
+
+    uint32_t videoProfileCount;
+    const VpVideoProfileDesc* pVideoProfiles;
 };
 
 struct VpCapabilitiesDesc {
@@ -234,7 +265,7 @@ struct VpProfileDesc {
     uint32_t                        minApiVersion;
 
     const detail::VpVariantDesc*    pMergedCapabilities;
-    
+
     uint32_t                        requiredProfileCount;
     const VpProfileProperties*      pRequiredProfiles;
 
@@ -249,6 +280,167 @@ template <typename T>
 VPAPI_ATTR bool vpCheckFlags(const T& actual, const uint64_t expected) {
     return (actual & expected) == expected;
 }
+
+
+#ifdef VK_KHR_video_queue
+VPAPI_ATTR void vpForEachMatchingVideoProfiles(
+    VkVideoProfileInfoKHR*                      pVideoProfileInfo,
+    void*                                       pUser,
+    PFN_vpStructChainerCb                       pfnCb) {
+    const VkVideoChromaSubsamplingFlagsKHR chroma_subsampling_list[] = {
+        VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR,
+        VK_VIDEO_CHROMA_SUBSAMPLING_422_BIT_KHR,
+        VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR,
+        VK_VIDEO_CHROMA_SUBSAMPLING_MONOCHROME_BIT_KHR
+    };
+    const VkVideoComponentBitDepthFlagsKHR bit_depth_list[] = {
+        VK_VIDEO_COMPONENT_BIT_DEPTH_8_BIT_KHR,
+        VK_VIDEO_COMPONENT_BIT_DEPTH_10_BIT_KHR,
+        VK_VIDEO_COMPONENT_BIT_DEPTH_12_BIT_KHR
+    };
+    for (size_t chromaSubsampling_idx = 0; chromaSubsampling_idx < std::size(chroma_subsampling_list); ++chromaSubsampling_idx) {
+        pVideoProfileInfo->chromaSubsampling = chroma_subsampling_list[chromaSubsampling_idx];
+        for (size_t lumaBitDepth_idx = 0; lumaBitDepth_idx < std::size(bit_depth_list); ++lumaBitDepth_idx) {
+            pVideoProfileInfo->lumaBitDepth = bit_depth_list[lumaBitDepth_idx];
+            for (size_t chromaBitDepth_idx = 0; chromaBitDepth_idx < std::size(bit_depth_list); ++chromaBitDepth_idx) {
+                pVideoProfileInfo->chromaBitDepth = bit_depth_list[chromaBitDepth_idx];
+                {
+                    pVideoProfileInfo->pNext = nullptr;
+                    pVideoProfileInfo->videoCodecOperation = VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
+                    VkVideoDecodeH264ProfileInfoKHR var_VideoDecodeH264ProfileInfoKHR = { VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_PROFILE_INFO_KHR };
+                    var_VideoDecodeH264ProfileInfoKHR.pNext = pVideoProfileInfo->pNext;
+                    pVideoProfileInfo->pNext = &var_VideoDecodeH264ProfileInfoKHR;
+                    var_VideoDecodeH264ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H264_PROFILE_IDC_BASELINE;
+                    var_VideoDecodeH264ProfileInfoKHR.pictureLayout = VK_VIDEO_DECODE_H264_PICTURE_LAYOUT_PROGRESSIVE_KHR;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeH264ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H264_PROFILE_IDC_MAIN;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeH264ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H264_PROFILE_IDC_HIGH;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeH264ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H264_PROFILE_IDC_HIGH_444_PREDICTIVE;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeH264ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H264_PROFILE_IDC_BASELINE;
+                    var_VideoDecodeH264ProfileInfoKHR.pictureLayout = VK_VIDEO_DECODE_H264_PICTURE_LAYOUT_INTERLACED_INTERLEAVED_LINES_BIT_KHR;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeH264ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H264_PROFILE_IDC_MAIN;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeH264ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H264_PROFILE_IDC_HIGH;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeH264ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H264_PROFILE_IDC_HIGH_444_PREDICTIVE;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeH264ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H264_PROFILE_IDC_BASELINE;
+                    var_VideoDecodeH264ProfileInfoKHR.pictureLayout = VK_VIDEO_DECODE_H264_PICTURE_LAYOUT_INTERLACED_SEPARATE_PLANES_BIT_KHR;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeH264ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H264_PROFILE_IDC_MAIN;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeH264ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H264_PROFILE_IDC_HIGH;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeH264ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H264_PROFILE_IDC_HIGH_444_PREDICTIVE;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                }
+                {
+                    pVideoProfileInfo->pNext = nullptr;
+                    pVideoProfileInfo->videoCodecOperation = VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR;
+                    VkVideoDecodeH265ProfileInfoKHR var_VideoDecodeH265ProfileInfoKHR = { VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_PROFILE_INFO_KHR };
+                    var_VideoDecodeH265ProfileInfoKHR.pNext = pVideoProfileInfo->pNext;
+                    pVideoProfileInfo->pNext = &var_VideoDecodeH265ProfileInfoKHR;
+                    var_VideoDecodeH265ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H265_PROFILE_IDC_MAIN;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeH265ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H265_PROFILE_IDC_MAIN_10;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeH265ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H265_PROFILE_IDC_MAIN_STILL_PICTURE;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeH265ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H265_PROFILE_IDC_FORMAT_RANGE_EXTENSIONS;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeH265ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H265_PROFILE_IDC_SCC_EXTENSIONS;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                }
+                {
+                    pVideoProfileInfo->pNext = nullptr;
+                    pVideoProfileInfo->videoCodecOperation = VK_VIDEO_CODEC_OPERATION_DECODE_VP9_BIT_KHR;
+                    VkVideoDecodeVP9ProfileInfoKHR var_VideoDecodeVP9ProfileInfoKHR = { VK_STRUCTURE_TYPE_VIDEO_DECODE_VP9_PROFILE_INFO_KHR };
+                    var_VideoDecodeVP9ProfileInfoKHR.pNext = pVideoProfileInfo->pNext;
+                    pVideoProfileInfo->pNext = &var_VideoDecodeVP9ProfileInfoKHR;
+                    var_VideoDecodeVP9ProfileInfoKHR.stdProfile = STD_VIDEO_VP9_PROFILE_0;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeVP9ProfileInfoKHR.stdProfile = STD_VIDEO_VP9_PROFILE_1;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeVP9ProfileInfoKHR.stdProfile = STD_VIDEO_VP9_PROFILE_2;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeVP9ProfileInfoKHR.stdProfile = STD_VIDEO_VP9_PROFILE_3;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                }
+                {
+                    pVideoProfileInfo->pNext = nullptr;
+                    pVideoProfileInfo->videoCodecOperation = VK_VIDEO_CODEC_OPERATION_DECODE_AV1_BIT_KHR;
+                    VkVideoDecodeAV1ProfileInfoKHR var_VideoDecodeAV1ProfileInfoKHR = { VK_STRUCTURE_TYPE_VIDEO_DECODE_AV1_PROFILE_INFO_KHR };
+                    var_VideoDecodeAV1ProfileInfoKHR.pNext = pVideoProfileInfo->pNext;
+                    pVideoProfileInfo->pNext = &var_VideoDecodeAV1ProfileInfoKHR;
+                    var_VideoDecodeAV1ProfileInfoKHR.stdProfile = STD_VIDEO_AV1_PROFILE_MAIN;
+                    var_VideoDecodeAV1ProfileInfoKHR.filmGrainSupport = VK_TRUE;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeAV1ProfileInfoKHR.stdProfile = STD_VIDEO_AV1_PROFILE_HIGH;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeAV1ProfileInfoKHR.stdProfile = STD_VIDEO_AV1_PROFILE_PROFESSIONAL;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeAV1ProfileInfoKHR.stdProfile = STD_VIDEO_AV1_PROFILE_MAIN;
+                    var_VideoDecodeAV1ProfileInfoKHR.filmGrainSupport = VK_FALSE;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeAV1ProfileInfoKHR.stdProfile = STD_VIDEO_AV1_PROFILE_HIGH;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoDecodeAV1ProfileInfoKHR.stdProfile = STD_VIDEO_AV1_PROFILE_PROFESSIONAL;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                }
+                {
+                    pVideoProfileInfo->pNext = nullptr;
+                    pVideoProfileInfo->videoCodecOperation = VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR;
+                    VkVideoEncodeH264ProfileInfoKHR var_VideoEncodeH264ProfileInfoKHR = { VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_PROFILE_INFO_KHR };
+                    var_VideoEncodeH264ProfileInfoKHR.pNext = pVideoProfileInfo->pNext;
+                    pVideoProfileInfo->pNext = &var_VideoEncodeH264ProfileInfoKHR;
+                    var_VideoEncodeH264ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H264_PROFILE_IDC_BASELINE;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoEncodeH264ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H264_PROFILE_IDC_MAIN;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoEncodeH264ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H264_PROFILE_IDC_HIGH;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoEncodeH264ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H264_PROFILE_IDC_HIGH_444_PREDICTIVE;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                }
+                {
+                    pVideoProfileInfo->pNext = nullptr;
+                    pVideoProfileInfo->videoCodecOperation = VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR;
+                    VkVideoEncodeH265ProfileInfoKHR var_VideoEncodeH265ProfileInfoKHR = { VK_STRUCTURE_TYPE_VIDEO_ENCODE_H265_PROFILE_INFO_KHR };
+                    var_VideoEncodeH265ProfileInfoKHR.pNext = pVideoProfileInfo->pNext;
+                    pVideoProfileInfo->pNext = &var_VideoEncodeH265ProfileInfoKHR;
+                    var_VideoEncodeH265ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H265_PROFILE_IDC_MAIN;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoEncodeH265ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H265_PROFILE_IDC_MAIN_10;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoEncodeH265ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H265_PROFILE_IDC_MAIN_STILL_PICTURE;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoEncodeH265ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H265_PROFILE_IDC_FORMAT_RANGE_EXTENSIONS;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoEncodeH265ProfileInfoKHR.stdProfileIdc = STD_VIDEO_H265_PROFILE_IDC_SCC_EXTENSIONS;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                }
+                {
+                    pVideoProfileInfo->pNext = nullptr;
+                    pVideoProfileInfo->videoCodecOperation = VK_VIDEO_CODEC_OPERATION_ENCODE_AV1_BIT_KHR;
+                    VkVideoEncodeAV1ProfileInfoKHR var_VideoEncodeAV1ProfileInfoKHR = { VK_STRUCTURE_TYPE_VIDEO_ENCODE_AV1_PROFILE_INFO_KHR };
+                    var_VideoEncodeAV1ProfileInfoKHR.pNext = pVideoProfileInfo->pNext;
+                    pVideoProfileInfo->pNext = &var_VideoEncodeAV1ProfileInfoKHR;
+                    var_VideoEncodeAV1ProfileInfoKHR.stdProfile = STD_VIDEO_AV1_PROFILE_MAIN;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoEncodeAV1ProfileInfoKHR.stdProfile = STD_VIDEO_AV1_PROFILE_HIGH;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                    var_VideoEncodeAV1ProfileInfoKHR.stdProfile = STD_VIDEO_AV1_PROFILE_PROFESSIONAL;
+                    pfnCb(reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo), pUser);
+                }
+            }
+        }
+    }
+}
+#endif  // VK_KHR_video_queue
 #ifdef VP_ANDROID_15_minimums
 namespace VP_ANDROID_15_MINIMUMS {
 
@@ -280,7 +472,9 @@ static const VkStructureType formatStructTypes[] = {
     VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3_KHR,
 };
 
+namespace blocks {
 namespace MUST {
+
 static const VkExtensionProperties instanceExtensions[] = {
     VkExtensionProperties{ VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME, 1 },
     VkExtensionProperties{ VK_GOOGLE_SURFACELESS_QUERY_EXTENSION_NAME, 1 },
@@ -305,7 +499,7 @@ static const VkExtensionProperties deviceExtensions[] = {
 };
 
 static const VpFeatureDesc featureDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR: {
                     VkPhysicalDeviceFeatures2KHR* s = static_cast<VkPhysicalDeviceFeatures2KHR*>(static_cast<void*>(p));
@@ -365,7 +559,7 @@ static const VpFeatureDesc featureDesc = {
                 default: break;
             }
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR: {
@@ -430,7 +624,7 @@ static const VpFeatureDesc featureDesc = {
 };
 
 static const VpPropertyDesc propertyDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR: {
                     VkPhysicalDeviceProperties2KHR* s = static_cast<VkPhysicalDeviceProperties2KHR*>(static_cast<void*>(p));
@@ -447,7 +641,7 @@ static const VpPropertyDesc propertyDesc = {
                 default: break;
             }
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR: {
@@ -471,7 +665,7 @@ static const VpPropertyDesc propertyDesc = {
 static const VpFormatDesc formatDesc[] = {
     {
         VK_FORMAT_A4B4G4R4_UNORM_PACK16_EXT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -481,7 +675,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -496,7 +690,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A4R4G4B4_UNORM_PACK16_EXT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -506,7 +700,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -545,8 +739,8 @@ static const VpStructChainerDesc chainerDesc = {
         p->pNext = static_cast<VkBaseOutStructure*>(static_cast<void*>(&physicalDeviceVulkan11Properties));
         pfnCb(p, pUser);
     },
-    [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
-        pfnCb(p, pUser);
+    [](uint32_t count, VkBaseOutStructure* p, void* pUser, PFN_vpStructArrayChainerCb pfnCb) {
+        pfnCb(count, p, pUser);
     },
     [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
         VkFormatProperties3KHR formatProperties3KHR{ VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3_KHR, nullptr };
@@ -554,14 +748,15 @@ static const VpStructChainerDesc chainerDesc = {
         pfnCb(p, pUser);
     },
 };
-} //namespace MUST
+} // namespace MUST
 namespace primitivesGeneratedQuery {
+
 static const VkExtensionProperties deviceExtensions[] = {
     VkExtensionProperties{ VK_EXT_PRIMITIVES_GENERATED_QUERY_EXTENSION_NAME, 1 },
 };
 
 static const VpFeatureDesc featureDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIMITIVES_GENERATED_QUERY_FEATURES_EXT: {
                     VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT* s = static_cast<VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT*>(static_cast<void*>(p));
@@ -570,7 +765,7 @@ static const VpFeatureDesc featureDesc = {
                 default: break;
             }
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIMITIVES_GENERATED_QUERY_FEATURES_EXT: {
@@ -584,9 +779,9 @@ static const VpFeatureDesc featureDesc = {
 };
 
 static const VpPropertyDesc propertyDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
         return ret;
     }
@@ -616,8 +811,8 @@ static const VpStructChainerDesc chainerDesc = {
         p->pNext = static_cast<VkBaseOutStructure*>(static_cast<void*>(&physicalDeviceVulkan11Properties));
         pfnCb(p, pUser);
     },
-    [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
-        pfnCb(p, pUser);
+    [](uint32_t count, VkBaseOutStructure* p, void* pUser, PFN_vpStructArrayChainerCb pfnCb) {
+        pfnCb(count, p, pUser);
     },
     [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
         VkFormatProperties3KHR formatProperties3KHR{ VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3_KHR, nullptr };
@@ -625,10 +820,11 @@ static const VpStructChainerDesc chainerDesc = {
         pfnCb(p, pUser);
     },
 };
-} //namespace primitivesGeneratedQuery
+} // namespace primitivesGeneratedQuery
 namespace pipelineStatisticsQuery {
+
 static const VpFeatureDesc featureDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR: {
                     VkPhysicalDeviceFeatures2KHR* s = static_cast<VkPhysicalDeviceFeatures2KHR*>(static_cast<void*>(p));
@@ -637,7 +833,7 @@ static const VpFeatureDesc featureDesc = {
                 default: break;
             }
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR: {
@@ -651,9 +847,9 @@ static const VpFeatureDesc featureDesc = {
 };
 
 static const VpPropertyDesc propertyDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
         return ret;
     }
@@ -683,8 +879,8 @@ static const VpStructChainerDesc chainerDesc = {
         p->pNext = static_cast<VkBaseOutStructure*>(static_cast<void*>(&physicalDeviceVulkan11Properties));
         pfnCb(p, pUser);
     },
-    [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
-        pfnCb(p, pUser);
+    [](uint32_t count, VkBaseOutStructure* p, void* pUser, PFN_vpStructArrayChainerCb pfnCb) {
+        pfnCb(count, p, pUser);
     },
     [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
         VkFormatProperties3KHR formatProperties3KHR{ VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3_KHR, nullptr };
@@ -692,14 +888,15 @@ static const VpStructChainerDesc chainerDesc = {
         pfnCb(p, pUser);
     },
 };
-} //namespace pipelineStatisticsQuery
+} // namespace pipelineStatisticsQuery
 namespace swBresenhamLines {
+
 static const VkExtensionProperties deviceExtensions[] = {
     VkExtensionProperties{ VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME, 1 },
 };
 
 static const VpFeatureDesc featureDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LINE_RASTERIZATION_FEATURES_EXT: {
                     VkPhysicalDeviceLineRasterizationFeaturesEXT* s = static_cast<VkPhysicalDeviceLineRasterizationFeaturesEXT*>(static_cast<void*>(p));
@@ -708,7 +905,7 @@ static const VpFeatureDesc featureDesc = {
                 default: break;
             }
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LINE_RASTERIZATION_FEATURES_EXT: {
@@ -722,9 +919,9 @@ static const VpFeatureDesc featureDesc = {
 };
 
 static const VpPropertyDesc propertyDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
         return ret;
     }
@@ -754,8 +951,8 @@ static const VpStructChainerDesc chainerDesc = {
         p->pNext = static_cast<VkBaseOutStructure*>(static_cast<void*>(&physicalDeviceVulkan11Properties));
         pfnCb(p, pUser);
     },
-    [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
-        pfnCb(p, pUser);
+    [](uint32_t count, VkBaseOutStructure* p, void* pUser, PFN_vpStructArrayChainerCb pfnCb) {
+        pfnCb(count, p, pUser);
     },
     [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
         VkFormatProperties3KHR formatProperties3KHR{ VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3_KHR, nullptr };
@@ -763,14 +960,15 @@ static const VpStructChainerDesc chainerDesc = {
         pfnCb(p, pUser);
     },
 };
-} //namespace swBresenhamLines
+} // namespace swBresenhamLines
 namespace hwBresenhamLines {
+
 static const VkExtensionProperties deviceExtensions[] = {
     VkExtensionProperties{ VK_IMG_RELAXED_LINE_RASTERIZATION_EXTENSION_NAME, 1 },
 };
 
 static const VpFeatureDesc featureDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RELAXED_LINE_RASTERIZATION_FEATURES_IMG: {
                     VkPhysicalDeviceRelaxedLineRasterizationFeaturesIMG* s = static_cast<VkPhysicalDeviceRelaxedLineRasterizationFeaturesIMG*>(static_cast<void*>(p));
@@ -779,7 +977,7 @@ static const VpFeatureDesc featureDesc = {
                 default: break;
             }
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RELAXED_LINE_RASTERIZATION_FEATURES_IMG: {
@@ -793,9 +991,9 @@ static const VpFeatureDesc featureDesc = {
 };
 
 static const VpPropertyDesc propertyDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
         return ret;
     }
@@ -825,8 +1023,8 @@ static const VpStructChainerDesc chainerDesc = {
         p->pNext = static_cast<VkBaseOutStructure*>(static_cast<void*>(&physicalDeviceVulkan11Properties));
         pfnCb(p, pUser);
     },
-    [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
-        pfnCb(p, pUser);
+    [](uint32_t count, VkBaseOutStructure* p, void* pUser, PFN_vpStructArrayChainerCb pfnCb) {
+        pfnCb(count, p, pUser);
     },
     [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
         VkFormatProperties3KHR formatProperties3KHR{ VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3_KHR, nullptr };
@@ -834,9 +1032,342 @@ static const VpStructChainerDesc chainerDesc = {
         pfnCb(p, pUser);
     },
 };
-} //namespace hwBresenhamLines
+} // namespace hwBresenhamLines
+} // namespace blocks
 } // namespace VP_ANDROID_15_MINIMUMS
 #endif // VP_ANDROID_15_minimums
+
+#ifdef VP_ANDROID_16_minimums
+namespace VP_ANDROID_16_MINIMUMS {
+
+static const VkStructureType featureStructTypes[] = {
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_UNIFORM_CONTROL_FLOW_FEATURES_KHR,
+};
+
+static const VkStructureType propertyStructTypes[] = {
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES,
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES,
+};
+
+namespace blocks {
+namespace MUST {
+
+static const VkExtensionProperties deviceExtensions[] = {
+    VkExtensionProperties{ VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME, 1 },
+    VkExtensionProperties{ VK_EXT_IMAGE_2D_VIEW_OF_3D_EXTENSION_NAME, 1 },
+    VkExtensionProperties{ VK_EXT_PIPELINE_PROTECTED_ACCESS_EXTENSION_NAME, 1 },
+    VkExtensionProperties{ VK_EXT_PIPELINE_ROBUSTNESS_EXTENSION_NAME, 1 },
+    VkExtensionProperties{ VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME, 1 },
+    VkExtensionProperties{ VK_KHR_8BIT_STORAGE_EXTENSION_NAME, 1 },
+    VkExtensionProperties{ VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME, 1 },
+    VkExtensionProperties{ VK_KHR_MAINTENANCE_6_EXTENSION_NAME, 1 },
+    VkExtensionProperties{ VK_KHR_MAP_MEMORY_2_EXTENSION_NAME, 1 },
+    VkExtensionProperties{ VK_KHR_SHADER_EXPECT_ASSUME_EXTENSION_NAME, 1 },
+    VkExtensionProperties{ VK_KHR_SHADER_FLOAT_CONTROLS_2_EXTENSION_NAME, 1 },
+    VkExtensionProperties{ VK_KHR_SHADER_MAXIMAL_RECONVERGENCE_EXTENSION_NAME, 1 },
+    VkExtensionProperties{ VK_KHR_SHADER_SUBGROUP_ROTATE_EXTENSION_NAME, 1 },
+    VkExtensionProperties{ VK_KHR_SHADER_SUBGROUP_UNIFORM_CONTROL_FLOW_EXTENSION_NAME, 1 },
+    VkExtensionProperties{ VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME, 1 },
+};
+
+static const VpFeatureDesc featureDesc = {
+    [](VkBaseOutStructure* p) { (void)p;
+            switch (p->sType) {
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR: {
+                    VkPhysicalDeviceFeatures2KHR* s = static_cast<VkPhysicalDeviceFeatures2KHR*>(static_cast<void*>(p));
+                    s->features.fullDrawIndexUint32 = VK_TRUE;
+                    s->features.shaderInt16 = VK_TRUE;
+                } break;
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES: {
+                    VkPhysicalDeviceVulkan12Features* s = static_cast<VkPhysicalDeviceVulkan12Features*>(static_cast<void*>(p));
+                    s->samplerMirrorClampToEdge = VK_TRUE;
+                    s->scalarBlockLayout = VK_TRUE;
+                } break;
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES: {
+                    VkPhysicalDeviceProtectedMemoryFeatures* s = static_cast<VkPhysicalDeviceProtectedMemoryFeatures*>(static_cast<void*>(p));
+                    s->protectedMemory = VK_TRUE;
+                } break;
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES: {
+                    VkPhysicalDeviceShaderIntegerDotProductFeatures* s = static_cast<VkPhysicalDeviceShaderIntegerDotProductFeatures*>(static_cast<void*>(p));
+                    s->shaderIntegerDotProduct = VK_TRUE;
+                } break;
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT: {
+                    VkPhysicalDeviceTransformFeedbackFeaturesEXT* s = static_cast<VkPhysicalDeviceTransformFeedbackFeaturesEXT*>(static_cast<void*>(p));
+                    s->transformFeedback = VK_TRUE;
+                } break;
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT: {
+                    VkPhysicalDeviceImage2DViewOf3DFeaturesEXT* s = static_cast<VkPhysicalDeviceImage2DViewOf3DFeaturesEXT*>(static_cast<void*>(p));
+                    s->image2DViewOf3D = VK_TRUE;
+                } break;
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_UNIFORM_CONTROL_FLOW_FEATURES_KHR: {
+                    VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR* s = static_cast<VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR*>(static_cast<void*>(p));
+                    s->shaderSubgroupUniformControlFlow = VK_TRUE;
+                } break;
+                default: break;
+            }
+    },
+    [](VkBaseOutStructure* p) -> bool { (void)p;
+        bool ret = true;
+            switch (p->sType) {
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR: {
+                    VkPhysicalDeviceFeatures2KHR* prettify_VkPhysicalDeviceFeatures2KHR = static_cast<VkPhysicalDeviceFeatures2KHR*>(static_cast<void*>(p));
+                    ret = ret && (prettify_VkPhysicalDeviceFeatures2KHR->features.fullDrawIndexUint32 == VK_TRUE); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceFeatures2KHR->features.fullDrawIndexUint32 == VK_TRUE), "Unsupported feature condition: VkPhysicalDeviceFeatures2KHR::features.fullDrawIndexUint32 == VK_TRUE");
+                    ret = ret && (prettify_VkPhysicalDeviceFeatures2KHR->features.shaderInt16 == VK_TRUE); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceFeatures2KHR->features.shaderInt16 == VK_TRUE), "Unsupported feature condition: VkPhysicalDeviceFeatures2KHR::features.shaderInt16 == VK_TRUE");
+                } break;
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES: {
+                    VkPhysicalDeviceVulkan12Features* prettify_VkPhysicalDeviceVulkan12Features = static_cast<VkPhysicalDeviceVulkan12Features*>(static_cast<void*>(p));
+                    ret = ret && (prettify_VkPhysicalDeviceVulkan12Features->samplerMirrorClampToEdge == VK_TRUE); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceVulkan12Features->samplerMirrorClampToEdge == VK_TRUE), "Unsupported feature condition: VkPhysicalDeviceVulkan12Features::samplerMirrorClampToEdge == VK_TRUE");
+                    ret = ret && (prettify_VkPhysicalDeviceVulkan12Features->scalarBlockLayout == VK_TRUE); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceVulkan12Features->scalarBlockLayout == VK_TRUE), "Unsupported feature condition: VkPhysicalDeviceVulkan12Features::scalarBlockLayout == VK_TRUE");
+                } break;
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES: {
+                    VkPhysicalDeviceProtectedMemoryFeatures* prettify_VkPhysicalDeviceProtectedMemoryFeatures = static_cast<VkPhysicalDeviceProtectedMemoryFeatures*>(static_cast<void*>(p));
+                    ret = ret && (prettify_VkPhysicalDeviceProtectedMemoryFeatures->protectedMemory == VK_TRUE); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProtectedMemoryFeatures->protectedMemory == VK_TRUE), "Unsupported feature condition: VkPhysicalDeviceProtectedMemoryFeatures::protectedMemory == VK_TRUE");
+                } break;
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES: {
+                    VkPhysicalDeviceShaderIntegerDotProductFeatures* prettify_VkPhysicalDeviceShaderIntegerDotProductFeatures = static_cast<VkPhysicalDeviceShaderIntegerDotProductFeatures*>(static_cast<void*>(p));
+                    ret = ret && (prettify_VkPhysicalDeviceShaderIntegerDotProductFeatures->shaderIntegerDotProduct == VK_TRUE); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceShaderIntegerDotProductFeatures->shaderIntegerDotProduct == VK_TRUE), "Unsupported feature condition: VkPhysicalDeviceShaderIntegerDotProductFeatures::shaderIntegerDotProduct == VK_TRUE");
+                } break;
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT: {
+                    VkPhysicalDeviceTransformFeedbackFeaturesEXT* prettify_VkPhysicalDeviceTransformFeedbackFeaturesEXT = static_cast<VkPhysicalDeviceTransformFeedbackFeaturesEXT*>(static_cast<void*>(p));
+                    ret = ret && (prettify_VkPhysicalDeviceTransformFeedbackFeaturesEXT->transformFeedback == VK_TRUE); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceTransformFeedbackFeaturesEXT->transformFeedback == VK_TRUE), "Unsupported feature condition: VkPhysicalDeviceTransformFeedbackFeaturesEXT::transformFeedback == VK_TRUE");
+                } break;
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT: {
+                    VkPhysicalDeviceImage2DViewOf3DFeaturesEXT* prettify_VkPhysicalDeviceImage2DViewOf3DFeaturesEXT = static_cast<VkPhysicalDeviceImage2DViewOf3DFeaturesEXT*>(static_cast<void*>(p));
+                    ret = ret && (prettify_VkPhysicalDeviceImage2DViewOf3DFeaturesEXT->image2DViewOf3D == VK_TRUE); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceImage2DViewOf3DFeaturesEXT->image2DViewOf3D == VK_TRUE), "Unsupported feature condition: VkPhysicalDeviceImage2DViewOf3DFeaturesEXT::image2DViewOf3D == VK_TRUE");
+                } break;
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_UNIFORM_CONTROL_FLOW_FEATURES_KHR: {
+                    VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR* prettify_VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR = static_cast<VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR*>(static_cast<void*>(p));
+                    ret = ret && (prettify_VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR->shaderSubgroupUniformControlFlow == VK_TRUE); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR->shaderSubgroupUniformControlFlow == VK_TRUE), "Unsupported feature condition: VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR::shaderSubgroupUniformControlFlow == VK_TRUE");
+                } break;
+                default: break;
+            }
+        return ret;
+    }
+};
+
+static const VpPropertyDesc propertyDesc = {
+    [](VkBaseOutStructure* p) { (void)p;
+            switch (p->sType) {
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR: {
+                    VkPhysicalDeviceProperties2KHR* s = static_cast<VkPhysicalDeviceProperties2KHR*>(static_cast<void*>(p));
+                    s->properties.limits.bufferImageGranularity = 4096;
+                    s->properties.limits.lineWidthGranularity = 0.5f;
+                    s->properties.limits.maxColorAttachments = 8;
+                    s->properties.limits.maxComputeWorkGroupInvocations = 256;
+                    s->properties.limits.maxComputeWorkGroupSize[0] = 256;
+                    s->properties.limits.maxComputeWorkGroupSize[1] = 256;
+                    s->properties.limits.maxComputeWorkGroupSize[2] = 64;
+                    s->properties.limits.maxDescriptorSetStorageBuffers = 96;
+                    s->properties.limits.maxDescriptorSetUniformBuffers = 90;
+                    s->properties.limits.maxFragmentCombinedOutputResources = 16;
+                    s->properties.limits.maxImageArrayLayers = 2048;
+                    s->properties.limits.maxImageDimension1D = 8192;
+                    s->properties.limits.maxImageDimension2D = 8192;
+                    s->properties.limits.maxImageDimensionCube = 8192;
+                    s->properties.limits.maxPerStageDescriptorUniformBuffers = 15;
+                    s->properties.limits.maxPerStageResources = 200;
+                    s->properties.limits.maxSamplerLodBias = 14;
+                    s->properties.limits.maxUniformBufferRange = 65536;
+                    s->properties.limits.maxVertexOutputComponents = 72;
+                    s->properties.limits.mipmapPrecisionBits = 6;
+                    s->properties.limits.pointSizeGranularity = 0.125f;
+                    s->properties.limits.standardSampleLocations = VK_TRUE;
+                    s->properties.limits.subTexelPrecisionBits = 8;
+                    s->properties.limits.timestampComputeAndGraphics = VK_TRUE;
+                } break;
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES: {
+                    VkPhysicalDeviceFloatControlsProperties* s = static_cast<VkPhysicalDeviceFloatControlsProperties*>(static_cast<void*>(p));
+                    s->shaderSignedZeroInfNanPreserveFloat16 = VK_TRUE;
+                    s->shaderSignedZeroInfNanPreserveFloat32 = VK_TRUE;
+                } break;
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES: {
+                    VkPhysicalDeviceVulkan11Properties* s = static_cast<VkPhysicalDeviceVulkan11Properties*>(static_cast<void*>(p));
+                    s->subgroupSupportedStages |= (VK_SHADER_STAGE_COMPUTE_BIT);
+                } break;
+                default: break;
+            }
+    },
+    [](VkBaseOutStructure* p) -> bool { (void)p;
+        bool ret = true;
+            switch (p->sType) {
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR: {
+                    VkPhysicalDeviceProperties2KHR* prettify_VkPhysicalDeviceProperties2KHR = static_cast<VkPhysicalDeviceProperties2KHR*>(static_cast<void*>(p));
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.bufferImageGranularity <= 4096); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.bufferImageGranularity <= 4096), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.bufferImageGranularity <= 4096");
+                    ret = ret && ((4096 % prettify_VkPhysicalDeviceProperties2KHR->properties.limits.bufferImageGranularity) == 0); VP_DEBUG_COND_MSG(!((4096 % prettify_VkPhysicalDeviceProperties2KHR->properties.limits.bufferImageGranularity) == 0), "Unsupported properties condition: (4096 % prettify_VkPhysicalDeviceProperties2KHR->properties.limits.bufferImageGranularity) == 0");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.lineWidthGranularity <= 0.5); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.lineWidthGranularity <= 0.5), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.lineWidthGranularity <= 0.5");
+                    ret = ret && (isMultiple(0.5, prettify_VkPhysicalDeviceProperties2KHR->properties.limits.lineWidthGranularity)); VP_DEBUG_COND_MSG(!(isMultiple(0.5, prettify_VkPhysicalDeviceProperties2KHR->properties.limits.lineWidthGranularity)), "Unsupported properties condition: isMultiple(0.5, prettify_VkPhysicalDeviceProperties2KHR->properties.limits.lineWidthGranularity)");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxColorAttachments >= 8); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxColorAttachments >= 8), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxColorAttachments >= 8");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxComputeWorkGroupInvocations >= 256); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxComputeWorkGroupInvocations >= 256), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxComputeWorkGroupInvocations >= 256");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxComputeWorkGroupSize[0] >= 256); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxComputeWorkGroupSize[0] >= 256), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxComputeWorkGroupSize[0] >= 256");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxComputeWorkGroupSize[1] >= 256); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxComputeWorkGroupSize[1] >= 256), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxComputeWorkGroupSize[1] >= 256");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxComputeWorkGroupSize[2] >= 64); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxComputeWorkGroupSize[2] >= 64), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxComputeWorkGroupSize[2] >= 64");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxDescriptorSetStorageBuffers >= 96); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxDescriptorSetStorageBuffers >= 96), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxDescriptorSetStorageBuffers >= 96");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxDescriptorSetUniformBuffers >= 90); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxDescriptorSetUniformBuffers >= 90), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxDescriptorSetUniformBuffers >= 90");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxFragmentCombinedOutputResources >= 16); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxFragmentCombinedOutputResources >= 16), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxFragmentCombinedOutputResources >= 16");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxImageArrayLayers >= 2048); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxImageArrayLayers >= 2048), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxImageArrayLayers >= 2048");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxImageDimension1D >= 8192); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxImageDimension1D >= 8192), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxImageDimension1D >= 8192");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxImageDimension2D >= 8192); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxImageDimension2D >= 8192), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxImageDimension2D >= 8192");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxImageDimensionCube >= 8192); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxImageDimensionCube >= 8192), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxImageDimensionCube >= 8192");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxPerStageDescriptorUniformBuffers >= 15); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxPerStageDescriptorUniformBuffers >= 15), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxPerStageDescriptorUniformBuffers >= 15");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxPerStageResources >= 200); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxPerStageResources >= 200), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxPerStageResources >= 200");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxSamplerLodBias >= 14); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxSamplerLodBias >= 14), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxSamplerLodBias >= 14");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxUniformBufferRange >= 65536); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxUniformBufferRange >= 65536), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxUniformBufferRange >= 65536");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxVertexOutputComponents >= 72); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxVertexOutputComponents >= 72), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxVertexOutputComponents >= 72");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.mipmapPrecisionBits >= 6); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.mipmapPrecisionBits >= 6), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.mipmapPrecisionBits >= 6");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.pointSizeGranularity <= 0.125); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.pointSizeGranularity <= 0.125), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.pointSizeGranularity <= 0.125");
+                    ret = ret && (isMultiple(0.125, prettify_VkPhysicalDeviceProperties2KHR->properties.limits.pointSizeGranularity)); VP_DEBUG_COND_MSG(!(isMultiple(0.125, prettify_VkPhysicalDeviceProperties2KHR->properties.limits.pointSizeGranularity)), "Unsupported properties condition: isMultiple(0.125, prettify_VkPhysicalDeviceProperties2KHR->properties.limits.pointSizeGranularity)");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.standardSampleLocations >= VK_TRUE); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.standardSampleLocations >= VK_TRUE), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.standardSampleLocations >= VK_TRUE");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.subTexelPrecisionBits >= 8); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.subTexelPrecisionBits >= 8), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.subTexelPrecisionBits >= 8");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.timestampComputeAndGraphics >= VK_TRUE); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.timestampComputeAndGraphics >= VK_TRUE), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.timestampComputeAndGraphics >= VK_TRUE");
+                } break;
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES: {
+                    VkPhysicalDeviceFloatControlsProperties* prettify_VkPhysicalDeviceFloatControlsProperties = static_cast<VkPhysicalDeviceFloatControlsProperties*>(static_cast<void*>(p));
+                    ret = ret && (prettify_VkPhysicalDeviceFloatControlsProperties->shaderSignedZeroInfNanPreserveFloat16 >= VK_TRUE); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceFloatControlsProperties->shaderSignedZeroInfNanPreserveFloat16 >= VK_TRUE), "Unsupported properties condition: VkPhysicalDeviceFloatControlsProperties::shaderSignedZeroInfNanPreserveFloat16 >= VK_TRUE");
+                    ret = ret && (prettify_VkPhysicalDeviceFloatControlsProperties->shaderSignedZeroInfNanPreserveFloat32 >= VK_TRUE); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceFloatControlsProperties->shaderSignedZeroInfNanPreserveFloat32 >= VK_TRUE), "Unsupported properties condition: VkPhysicalDeviceFloatControlsProperties::shaderSignedZeroInfNanPreserveFloat32 >= VK_TRUE");
+                } break;
+                case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES: {
+                    VkPhysicalDeviceVulkan11Properties* prettify_VkPhysicalDeviceVulkan11Properties = static_cast<VkPhysicalDeviceVulkan11Properties*>(static_cast<void*>(p));
+                    ret = ret && (vpCheckFlags(prettify_VkPhysicalDeviceVulkan11Properties->subgroupSupportedStages, (VK_SHADER_STAGE_COMPUTE_BIT))); VP_DEBUG_COND_MSG(!(vpCheckFlags(prettify_VkPhysicalDeviceVulkan11Properties->subgroupSupportedStages, (VK_SHADER_STAGE_COMPUTE_BIT))), "Unsupported properties condition: VkPhysicalDeviceVulkan11Properties::subgroupSupportedStages contains (VK_SHADER_STAGE_COMPUTE_BIT)");
+                } break;
+                default: break;
+            }
+        return ret;
+    }
+};
+
+static const VpStructChainerDesc chainerDesc = {
+    [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
+        VkPhysicalDeviceVulkan12Features physicalDeviceVulkan12Features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, nullptr };
+        VkPhysicalDeviceProtectedMemoryFeatures physicalDeviceProtectedMemoryFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES, &physicalDeviceVulkan12Features };
+        VkPhysicalDeviceShaderIntegerDotProductFeatures physicalDeviceShaderIntegerDotProductFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES, &physicalDeviceProtectedMemoryFeatures };
+        VkPhysicalDeviceTransformFeedbackFeaturesEXT physicalDeviceTransformFeedbackFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT, &physicalDeviceShaderIntegerDotProductFeatures };
+        VkPhysicalDeviceImage2DViewOf3DFeaturesEXT physicalDeviceImage2DViewOf3DFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT, &physicalDeviceTransformFeedbackFeaturesEXT };
+        VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR physicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_UNIFORM_CONTROL_FLOW_FEATURES_KHR, &physicalDeviceImage2DViewOf3DFeaturesEXT };
+        p->pNext = static_cast<VkBaseOutStructure*>(static_cast<void*>(&physicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR));
+        pfnCb(p, pUser);
+    },
+    [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
+        VkPhysicalDeviceFloatControlsProperties physicalDeviceFloatControlsProperties{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES, nullptr };
+        VkPhysicalDeviceVulkan11Properties physicalDeviceVulkan11Properties{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES, &physicalDeviceFloatControlsProperties };
+        p->pNext = static_cast<VkBaseOutStructure*>(static_cast<void*>(&physicalDeviceVulkan11Properties));
+        pfnCb(p, pUser);
+    },
+    [](uint32_t count, VkBaseOutStructure* p, void* pUser, PFN_vpStructArrayChainerCb pfnCb) {
+        pfnCb(count, p, pUser);
+    },
+    [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
+        pfnCb(p, pUser);
+    },
+};
+} // namespace MUST
+namespace multisampledToSingleSampled {
+
+static const VkExtensionProperties deviceExtensions[] = {
+    VkExtensionProperties{ VK_EXT_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_EXTENSION_NAME, 1 },
+};
+
+static const VpFeatureDesc featureDesc = {
+    [](VkBaseOutStructure* p) { (void)p;
+    },
+    [](VkBaseOutStructure* p) -> bool { (void)p;
+        bool ret = true;
+        return ret;
+    }
+};
+
+static const VpPropertyDesc propertyDesc = {
+    [](VkBaseOutStructure* p) { (void)p;
+    },
+    [](VkBaseOutStructure* p) -> bool { (void)p;
+        bool ret = true;
+        return ret;
+    }
+};
+
+static const VpStructChainerDesc chainerDesc = {
+    [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
+        VkPhysicalDeviceVulkan12Features physicalDeviceVulkan12Features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, nullptr };
+        VkPhysicalDeviceProtectedMemoryFeatures physicalDeviceProtectedMemoryFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES, &physicalDeviceVulkan12Features };
+        VkPhysicalDeviceShaderIntegerDotProductFeatures physicalDeviceShaderIntegerDotProductFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES, &physicalDeviceProtectedMemoryFeatures };
+        VkPhysicalDeviceTransformFeedbackFeaturesEXT physicalDeviceTransformFeedbackFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT, &physicalDeviceShaderIntegerDotProductFeatures };
+        VkPhysicalDeviceImage2DViewOf3DFeaturesEXT physicalDeviceImage2DViewOf3DFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT, &physicalDeviceTransformFeedbackFeaturesEXT };
+        VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR physicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_UNIFORM_CONTROL_FLOW_FEATURES_KHR, &physicalDeviceImage2DViewOf3DFeaturesEXT };
+        p->pNext = static_cast<VkBaseOutStructure*>(static_cast<void*>(&physicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR));
+        pfnCb(p, pUser);
+    },
+    [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
+        VkPhysicalDeviceFloatControlsProperties physicalDeviceFloatControlsProperties{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES, nullptr };
+        VkPhysicalDeviceVulkan11Properties physicalDeviceVulkan11Properties{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES, &physicalDeviceFloatControlsProperties };
+        p->pNext = static_cast<VkBaseOutStructure*>(static_cast<void*>(&physicalDeviceVulkan11Properties));
+        pfnCb(p, pUser);
+    },
+    [](uint32_t count, VkBaseOutStructure* p, void* pUser, PFN_vpStructArrayChainerCb pfnCb) {
+        pfnCb(count, p, pUser);
+    },
+    [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
+        pfnCb(p, pUser);
+    },
+};
+} // namespace multisampledToSingleSampled
+namespace shaderStencilExport {
+
+static const VkExtensionProperties deviceExtensions[] = {
+    VkExtensionProperties{ VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME, 1 },
+};
+
+static const VpFeatureDesc featureDesc = {
+    [](VkBaseOutStructure* p) { (void)p;
+    },
+    [](VkBaseOutStructure* p) -> bool { (void)p;
+        bool ret = true;
+        return ret;
+    }
+};
+
+static const VpPropertyDesc propertyDesc = {
+    [](VkBaseOutStructure* p) { (void)p;
+    },
+    [](VkBaseOutStructure* p) -> bool { (void)p;
+        bool ret = true;
+        return ret;
+    }
+};
+
+static const VpStructChainerDesc chainerDesc = {
+    [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
+        VkPhysicalDeviceVulkan12Features physicalDeviceVulkan12Features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, nullptr };
+        VkPhysicalDeviceProtectedMemoryFeatures physicalDeviceProtectedMemoryFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES, &physicalDeviceVulkan12Features };
+        VkPhysicalDeviceShaderIntegerDotProductFeatures physicalDeviceShaderIntegerDotProductFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES, &physicalDeviceProtectedMemoryFeatures };
+        VkPhysicalDeviceTransformFeedbackFeaturesEXT physicalDeviceTransformFeedbackFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT, &physicalDeviceShaderIntegerDotProductFeatures };
+        VkPhysicalDeviceImage2DViewOf3DFeaturesEXT physicalDeviceImage2DViewOf3DFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT, &physicalDeviceTransformFeedbackFeaturesEXT };
+        VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR physicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_UNIFORM_CONTROL_FLOW_FEATURES_KHR, &physicalDeviceImage2DViewOf3DFeaturesEXT };
+        p->pNext = static_cast<VkBaseOutStructure*>(static_cast<void*>(&physicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR));
+        pfnCb(p, pUser);
+    },
+    [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
+        VkPhysicalDeviceFloatControlsProperties physicalDeviceFloatControlsProperties{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES, nullptr };
+        VkPhysicalDeviceVulkan11Properties physicalDeviceVulkan11Properties{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES, &physicalDeviceFloatControlsProperties };
+        p->pNext = static_cast<VkBaseOutStructure*>(static_cast<void*>(&physicalDeviceVulkan11Properties));
+        pfnCb(p, pUser);
+    },
+    [](uint32_t count, VkBaseOutStructure* p, void* pUser, PFN_vpStructArrayChainerCb pfnCb) {
+        pfnCb(count, p, pUser);
+    },
+    [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
+        pfnCb(p, pUser);
+    },
+};
+} // namespace shaderStencilExport
+} // namespace blocks
+} // namespace VP_ANDROID_16_MINIMUMS
+#endif // VP_ANDROID_16_minimums
 
 #ifdef VP_ANDROID_baseline_2021
 namespace VP_ANDROID_BASELINE_2021 {
@@ -883,7 +1414,7 @@ static const VkExtensionProperties deviceExtensions[] = {
 };
 
 static const VpFeatureDesc featureDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR: {
                     VkPhysicalDeviceFeatures2KHR* s = static_cast<VkPhysicalDeviceFeatures2KHR*>(static_cast<void*>(p));
@@ -903,7 +1434,7 @@ static const VpFeatureDesc featureDesc = {
                 default: break;
             }
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR: {
@@ -928,9 +1459,9 @@ static const VpFeatureDesc featureDesc = {
 };
 
 static const VpPropertyDesc propertyDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
         return ret;
     }
@@ -945,8 +1476,8 @@ static const VpStructChainerDesc chainerDesc = {
         p->pNext = static_cast<VkBaseOutStructure*>(static_cast<void*>(nullptr));
         pfnCb(p, pUser);
     },
-    [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
-        pfnCb(p, pUser);
+    [](uint32_t count, VkBaseOutStructure* p, void* pUser, PFN_vpStructArrayChainerCb pfnCb) {
+        pfnCb(count, p, pUser);
     },
     [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
         VkFormatProperties3KHR formatProperties3KHR{ VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3_KHR, nullptr };
@@ -955,7 +1486,9 @@ static const VpStructChainerDesc chainerDesc = {
     },
 };
 
+namespace blocks {
 namespace baseline {
+
 static const VkExtensionProperties instanceExtensions[] = {
     VkExtensionProperties{ VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME, 1 },
     VkExtensionProperties{ VK_KHR_ANDROID_SURFACE_EXTENSION_NAME, 1 },
@@ -985,7 +1518,7 @@ static const VkExtensionProperties deviceExtensions[] = {
 };
 
 static const VpFeatureDesc featureDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR: {
                     VkPhysicalDeviceFeatures2KHR* s = static_cast<VkPhysicalDeviceFeatures2KHR*>(static_cast<void*>(p));
@@ -1005,7 +1538,7 @@ static const VpFeatureDesc featureDesc = {
                 default: break;
             }
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR: {
@@ -1030,7 +1563,7 @@ static const VpFeatureDesc featureDesc = {
 };
 
 static const VpPropertyDesc propertyDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR: {
                     VkPhysicalDeviceProperties2KHR* s = static_cast<VkPhysicalDeviceProperties2KHR*>(static_cast<void*>(p));
@@ -1097,7 +1630,6 @@ static const VpPropertyDesc propertyDesc = {
                     s->properties.limits.maxViewportDimensions[1] = 4096;
                     s->properties.limits.maxViewports = 1;
                     s->properties.limits.minInterpolationOffset = -0.5f;
-                    s->properties.limits.minMemoryMapAlignment = 4096;
                     s->properties.limits.minStorageBufferOffsetAlignment = 256;
                     s->properties.limits.minTexelBufferOffsetAlignment = 256;
                     s->properties.limits.minTexelOffset = -8;
@@ -1119,7 +1651,7 @@ static const VpPropertyDesc propertyDesc = {
                 default: break;
             }
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR: {
@@ -1187,8 +1719,6 @@ static const VpPropertyDesc propertyDesc = {
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxViewportDimensions[1] >= 4096); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxViewportDimensions[1] >= 4096), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxViewportDimensions[1] >= 4096");
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxViewports >= 1); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxViewports >= 1), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxViewports >= 1");
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minInterpolationOffset <= -0.5); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minInterpolationOffset <= -0.5), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.minInterpolationOffset <= -0.5");
-                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment <= 4096); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment <= 4096), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.minMemoryMapAlignment <= 4096");
-                    ret = ret && ((prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment & (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment - 1)) == 0); VP_DEBUG_COND_MSG(!((prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment & (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment - 1)) == 0), "Unsupported properties condition: (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment & (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment - 1)) == 0");
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment <= 256); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment <= 256), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.minStorageBufferOffsetAlignment <= 256");
                     ret = ret && ((prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment & (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment - 1)) == 0); VP_DEBUG_COND_MSG(!((prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment & (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment - 1)) == 0), "Unsupported properties condition: (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment & (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment - 1)) == 0");
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minTexelBufferOffsetAlignment <= 256); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minTexelBufferOffsetAlignment <= 256), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.minTexelBufferOffsetAlignment <= 256");
@@ -1203,7 +1733,7 @@ static const VpPropertyDesc propertyDesc = {
                     ret = ret && (vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.sampledImageDepthSampleCounts, (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT))); VP_DEBUG_COND_MSG(!(vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.sampledImageDepthSampleCounts, (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT))), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.sampledImageDepthSampleCounts contains (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT)");
                     ret = ret && (vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.sampledImageIntegerSampleCounts, (VK_SAMPLE_COUNT_1_BIT))); VP_DEBUG_COND_MSG(!(vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.sampledImageIntegerSampleCounts, (VK_SAMPLE_COUNT_1_BIT))), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.sampledImageIntegerSampleCounts contains (VK_SAMPLE_COUNT_1_BIT)");
                     ret = ret && (vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.sampledImageStencilSampleCounts, (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT))); VP_DEBUG_COND_MSG(!(vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.sampledImageStencilSampleCounts, (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT))), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.sampledImageStencilSampleCounts contains (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT)");
-                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.standardSampleLocations == VK_TRUE); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.standardSampleLocations == VK_TRUE), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.standardSampleLocations == VK_TRUE");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.standardSampleLocations >= VK_TRUE); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.standardSampleLocations >= VK_TRUE), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.standardSampleLocations >= VK_TRUE");
                     ret = ret && (vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.storageImageSampleCounts, (VK_SAMPLE_COUNT_1_BIT))); VP_DEBUG_COND_MSG(!(vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.storageImageSampleCounts, (VK_SAMPLE_COUNT_1_BIT))), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.storageImageSampleCounts contains (VK_SAMPLE_COUNT_1_BIT)");
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.subPixelInterpolationOffsetBits >= 4); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.subPixelInterpolationOffsetBits >= 4), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.subPixelInterpolationOffsetBits >= 4");
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.subPixelPrecisionBits >= 4); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.subPixelPrecisionBits >= 4), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.subPixelPrecisionBits >= 4");
@@ -1220,7 +1750,7 @@ static const VpPropertyDesc propertyDesc = {
 static const VpFormatDesc formatDesc[] = {
     {
         VK_FORMAT_A1R5G5B5_UNORM_PACK16,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1230,7 +1760,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1245,7 +1775,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A2B10G10R10_UINT_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1256,7 +1786,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1272,7 +1802,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A2B10G10R10_UNORM_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1283,7 +1813,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1299,7 +1829,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A8B8G8R8_SINT_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1310,7 +1840,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1326,7 +1856,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A8B8G8R8_SNORM_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1337,7 +1867,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1353,7 +1883,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A8B8G8R8_SRGB_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1363,7 +1893,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1378,7 +1908,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A8B8G8R8_UINT_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1389,7 +1919,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1405,7 +1935,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A8B8G8R8_UNORM_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1416,7 +1946,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1432,7 +1962,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x10_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1442,7 +1972,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1457,7 +1987,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x10_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1467,7 +1997,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1482,7 +2012,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x5_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1492,7 +2022,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1507,7 +2037,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x5_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1517,7 +2047,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1532,7 +2062,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x6_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1542,7 +2072,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1557,7 +2087,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x6_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1567,7 +2097,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1582,7 +2112,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x8_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1592,7 +2122,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1607,7 +2137,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x8_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1617,7 +2147,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1632,7 +2162,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_12x10_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1642,7 +2172,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1657,7 +2187,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_12x10_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1667,7 +2197,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1682,7 +2212,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_12x12_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1692,7 +2222,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1707,7 +2237,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_12x12_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1717,7 +2247,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1732,7 +2262,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_4x4_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1742,7 +2272,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1757,7 +2287,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_4x4_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1767,7 +2297,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1782,7 +2312,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_5x4_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1792,7 +2322,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1807,7 +2337,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_5x4_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1817,7 +2347,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1832,7 +2362,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_5x5_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1842,7 +2372,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1857,7 +2387,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_5x5_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1867,7 +2397,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1882,7 +2412,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_6x5_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1892,7 +2422,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1907,7 +2437,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_6x5_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1917,7 +2447,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1932,7 +2462,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_6x6_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1942,7 +2472,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1957,7 +2487,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_6x6_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1967,7 +2497,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -1982,7 +2512,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_8x5_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -1992,7 +2522,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2007,7 +2537,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_8x5_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2017,7 +2547,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2032,7 +2562,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_8x6_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2042,7 +2572,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2057,7 +2587,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_8x6_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2067,7 +2597,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2082,7 +2612,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_8x8_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2092,7 +2622,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2107,7 +2637,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_8x8_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2117,7 +2647,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2132,7 +2662,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_B10G11R11_UFLOAT_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2143,7 +2673,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2159,7 +2689,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_B4G4R4A4_UNORM_PACK16,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2169,7 +2699,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2184,7 +2714,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_B8G8R8A8_SRGB,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2194,7 +2724,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2209,7 +2739,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_B8G8R8A8_UNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2220,7 +2750,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2236,7 +2766,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_D16_UNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2245,7 +2775,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2259,7 +2789,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_D32_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2268,7 +2798,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2282,7 +2812,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_E5B9G9R9_UFLOAT_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2292,7 +2822,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2307,7 +2837,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_EAC_R11G11_SNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2317,7 +2847,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2332,7 +2862,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_EAC_R11G11_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2342,7 +2872,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2357,7 +2887,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_EAC_R11_SNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2367,7 +2897,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2382,7 +2912,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_EAC_R11_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2392,7 +2922,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2407,7 +2937,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ETC2_R8G8B8A1_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2417,7 +2947,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2432,7 +2962,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ETC2_R8G8B8A1_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2442,7 +2972,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2457,7 +2987,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ETC2_R8G8B8A8_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2467,7 +2997,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2482,7 +3012,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2492,7 +3022,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2507,7 +3037,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ETC2_R8G8B8_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2517,7 +3047,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2532,7 +3062,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2542,7 +3072,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2557,7 +3087,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16B16A16_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2568,7 +3098,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2584,7 +3114,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16B16A16_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2595,7 +3125,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2611,7 +3141,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16B16A16_SNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2620,7 +3150,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2634,7 +3164,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16B16A16_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2645,7 +3175,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2661,7 +3191,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2672,7 +3202,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2688,7 +3218,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2699,7 +3229,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2715,7 +3245,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16_SNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2724,7 +3254,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2738,7 +3268,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2748,7 +3278,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2763,7 +3293,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2774,7 +3304,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2790,7 +3320,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2801,7 +3331,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2817,7 +3347,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16_SNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2826,7 +3356,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2840,7 +3370,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2851,7 +3381,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2867,7 +3397,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16_UNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2876,7 +3406,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2890,7 +3420,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32G32B32A32_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2900,7 +3430,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2915,7 +3445,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32G32B32A32_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2925,7 +3455,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2940,7 +3470,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32G32B32A32_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2950,7 +3480,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2965,7 +3495,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32G32_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -2976,7 +3506,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -2992,7 +3522,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32G32_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3003,7 +3533,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3019,7 +3549,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32G32_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3030,7 +3560,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3046,7 +3576,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3057,7 +3587,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3073,7 +3603,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3084,7 +3614,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3100,7 +3630,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3111,7 +3641,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3127,7 +3657,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R5G6B5_UNORM_PACK16,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3137,7 +3667,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3152,7 +3682,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8B8A8_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3163,7 +3693,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3179,7 +3709,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8B8A8_SNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3190,7 +3720,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3206,7 +3736,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8B8A8_SRGB,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3216,7 +3746,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3231,7 +3761,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8B8A8_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3242,7 +3772,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3258,7 +3788,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8B8A8_UNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3269,7 +3799,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3285,7 +3815,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3296,7 +3826,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3312,7 +3842,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8_SNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3323,7 +3853,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3339,7 +3869,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3350,7 +3880,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3366,7 +3896,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8_UNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3377,7 +3907,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3393,7 +3923,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3404,7 +3934,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3420,7 +3950,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8_SNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3431,7 +3961,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3447,7 +3977,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3458,7 +3988,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3474,7 +4004,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8_UNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3485,7 +4015,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3510,8 +4040,8 @@ static const VpStructChainerDesc chainerDesc = {
         p->pNext = static_cast<VkBaseOutStructure*>(static_cast<void*>(nullptr));
         pfnCb(p, pUser);
     },
-    [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
-        pfnCb(p, pUser);
+    [](uint32_t count, VkBaseOutStructure* p, void* pUser, PFN_vpStructArrayChainerCb pfnCb) {
+        pfnCb(count, p, pUser);
     },
     [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
         VkFormatProperties3KHR formatProperties3KHR{ VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3_KHR, nullptr };
@@ -3519,7 +4049,8 @@ static const VpStructChainerDesc chainerDesc = {
         pfnCb(p, pUser);
     },
 };
-} //namespace baseline
+} // namespace baseline
+} // namespace blocks
 } // namespace VP_ANDROID_BASELINE_2021
 #endif // VP_ANDROID_baseline_2021
 
@@ -3565,7 +4096,7 @@ static const VkExtensionProperties deviceExtensions[] = {
 };
 
 static const VpFeatureDesc featureDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR: {
                     VkPhysicalDeviceFeatures2KHR* s = static_cast<VkPhysicalDeviceFeatures2KHR*>(static_cast<void*>(p));
@@ -3585,7 +4116,7 @@ static const VpFeatureDesc featureDesc = {
                 default: break;
             }
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR: {
@@ -3610,9 +4141,9 @@ static const VpFeatureDesc featureDesc = {
 };
 
 static const VpPropertyDesc propertyDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
         return ret;
     }
@@ -3627,8 +4158,8 @@ static const VpStructChainerDesc chainerDesc = {
         p->pNext = static_cast<VkBaseOutStructure*>(static_cast<void*>(nullptr));
         pfnCb(p, pUser);
     },
-    [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
-        pfnCb(p, pUser);
+    [](uint32_t count, VkBaseOutStructure* p, void* pUser, PFN_vpStructArrayChainerCb pfnCb) {
+        pfnCb(count, p, pUser);
     },
     [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
         VkFormatProperties3KHR formatProperties3KHR{ VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3_KHR, nullptr };
@@ -3637,7 +4168,9 @@ static const VpStructChainerDesc chainerDesc = {
     },
 };
 
+namespace blocks {
 namespace baseline {
+
 static const VkExtensionProperties instanceExtensions[] = {
     VkExtensionProperties{ VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME, 1 },
     VkExtensionProperties{ VK_KHR_ANDROID_SURFACE_EXTENSION_NAME, 1 },
@@ -3664,7 +4197,7 @@ static const VkExtensionProperties deviceExtensions[] = {
 };
 
 static const VpFeatureDesc featureDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR: {
                     VkPhysicalDeviceFeatures2KHR* s = static_cast<VkPhysicalDeviceFeatures2KHR*>(static_cast<void*>(p));
@@ -3684,7 +4217,7 @@ static const VpFeatureDesc featureDesc = {
                 default: break;
             }
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR: {
@@ -3709,7 +4242,7 @@ static const VpFeatureDesc featureDesc = {
 };
 
 static const VpPropertyDesc propertyDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR: {
                     VkPhysicalDeviceProperties2KHR* s = static_cast<VkPhysicalDeviceProperties2KHR*>(static_cast<void*>(p));
@@ -3776,7 +4309,6 @@ static const VpPropertyDesc propertyDesc = {
                     s->properties.limits.maxViewportDimensions[1] = 4096;
                     s->properties.limits.maxViewports = 1;
                     s->properties.limits.minInterpolationOffset = -0.5f;
-                    s->properties.limits.minMemoryMapAlignment = 4096;
                     s->properties.limits.minStorageBufferOffsetAlignment = 256;
                     s->properties.limits.minTexelBufferOffsetAlignment = 256;
                     s->properties.limits.minTexelOffset = -8;
@@ -3797,7 +4329,7 @@ static const VpPropertyDesc propertyDesc = {
                 default: break;
             }
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR: {
@@ -3865,8 +4397,6 @@ static const VpPropertyDesc propertyDesc = {
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxViewportDimensions[1] >= 4096); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxViewportDimensions[1] >= 4096), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxViewportDimensions[1] >= 4096");
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxViewports >= 1); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxViewports >= 1), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxViewports >= 1");
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minInterpolationOffset <= -0.5); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minInterpolationOffset <= -0.5), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.minInterpolationOffset <= -0.5");
-                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment <= 4096); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment <= 4096), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.minMemoryMapAlignment <= 4096");
-                    ret = ret && ((prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment & (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment - 1)) == 0); VP_DEBUG_COND_MSG(!((prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment & (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment - 1)) == 0), "Unsupported properties condition: (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment & (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment - 1)) == 0");
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment <= 256); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment <= 256), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.minStorageBufferOffsetAlignment <= 256");
                     ret = ret && ((prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment & (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment - 1)) == 0); VP_DEBUG_COND_MSG(!((prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment & (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment - 1)) == 0), "Unsupported properties condition: (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment & (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment - 1)) == 0");
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minTexelBufferOffsetAlignment <= 256); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minTexelBufferOffsetAlignment <= 256), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.minTexelBufferOffsetAlignment <= 256");
@@ -3879,7 +4409,7 @@ static const VpPropertyDesc propertyDesc = {
                     ret = ret && (vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.sampledImageDepthSampleCounts, (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT))); VP_DEBUG_COND_MSG(!(vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.sampledImageDepthSampleCounts, (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT))), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.sampledImageDepthSampleCounts contains (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT)");
                     ret = ret && (vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.sampledImageIntegerSampleCounts, (VK_SAMPLE_COUNT_1_BIT))); VP_DEBUG_COND_MSG(!(vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.sampledImageIntegerSampleCounts, (VK_SAMPLE_COUNT_1_BIT))), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.sampledImageIntegerSampleCounts contains (VK_SAMPLE_COUNT_1_BIT)");
                     ret = ret && (vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.sampledImageStencilSampleCounts, (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT))); VP_DEBUG_COND_MSG(!(vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.sampledImageStencilSampleCounts, (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT))), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.sampledImageStencilSampleCounts contains (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT)");
-                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.standardSampleLocations == VK_TRUE); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.standardSampleLocations == VK_TRUE), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.standardSampleLocations == VK_TRUE");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.standardSampleLocations >= VK_TRUE); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.standardSampleLocations >= VK_TRUE), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.standardSampleLocations >= VK_TRUE");
                     ret = ret && (vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.storageImageSampleCounts, (VK_SAMPLE_COUNT_1_BIT))); VP_DEBUG_COND_MSG(!(vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.storageImageSampleCounts, (VK_SAMPLE_COUNT_1_BIT))), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.storageImageSampleCounts contains (VK_SAMPLE_COUNT_1_BIT)");
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.subPixelInterpolationOffsetBits >= 4); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.subPixelInterpolationOffsetBits >= 4), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.subPixelInterpolationOffsetBits >= 4");
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.subPixelPrecisionBits >= 4); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.subPixelPrecisionBits >= 4), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.subPixelPrecisionBits >= 4");
@@ -3896,7 +4426,7 @@ static const VpPropertyDesc propertyDesc = {
 static const VpFormatDesc formatDesc[] = {
     {
         VK_FORMAT_A1R5G5B5_UNORM_PACK16,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3906,7 +4436,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3921,7 +4451,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A2B10G10R10_UINT_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3932,7 +4462,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3948,7 +4478,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A2B10G10R10_UNORM_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3959,7 +4489,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -3975,7 +4505,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A8B8G8R8_SINT_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -3986,7 +4516,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4002,7 +4532,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A8B8G8R8_SNORM_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4013,7 +4543,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4029,7 +4559,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A8B8G8R8_SRGB_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4039,7 +4569,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4054,7 +4584,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A8B8G8R8_UINT_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4065,7 +4595,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4081,7 +4611,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A8B8G8R8_UNORM_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4092,7 +4622,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4108,7 +4638,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x10_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4118,7 +4648,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4133,7 +4663,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x10_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4143,7 +4673,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4158,7 +4688,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x5_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4168,7 +4698,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4183,7 +4713,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x5_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4193,7 +4723,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4208,7 +4738,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x6_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4218,7 +4748,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4233,7 +4763,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x6_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4243,7 +4773,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4258,7 +4788,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x8_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4268,7 +4798,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4283,7 +4813,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x8_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4293,7 +4823,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4308,7 +4838,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_12x10_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4318,7 +4848,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4333,7 +4863,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_12x10_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4343,7 +4873,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4358,7 +4888,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_12x12_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4368,7 +4898,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4383,7 +4913,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_12x12_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4393,7 +4923,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4408,7 +4938,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_4x4_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4418,7 +4948,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4433,7 +4963,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_4x4_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4443,7 +4973,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4458,7 +4988,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_5x4_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4468,7 +4998,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4483,7 +5013,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_5x4_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4493,7 +5023,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4508,7 +5038,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_5x5_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4518,7 +5048,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4533,7 +5063,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_5x5_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4543,7 +5073,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4558,7 +5088,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_6x5_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4568,7 +5098,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4583,7 +5113,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_6x5_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4593,7 +5123,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4608,7 +5138,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_6x6_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4618,7 +5148,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4633,7 +5163,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_6x6_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4643,7 +5173,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4658,7 +5188,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_8x5_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4668,7 +5198,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4683,7 +5213,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_8x5_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4693,7 +5223,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4708,7 +5238,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_8x6_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4718,7 +5248,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4733,7 +5263,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_8x6_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4743,7 +5273,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4758,7 +5288,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_8x8_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4768,7 +5298,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4783,7 +5313,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_8x8_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4793,7 +5323,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4808,7 +5338,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_B10G11R11_UFLOAT_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4819,7 +5349,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4835,7 +5365,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_B4G4R4A4_UNORM_PACK16,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4845,7 +5375,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4860,7 +5390,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_B8G8R8A8_SRGB,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4870,7 +5400,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4885,7 +5415,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_B8G8R8A8_UNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4896,7 +5426,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4912,7 +5442,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_D16_UNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4921,7 +5451,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4935,7 +5465,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_D32_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4944,7 +5474,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4958,7 +5488,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_E5B9G9R9_UFLOAT_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4968,7 +5498,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -4983,7 +5513,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_EAC_R11G11_SNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -4993,7 +5523,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5008,7 +5538,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_EAC_R11G11_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5018,7 +5548,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5033,7 +5563,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_EAC_R11_SNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5043,7 +5573,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5058,7 +5588,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_EAC_R11_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5068,7 +5598,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5083,7 +5613,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ETC2_R8G8B8A1_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5093,7 +5623,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5108,7 +5638,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ETC2_R8G8B8A1_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5118,7 +5648,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5133,7 +5663,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ETC2_R8G8B8A8_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5143,7 +5673,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5158,7 +5688,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5168,7 +5698,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5183,7 +5713,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ETC2_R8G8B8_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5193,7 +5723,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5208,7 +5738,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5218,7 +5748,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5233,7 +5763,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16B16A16_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5244,7 +5774,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5260,7 +5790,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16B16A16_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5271,7 +5801,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5287,7 +5817,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16B16A16_SNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5296,7 +5826,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5310,7 +5840,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16B16A16_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5321,7 +5851,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5337,7 +5867,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5348,7 +5878,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5364,7 +5894,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5375,7 +5905,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5391,7 +5921,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16_SNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5400,7 +5930,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5414,7 +5944,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5424,7 +5954,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5439,7 +5969,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5450,7 +5980,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5466,7 +5996,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5477,7 +6007,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5493,7 +6023,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16_SNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5502,7 +6032,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5516,7 +6046,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5527,7 +6057,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5543,7 +6073,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16_UNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5552,7 +6082,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5566,7 +6096,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32G32B32A32_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5576,7 +6106,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5591,7 +6121,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32G32B32A32_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5601,7 +6131,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5616,7 +6146,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32G32B32A32_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5626,7 +6156,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5641,7 +6171,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32G32_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5652,7 +6182,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5668,7 +6198,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32G32_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5679,7 +6209,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5695,7 +6225,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32G32_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5706,7 +6236,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5722,7 +6252,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5733,7 +6263,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5749,7 +6279,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5760,7 +6290,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5776,7 +6306,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5787,7 +6317,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5803,7 +6333,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R5G6B5_UNORM_PACK16,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5813,7 +6343,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5828,7 +6358,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8B8A8_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5839,7 +6369,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5855,7 +6385,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8B8A8_SNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5866,7 +6396,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5882,7 +6412,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8B8A8_SRGB,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5892,7 +6422,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5907,7 +6437,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8B8A8_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5918,7 +6448,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5934,7 +6464,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8B8A8_UNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5945,7 +6475,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5961,7 +6491,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5972,7 +6502,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -5988,7 +6518,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8_SNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -5999,7 +6529,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -6015,7 +6545,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -6026,7 +6556,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -6042,7 +6572,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8_UNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -6053,7 +6583,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -6069,7 +6599,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -6080,7 +6610,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -6096,7 +6626,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8_SNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -6107,7 +6637,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -6123,7 +6653,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -6134,7 +6664,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -6150,7 +6680,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8_UNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -6161,7 +6691,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -6186,8 +6716,8 @@ static const VpStructChainerDesc chainerDesc = {
         p->pNext = static_cast<VkBaseOutStructure*>(static_cast<void*>(nullptr));
         pfnCb(p, pUser);
     },
-    [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
-        pfnCb(p, pUser);
+    [](uint32_t count, VkBaseOutStructure* p, void* pUser, PFN_vpStructArrayChainerCb pfnCb) {
+        pfnCb(count, p, pUser);
     },
     [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
         VkFormatProperties3KHR formatProperties3KHR{ VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3_KHR, nullptr };
@@ -6195,7 +6725,8 @@ static const VpStructChainerDesc chainerDesc = {
         pfnCb(p, pUser);
     },
 };
-} //namespace baseline
+} // namespace baseline
+} // namespace blocks
 } // namespace VP_ANDROID_BASELINE_2021_CPU_ONLY
 #endif // VP_ANDROID_baseline_2021_cpu_only
 
@@ -6254,7 +6785,7 @@ static const VkExtensionProperties deviceExtensions[] = {
 };
 
 static const VpFeatureDesc featureDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR: {
                     VkPhysicalDeviceFeatures2KHR* s = static_cast<VkPhysicalDeviceFeatures2KHR*>(static_cast<void*>(p));
@@ -6294,7 +6825,7 @@ static const VpFeatureDesc featureDesc = {
                 default: break;
             }
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR: {
@@ -6339,9 +6870,9 @@ static const VpFeatureDesc featureDesc = {
 };
 
 static const VpPropertyDesc propertyDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
         return ret;
     }
@@ -6361,8 +6892,8 @@ static const VpStructChainerDesc chainerDesc = {
         p->pNext = static_cast<VkBaseOutStructure*>(static_cast<void*>(&physicalDeviceMultiviewProperties));
         pfnCb(p, pUser);
     },
-    [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
-        pfnCb(p, pUser);
+    [](uint32_t count, VkBaseOutStructure* p, void* pUser, PFN_vpStructArrayChainerCb pfnCb) {
+        pfnCb(count, p, pUser);
     },
     [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
         VkFormatProperties3KHR formatProperties3KHR{ VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3_KHR, nullptr };
@@ -6371,7 +6902,9 @@ static const VpStructChainerDesc chainerDesc = {
     },
 };
 
+namespace blocks {
 namespace baseline {
+
 static const VkExtensionProperties instanceExtensions[] = {
     VkExtensionProperties{ VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME, 1 },
     VkExtensionProperties{ VK_KHR_ANDROID_SURFACE_EXTENSION_NAME, 1 },
@@ -6406,7 +6939,7 @@ static const VkExtensionProperties deviceExtensions[] = {
 };
 
 static const VpFeatureDesc featureDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR: {
                     VkPhysicalDeviceFeatures2KHR* s = static_cast<VkPhysicalDeviceFeatures2KHR*>(static_cast<void*>(p));
@@ -6446,7 +6979,7 @@ static const VpFeatureDesc featureDesc = {
                 default: break;
             }
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR: {
@@ -6491,7 +7024,7 @@ static const VpFeatureDesc featureDesc = {
 };
 
 static const VpPropertyDesc propertyDesc = {
-    [](VkBaseOutStructure* p) {
+    [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR: {
                     VkPhysicalDeviceProperties2KHR* s = static_cast<VkPhysicalDeviceProperties2KHR*>(static_cast<void*>(p));
@@ -6558,7 +7091,6 @@ static const VpPropertyDesc propertyDesc = {
                     s->properties.limits.maxViewportDimensions[1] = 4096;
                     s->properties.limits.maxViewports = 1;
                     s->properties.limits.minInterpolationOffset = -0.5f;
-                    s->properties.limits.minMemoryMapAlignment = 4096;
                     s->properties.limits.minStorageBufferOffsetAlignment = 256;
                     s->properties.limits.minTexelBufferOffsetAlignment = 256;
                     s->properties.limits.minTexelOffset = -8;
@@ -6587,7 +7119,7 @@ static const VpPropertyDesc propertyDesc = {
                 default: break;
             }
     },
-    [](VkBaseOutStructure* p) -> bool {
+    [](VkBaseOutStructure* p) -> bool { (void)p;
         bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR: {
@@ -6655,8 +7187,6 @@ static const VpPropertyDesc propertyDesc = {
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxViewportDimensions[1] >= 4096); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxViewportDimensions[1] >= 4096), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxViewportDimensions[1] >= 4096");
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxViewports >= 1); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.maxViewports >= 1), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.maxViewports >= 1");
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minInterpolationOffset <= -0.5); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minInterpolationOffset <= -0.5), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.minInterpolationOffset <= -0.5");
-                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment <= 4096); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment <= 4096), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.minMemoryMapAlignment <= 4096");
-                    ret = ret && ((prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment & (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment - 1)) == 0); VP_DEBUG_COND_MSG(!((prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment & (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment - 1)) == 0), "Unsupported properties condition: (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment & (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minMemoryMapAlignment - 1)) == 0");
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment <= 256); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment <= 256), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.minStorageBufferOffsetAlignment <= 256");
                     ret = ret && ((prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment & (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment - 1)) == 0); VP_DEBUG_COND_MSG(!((prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment & (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment - 1)) == 0), "Unsupported properties condition: (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment & (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minStorageBufferOffsetAlignment - 1)) == 0");
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minTexelBufferOffsetAlignment <= 256); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.minTexelBufferOffsetAlignment <= 256), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.minTexelBufferOffsetAlignment <= 256");
@@ -6673,7 +7203,7 @@ static const VpPropertyDesc propertyDesc = {
                     ret = ret && (vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.sampledImageDepthSampleCounts, (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT))); VP_DEBUG_COND_MSG(!(vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.sampledImageDepthSampleCounts, (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT))), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.sampledImageDepthSampleCounts contains (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT)");
                     ret = ret && (vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.sampledImageIntegerSampleCounts, (VK_SAMPLE_COUNT_1_BIT))); VP_DEBUG_COND_MSG(!(vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.sampledImageIntegerSampleCounts, (VK_SAMPLE_COUNT_1_BIT))), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.sampledImageIntegerSampleCounts contains (VK_SAMPLE_COUNT_1_BIT)");
                     ret = ret && (vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.sampledImageStencilSampleCounts, (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT))); VP_DEBUG_COND_MSG(!(vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.sampledImageStencilSampleCounts, (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT))), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.sampledImageStencilSampleCounts contains (VK_SAMPLE_COUNT_1_BIT | VK_SAMPLE_COUNT_4_BIT)");
-                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.standardSampleLocations == VK_TRUE); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.standardSampleLocations == VK_TRUE), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.standardSampleLocations == VK_TRUE");
+                    ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.standardSampleLocations >= VK_TRUE); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.standardSampleLocations >= VK_TRUE), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.standardSampleLocations >= VK_TRUE");
                     ret = ret && (vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.storageImageSampleCounts, (VK_SAMPLE_COUNT_1_BIT))); VP_DEBUG_COND_MSG(!(vpCheckFlags(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.storageImageSampleCounts, (VK_SAMPLE_COUNT_1_BIT))), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.storageImageSampleCounts contains (VK_SAMPLE_COUNT_1_BIT)");
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.subPixelInterpolationOffsetBits >= 4); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.subPixelInterpolationOffsetBits >= 4), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.subPixelInterpolationOffsetBits >= 4");
                     ret = ret && (prettify_VkPhysicalDeviceProperties2KHR->properties.limits.subPixelPrecisionBits >= 4); VP_DEBUG_COND_MSG(!(prettify_VkPhysicalDeviceProperties2KHR->properties.limits.subPixelPrecisionBits >= 4), "Unsupported properties condition: VkPhysicalDeviceProperties2KHR::properties.limits.subPixelPrecisionBits >= 4");
@@ -6695,7 +7225,7 @@ static const VpPropertyDesc propertyDesc = {
 static const VpFormatDesc formatDesc[] = {
     {
         VK_FORMAT_A1R5G5B5_UNORM_PACK16,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -6705,7 +7235,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -6720,7 +7250,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A2B10G10R10_UINT_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -6731,7 +7261,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -6747,7 +7277,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A2B10G10R10_UNORM_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -6758,7 +7288,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -6774,7 +7304,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A8B8G8R8_SINT_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -6785,7 +7315,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -6801,7 +7331,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A8B8G8R8_SNORM_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -6812,7 +7342,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -6828,7 +7358,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A8B8G8R8_SRGB_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -6838,7 +7368,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -6853,7 +7383,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A8B8G8R8_UINT_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -6864,7 +7394,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -6880,7 +7410,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_A8B8G8R8_UNORM_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -6891,7 +7421,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -6907,7 +7437,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x10_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -6917,7 +7447,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -6932,7 +7462,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x10_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -6942,7 +7472,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -6957,7 +7487,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x5_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -6967,7 +7497,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -6982,7 +7512,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x5_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -6992,7 +7522,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7007,7 +7537,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x6_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7017,7 +7547,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7032,7 +7562,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x6_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7042,7 +7572,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7057,7 +7587,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x8_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7067,7 +7597,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7082,7 +7612,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_10x8_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7092,7 +7622,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7107,7 +7637,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_12x10_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7117,7 +7647,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7132,7 +7662,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_12x10_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7142,7 +7672,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7157,7 +7687,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_12x12_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7167,7 +7697,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7182,7 +7712,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_12x12_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7192,7 +7722,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7207,7 +7737,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_4x4_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7217,7 +7747,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7232,7 +7762,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_4x4_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7242,7 +7772,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7257,7 +7787,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_5x4_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7267,7 +7797,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7282,7 +7812,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_5x4_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7292,7 +7822,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7307,7 +7837,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_5x5_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7317,7 +7847,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7332,7 +7862,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_5x5_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7342,7 +7872,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7357,7 +7887,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_6x5_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7367,7 +7897,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7382,7 +7912,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_6x5_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7392,7 +7922,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7407,7 +7937,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_6x6_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7417,7 +7947,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7432,7 +7962,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_6x6_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7442,7 +7972,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7457,7 +7987,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_8x5_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7467,7 +7997,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7482,7 +8012,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_8x5_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7492,7 +8022,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7507,7 +8037,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_8x6_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7517,7 +8047,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7532,7 +8062,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_8x6_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7542,7 +8072,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7557,7 +8087,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_8x8_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7567,7 +8097,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7582,7 +8112,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ASTC_8x8_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7592,7 +8122,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7607,7 +8137,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_B10G11R11_UFLOAT_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7618,7 +8148,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7634,7 +8164,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_B4G4R4A4_UNORM_PACK16,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7644,7 +8174,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7659,7 +8189,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_B8G8R8A8_SRGB,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7669,7 +8199,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7684,7 +8214,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_B8G8R8A8_UNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7695,7 +8225,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7711,7 +8241,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_D16_UNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7720,7 +8250,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7734,7 +8264,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_D32_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7743,7 +8273,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7757,7 +8287,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_E5B9G9R9_UFLOAT_PACK32,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7767,7 +8297,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7782,7 +8312,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_EAC_R11G11_SNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7792,7 +8322,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7807,7 +8337,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_EAC_R11G11_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7817,7 +8347,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7832,7 +8362,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_EAC_R11_SNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7842,7 +8372,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7857,7 +8387,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_EAC_R11_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7867,7 +8397,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7882,7 +8412,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ETC2_R8G8B8A1_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7892,7 +8422,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7907,7 +8437,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ETC2_R8G8B8A1_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7917,7 +8447,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7932,7 +8462,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ETC2_R8G8B8A8_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7942,7 +8472,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7957,7 +8487,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7967,7 +8497,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -7982,7 +8512,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ETC2_R8G8B8_SRGB_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -7992,7 +8522,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8007,7 +8537,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8017,7 +8547,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8032,7 +8562,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16B16A16_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8043,7 +8573,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8059,7 +8589,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16B16A16_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8070,7 +8600,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8086,7 +8616,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16B16A16_SNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8095,7 +8625,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8109,7 +8639,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16B16A16_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8120,7 +8650,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8136,7 +8666,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8147,7 +8677,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8163,7 +8693,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8174,7 +8704,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8190,7 +8720,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16_SNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8199,7 +8729,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8213,7 +8743,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16G16_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8223,7 +8753,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8238,7 +8768,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8249,7 +8779,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8265,7 +8795,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8276,7 +8806,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8292,7 +8822,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16_SNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8301,7 +8831,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8315,7 +8845,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8326,7 +8856,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8342,7 +8872,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R16_UNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8351,7 +8881,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8365,7 +8895,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32G32B32A32_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8375,7 +8905,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8390,7 +8920,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32G32B32A32_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8400,7 +8930,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8415,7 +8945,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32G32B32A32_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8425,7 +8955,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8440,7 +8970,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32G32_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8451,7 +8981,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8467,7 +8997,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32G32_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8478,7 +9008,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8494,7 +9024,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32G32_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8505,7 +9035,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8521,7 +9051,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32_SFLOAT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8532,7 +9062,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8548,7 +9078,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8559,7 +9089,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8575,7 +9105,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R32_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8586,7 +9116,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8602,7 +9132,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R5G6B5_UNORM_PACK16,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8612,7 +9142,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8627,7 +9157,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8B8A8_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8638,7 +9168,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8654,7 +9184,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8B8A8_SNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8665,7 +9195,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8681,7 +9211,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8B8A8_SRGB,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8691,7 +9221,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8706,7 +9236,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8B8A8_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8717,7 +9247,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8733,7 +9263,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8B8A8_UNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8744,7 +9274,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8760,7 +9290,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8771,7 +9301,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8787,7 +9317,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8_SNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8798,7 +9328,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8814,7 +9344,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8825,7 +9355,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8841,7 +9371,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8G8_UNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8852,7 +9382,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8868,7 +9398,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8_SINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8879,7 +9409,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8895,7 +9425,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8_SNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8906,7 +9436,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8922,7 +9452,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8_UINT,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8933,7 +9463,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8949,7 +9479,7 @@ static const VpFormatDesc formatDesc[] = {
     },
     {
         VK_FORMAT_R8_UNORM,
-        [](VkBaseOutStructure* p) {
+        [](VkBaseOutStructure* p) { (void)p;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
                     VkFormatProperties2KHR* s = static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p));
@@ -8960,7 +9490,7 @@ static const VpFormatDesc formatDesc[] = {
                 default: break;
             }
         },
-        [](VkBaseOutStructure* p) -> bool {
+        [](VkBaseOutStructure* p) -> bool { (void)p;
             bool ret = true;
             switch (p->sType) {
                 case VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR: {
@@ -8990,8 +9520,8 @@ static const VpStructChainerDesc chainerDesc = {
         p->pNext = static_cast<VkBaseOutStructure*>(static_cast<void*>(&physicalDeviceMultiviewProperties));
         pfnCb(p, pUser);
     },
-    [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
-        pfnCb(p, pUser);
+    [](uint32_t count, VkBaseOutStructure* p, void* pUser, PFN_vpStructArrayChainerCb pfnCb) {
+        pfnCb(count, p, pUser);
     },
     [](VkBaseOutStructure* p, void* pUser, PFN_vpStructChainerCb pfnCb) {
         VkFormatProperties3KHR formatProperties3KHR{ VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3_KHR, nullptr };
@@ -8999,105 +9529,113 @@ static const VpStructChainerDesc chainerDesc = {
         pfnCb(p, pUser);
     },
 };
-} //namespace baseline
+} // namespace baseline
+} // namespace blocks
 } // namespace VP_ANDROID_BASELINE_2022
 #endif // VP_ANDROID_baseline_2022
 
 
 #ifdef VP_ANDROID_15_minimums
 namespace VP_ANDROID_15_MINIMUMS {
-    namespace MUST {
-        static const VpVariantDesc variants[] = {
-            {
-                "MUST",
-                static_cast<uint32_t>(std::size(MUST::instanceExtensions)), MUST::instanceExtensions,
-                static_cast<uint32_t>(std::size(MUST::deviceExtensions)), MUST::deviceExtensions,
-                static_cast<uint32_t>(std::size(featureStructTypes)), featureStructTypes,
-                MUST::featureDesc,
-                static_cast<uint32_t>(std::size(propertyStructTypes)), propertyStructTypes,
-                MUST::propertyDesc,
-                0, nullptr,
-                0, nullptr,
-                static_cast<uint32_t>(std::size(formatStructTypes)), formatStructTypes,
-                static_cast<uint32_t>(std::size(MUST::formatDesc)), MUST::formatDesc,
-                MUST::chainerDesc,
-            },
-        };
-        static const uint32_t variantCount = static_cast<uint32_t>(std::size(variants));
-    } // namespace MUST
+    namespace blocks {
+        namespace MUST {
+            static const VpVariantDesc variants[] = {
+                {
+                    "MUST",
+                    static_cast<uint32_t>(std::size(blocks::MUST::instanceExtensions)), blocks::MUST::instanceExtensions,
+                    static_cast<uint32_t>(std::size(blocks::MUST::deviceExtensions)), blocks::MUST::deviceExtensions,
+                    static_cast<uint32_t>(std::size(featureStructTypes)), featureStructTypes,
+                    blocks::MUST::featureDesc,
+                    static_cast<uint32_t>(std::size(propertyStructTypes)), propertyStructTypes,
+                    blocks::MUST::propertyDesc,
+                    0, nullptr,
+                    0, nullptr,
+                    static_cast<uint32_t>(std::size(formatStructTypes)), formatStructTypes,
+                    static_cast<uint32_t>(std::size(blocks::MUST::formatDesc)), blocks::MUST::formatDesc,
+                    blocks::MUST::chainerDesc,
+                    0, nullptr,
+                },
+            };
+            static const uint32_t variantCount = static_cast<uint32_t>(std::size(variants));
+        } // namespace MUST
 
-    namespace primitivesGeneratedQuery_pipelineStatisticsQuery_ {
-        static const VpVariantDesc variants[] = {
-            {
-                "primitivesGeneratedQuery",
-                0, nullptr,
-                static_cast<uint32_t>(std::size(primitivesGeneratedQuery::deviceExtensions)), primitivesGeneratedQuery::deviceExtensions,
-                static_cast<uint32_t>(std::size(featureStructTypes)), featureStructTypes,
-                primitivesGeneratedQuery::featureDesc,
-                0, nullptr,
-                primitivesGeneratedQuery::propertyDesc,
-                0, nullptr,
-                0, nullptr,
-                0, nullptr,
-                0, nullptr,
-                primitivesGeneratedQuery::chainerDesc,
-            },
-            {
-                "pipelineStatisticsQuery",
-                0, nullptr,
-                0, nullptr,
-                static_cast<uint32_t>(std::size(featureStructTypes)), featureStructTypes,
-                pipelineStatisticsQuery::featureDesc,
-                0, nullptr,
-                pipelineStatisticsQuery::propertyDesc,
-                0, nullptr,
-                0, nullptr,
-                0, nullptr,
-                0, nullptr,
-                pipelineStatisticsQuery::chainerDesc,
-            },
-        };
-        static const uint32_t variantCount = static_cast<uint32_t>(std::size(variants));
-    } // namespace primitivesGeneratedQuery_pipelineStatisticsQuery_
+        namespace primitivesGeneratedQuery_pipelineStatisticsQuery_ {
+            static const VpVariantDesc variants[] = {
+                {
+                    "primitivesGeneratedQuery",
+                    0, nullptr,
+                    static_cast<uint32_t>(std::size(blocks::primitivesGeneratedQuery::deviceExtensions)), blocks::primitivesGeneratedQuery::deviceExtensions,
+                    static_cast<uint32_t>(std::size(featureStructTypes)), featureStructTypes,
+                    blocks::primitivesGeneratedQuery::featureDesc,
+                    0, nullptr,
+                    blocks::primitivesGeneratedQuery::propertyDesc,
+                    0, nullptr,
+                    0, nullptr,
+                    0, nullptr,
+                    0, nullptr,
+                    blocks::primitivesGeneratedQuery::chainerDesc,
+                    0, nullptr,
+                },
+                {
+                    "pipelineStatisticsQuery",
+                    0, nullptr,
+                    0, nullptr,
+                    static_cast<uint32_t>(std::size(featureStructTypes)), featureStructTypes,
+                    blocks::pipelineStatisticsQuery::featureDesc,
+                    0, nullptr,
+                    blocks::pipelineStatisticsQuery::propertyDesc,
+                    0, nullptr,
+                    0, nullptr,
+                    0, nullptr,
+                    0, nullptr,
+                    blocks::pipelineStatisticsQuery::chainerDesc,
+                    0, nullptr,
+                },
+            };
+            static const uint32_t variantCount = static_cast<uint32_t>(std::size(variants));
+        } // namespace primitivesGeneratedQuery_pipelineStatisticsQuery_
 
-    namespace swBresenhamLines_hwBresenhamLines_ {
-        static const VpVariantDesc variants[] = {
-            {
-                "swBresenhamLines",
-                0, nullptr,
-                static_cast<uint32_t>(std::size(swBresenhamLines::deviceExtensions)), swBresenhamLines::deviceExtensions,
-                static_cast<uint32_t>(std::size(featureStructTypes)), featureStructTypes,
-                swBresenhamLines::featureDesc,
-                0, nullptr,
-                swBresenhamLines::propertyDesc,
-                0, nullptr,
-                0, nullptr,
-                0, nullptr,
-                0, nullptr,
-                swBresenhamLines::chainerDesc,
-            },
-            {
-                "hwBresenhamLines",
-                0, nullptr,
-                static_cast<uint32_t>(std::size(hwBresenhamLines::deviceExtensions)), hwBresenhamLines::deviceExtensions,
-                static_cast<uint32_t>(std::size(featureStructTypes)), featureStructTypes,
-                hwBresenhamLines::featureDesc,
-                0, nullptr,
-                hwBresenhamLines::propertyDesc,
-                0, nullptr,
-                0, nullptr,
-                0, nullptr,
-                0, nullptr,
-                hwBresenhamLines::chainerDesc,
-            },
-        };
-        static const uint32_t variantCount = static_cast<uint32_t>(std::size(variants));
-    } // namespace swBresenhamLines_hwBresenhamLines_
+        namespace swBresenhamLines_hwBresenhamLines_ {
+            static const VpVariantDesc variants[] = {
+                {
+                    "swBresenhamLines",
+                    0, nullptr,
+                    static_cast<uint32_t>(std::size(blocks::swBresenhamLines::deviceExtensions)), blocks::swBresenhamLines::deviceExtensions,
+                    static_cast<uint32_t>(std::size(featureStructTypes)), featureStructTypes,
+                    blocks::swBresenhamLines::featureDesc,
+                    0, nullptr,
+                    blocks::swBresenhamLines::propertyDesc,
+                    0, nullptr,
+                    0, nullptr,
+                    0, nullptr,
+                    0, nullptr,
+                    blocks::swBresenhamLines::chainerDesc,
+                    0, nullptr,
+                },
+                {
+                    "hwBresenhamLines",
+                    0, nullptr,
+                    static_cast<uint32_t>(std::size(blocks::hwBresenhamLines::deviceExtensions)), blocks::hwBresenhamLines::deviceExtensions,
+                    static_cast<uint32_t>(std::size(featureStructTypes)), featureStructTypes,
+                    blocks::hwBresenhamLines::featureDesc,
+                    0, nullptr,
+                    blocks::hwBresenhamLines::propertyDesc,
+                    0, nullptr,
+                    0, nullptr,
+                    0, nullptr,
+                    0, nullptr,
+                    blocks::hwBresenhamLines::chainerDesc,
+                    0, nullptr,
+                },
+            };
+            static const uint32_t variantCount = static_cast<uint32_t>(std::size(variants));
+        } // namespace swBresenhamLines_hwBresenhamLines_
+    } // namespace blocks
 
     static const VpCapabilitiesDesc capabilities[] = {
-        MUST::variantCount, MUST::variants,
-        primitivesGeneratedQuery_pipelineStatisticsQuery_::variantCount, primitivesGeneratedQuery_pipelineStatisticsQuery_::variants,
-        swBresenhamLines_hwBresenhamLines_::variantCount, swBresenhamLines_hwBresenhamLines_::variants,
+        { blocks::MUST::variantCount, blocks::MUST::variants },
+        { blocks::primitivesGeneratedQuery_pipelineStatisticsQuery_::variantCount, blocks::primitivesGeneratedQuery_pipelineStatisticsQuery_::variants },
+        { blocks::swBresenhamLines_hwBresenhamLines_::variantCount, blocks::swBresenhamLines_hwBresenhamLines_::variants },
     };
     static const uint32_t capabilityCount = static_cast<uint32_t>(std::size(capabilities));
 
@@ -9108,9 +9646,85 @@ namespace VP_ANDROID_15_MINIMUMS {
 } // namespace VP_ANDROID_15_MINIMUMS
 #endif //VP_ANDROID_15_minimums
 
+#ifdef VP_ANDROID_16_minimums
+namespace VP_ANDROID_16_MINIMUMS {
+    namespace blocks {
+        namespace MUST {
+            static const VpVariantDesc variants[] = {
+                {
+                    "MUST",
+                    0, nullptr,
+                    static_cast<uint32_t>(std::size(blocks::MUST::deviceExtensions)), blocks::MUST::deviceExtensions,
+                    static_cast<uint32_t>(std::size(featureStructTypes)), featureStructTypes,
+                    blocks::MUST::featureDesc,
+                    static_cast<uint32_t>(std::size(propertyStructTypes)), propertyStructTypes,
+                    blocks::MUST::propertyDesc,
+                    0, nullptr,
+                    0, nullptr,
+                    0, nullptr,
+                    0, nullptr,
+                    blocks::MUST::chainerDesc,
+                    0, nullptr,
+                },
+            };
+            static const uint32_t variantCount = static_cast<uint32_t>(std::size(variants));
+        } // namespace MUST
+
+        namespace multisampledToSingleSampled_shaderStencilExport_ {
+            static const VpVariantDesc variants[] = {
+                {
+                    "multisampledToSingleSampled",
+                    0, nullptr,
+                    static_cast<uint32_t>(std::size(blocks::multisampledToSingleSampled::deviceExtensions)), blocks::multisampledToSingleSampled::deviceExtensions,
+                    0, nullptr,
+                    blocks::multisampledToSingleSampled::featureDesc,
+                    0, nullptr,
+                    blocks::multisampledToSingleSampled::propertyDesc,
+                    0, nullptr,
+                    0, nullptr,
+                    0, nullptr,
+                    0, nullptr,
+                    blocks::multisampledToSingleSampled::chainerDesc,
+                    0, nullptr,
+                },
+                {
+                    "shaderStencilExport",
+                    0, nullptr,
+                    static_cast<uint32_t>(std::size(blocks::shaderStencilExport::deviceExtensions)), blocks::shaderStencilExport::deviceExtensions,
+                    0, nullptr,
+                    blocks::shaderStencilExport::featureDesc,
+                    0, nullptr,
+                    blocks::shaderStencilExport::propertyDesc,
+                    0, nullptr,
+                    0, nullptr,
+                    0, nullptr,
+                    0, nullptr,
+                    blocks::shaderStencilExport::chainerDesc,
+                    0, nullptr,
+                },
+            };
+            static const uint32_t variantCount = static_cast<uint32_t>(std::size(variants));
+        } // namespace multisampledToSingleSampled_shaderStencilExport_
+    } // namespace blocks
+
+    static const VpCapabilitiesDesc capabilities[] = {
+        { blocks::MUST::variantCount, blocks::MUST::variants },
+        { blocks::multisampledToSingleSampled_shaderStencilExport_::variantCount, blocks::multisampledToSingleSampled_shaderStencilExport_::variants },
+    };
+    static const uint32_t capabilityCount = static_cast<uint32_t>(std::size(capabilities));
+
+    static const VpProfileProperties profiles[] = {
+        {VP_ANDROID_BASELINE_2022_NAME, VP_ANDROID_BASELINE_2022_SPEC_VERSION},
+        {VP_ANDROID_15_MINIMUMS_NAME, VP_ANDROID_15_MINIMUMS_SPEC_VERSION},
+    };
+    static const uint32_t profileCount = static_cast<uint32_t>(std::size(profiles));
+} // namespace VP_ANDROID_16_MINIMUMS
+#endif //VP_ANDROID_16_minimums
+
 #ifdef VP_ANDROID_baseline_2021
 namespace VP_ANDROID_BASELINE_2021 {
     static const VpVariantDesc mergedCapabilities[] = {
+        {
         "MERGED",
         static_cast<uint32_t>(std::size(instanceExtensions)), instanceExtensions,
         static_cast<uint32_t>(std::size(deviceExtensions)), deviceExtensions,
@@ -9123,30 +9737,35 @@ namespace VP_ANDROID_BASELINE_2021 {
         0, nullptr,
         0, nullptr,
         chainerDesc,
+        0, nullptr,
+        },
     };
 
-    namespace baseline {
-        static const VpVariantDesc variants[] = {
-            {
-                "baseline",
-                static_cast<uint32_t>(std::size(baseline::instanceExtensions)), baseline::instanceExtensions,
-                static_cast<uint32_t>(std::size(baseline::deviceExtensions)), baseline::deviceExtensions,
-                static_cast<uint32_t>(std::size(featureStructTypes)), featureStructTypes,
-                baseline::featureDesc,
-                static_cast<uint32_t>(std::size(propertyStructTypes)), propertyStructTypes,
-                baseline::propertyDesc,
-                0, nullptr,
-                0, nullptr,
-                static_cast<uint32_t>(std::size(formatStructTypes)), formatStructTypes,
-                static_cast<uint32_t>(std::size(baseline::formatDesc)), baseline::formatDesc,
-                baseline::chainerDesc,
-            },
-        };
-        static const uint32_t variantCount = static_cast<uint32_t>(std::size(variants));
-    } // namespace baseline
+    namespace blocks {
+        namespace baseline {
+            static const VpVariantDesc variants[] = {
+                {
+                    "baseline",
+                    static_cast<uint32_t>(std::size(blocks::baseline::instanceExtensions)), blocks::baseline::instanceExtensions,
+                    static_cast<uint32_t>(std::size(blocks::baseline::deviceExtensions)), blocks::baseline::deviceExtensions,
+                    static_cast<uint32_t>(std::size(featureStructTypes)), featureStructTypes,
+                    blocks::baseline::featureDesc,
+                    static_cast<uint32_t>(std::size(propertyStructTypes)), propertyStructTypes,
+                    blocks::baseline::propertyDesc,
+                    0, nullptr,
+                    0, nullptr,
+                    static_cast<uint32_t>(std::size(formatStructTypes)), formatStructTypes,
+                    static_cast<uint32_t>(std::size(blocks::baseline::formatDesc)), blocks::baseline::formatDesc,
+                    blocks::baseline::chainerDesc,
+                    0, nullptr,
+                },
+            };
+            static const uint32_t variantCount = static_cast<uint32_t>(std::size(variants));
+        } // namespace baseline
+    } // namespace blocks
 
     static const VpCapabilitiesDesc capabilities[] = {
-        baseline::variantCount, baseline::variants,
+        { blocks::baseline::variantCount, blocks::baseline::variants },
     };
     static const uint32_t capabilityCount = static_cast<uint32_t>(std::size(capabilities));
 } // namespace VP_ANDROID_BASELINE_2021
@@ -9155,6 +9774,7 @@ namespace VP_ANDROID_BASELINE_2021 {
 #ifdef VP_ANDROID_baseline_2021_cpu_only
 namespace VP_ANDROID_BASELINE_2021_CPU_ONLY {
     static const VpVariantDesc mergedCapabilities[] = {
+        {
         "MERGED",
         static_cast<uint32_t>(std::size(instanceExtensions)), instanceExtensions,
         static_cast<uint32_t>(std::size(deviceExtensions)), deviceExtensions,
@@ -9167,30 +9787,35 @@ namespace VP_ANDROID_BASELINE_2021_CPU_ONLY {
         0, nullptr,
         0, nullptr,
         chainerDesc,
+        0, nullptr,
+        },
     };
 
-    namespace baseline {
-        static const VpVariantDesc variants[] = {
-            {
-                "baseline",
-                static_cast<uint32_t>(std::size(baseline::instanceExtensions)), baseline::instanceExtensions,
-                static_cast<uint32_t>(std::size(baseline::deviceExtensions)), baseline::deviceExtensions,
-                static_cast<uint32_t>(std::size(featureStructTypes)), featureStructTypes,
-                baseline::featureDesc,
-                static_cast<uint32_t>(std::size(propertyStructTypes)), propertyStructTypes,
-                baseline::propertyDesc,
-                0, nullptr,
-                0, nullptr,
-                static_cast<uint32_t>(std::size(formatStructTypes)), formatStructTypes,
-                static_cast<uint32_t>(std::size(baseline::formatDesc)), baseline::formatDesc,
-                baseline::chainerDesc,
-            },
-        };
-        static const uint32_t variantCount = static_cast<uint32_t>(std::size(variants));
-    } // namespace baseline
+    namespace blocks {
+        namespace baseline {
+            static const VpVariantDesc variants[] = {
+                {
+                    "baseline",
+                    static_cast<uint32_t>(std::size(blocks::baseline::instanceExtensions)), blocks::baseline::instanceExtensions,
+                    static_cast<uint32_t>(std::size(blocks::baseline::deviceExtensions)), blocks::baseline::deviceExtensions,
+                    static_cast<uint32_t>(std::size(featureStructTypes)), featureStructTypes,
+                    blocks::baseline::featureDesc,
+                    static_cast<uint32_t>(std::size(propertyStructTypes)), propertyStructTypes,
+                    blocks::baseline::propertyDesc,
+                    0, nullptr,
+                    0, nullptr,
+                    static_cast<uint32_t>(std::size(formatStructTypes)), formatStructTypes,
+                    static_cast<uint32_t>(std::size(blocks::baseline::formatDesc)), blocks::baseline::formatDesc,
+                    blocks::baseline::chainerDesc,
+                    0, nullptr,
+                },
+            };
+            static const uint32_t variantCount = static_cast<uint32_t>(std::size(variants));
+        } // namespace baseline
+    } // namespace blocks
 
     static const VpCapabilitiesDesc capabilities[] = {
-        baseline::variantCount, baseline::variants,
+        { blocks::baseline::variantCount, blocks::baseline::variants },
     };
     static const uint32_t capabilityCount = static_cast<uint32_t>(std::size(capabilities));
 } // namespace VP_ANDROID_BASELINE_2021_CPU_ONLY
@@ -9199,6 +9824,7 @@ namespace VP_ANDROID_BASELINE_2021_CPU_ONLY {
 #ifdef VP_ANDROID_baseline_2022
 namespace VP_ANDROID_BASELINE_2022 {
     static const VpVariantDesc mergedCapabilities[] = {
+        {
         "MERGED",
         static_cast<uint32_t>(std::size(instanceExtensions)), instanceExtensions,
         static_cast<uint32_t>(std::size(deviceExtensions)), deviceExtensions,
@@ -9211,30 +9837,35 @@ namespace VP_ANDROID_BASELINE_2022 {
         0, nullptr,
         0, nullptr,
         chainerDesc,
+        0, nullptr,
+        },
     };
 
-    namespace baseline {
-        static const VpVariantDesc variants[] = {
-            {
-                "baseline",
-                static_cast<uint32_t>(std::size(baseline::instanceExtensions)), baseline::instanceExtensions,
-                static_cast<uint32_t>(std::size(baseline::deviceExtensions)), baseline::deviceExtensions,
-                static_cast<uint32_t>(std::size(featureStructTypes)), featureStructTypes,
-                baseline::featureDesc,
-                static_cast<uint32_t>(std::size(propertyStructTypes)), propertyStructTypes,
-                baseline::propertyDesc,
-                0, nullptr,
-                0, nullptr,
-                static_cast<uint32_t>(std::size(formatStructTypes)), formatStructTypes,
-                static_cast<uint32_t>(std::size(baseline::formatDesc)), baseline::formatDesc,
-                baseline::chainerDesc,
-            },
-        };
-        static const uint32_t variantCount = static_cast<uint32_t>(std::size(variants));
-    } // namespace baseline
+    namespace blocks {
+        namespace baseline {
+            static const VpVariantDesc variants[] = {
+                {
+                    "baseline",
+                    static_cast<uint32_t>(std::size(blocks::baseline::instanceExtensions)), blocks::baseline::instanceExtensions,
+                    static_cast<uint32_t>(std::size(blocks::baseline::deviceExtensions)), blocks::baseline::deviceExtensions,
+                    static_cast<uint32_t>(std::size(featureStructTypes)), featureStructTypes,
+                    blocks::baseline::featureDesc,
+                    static_cast<uint32_t>(std::size(propertyStructTypes)), propertyStructTypes,
+                    blocks::baseline::propertyDesc,
+                    0, nullptr,
+                    0, nullptr,
+                    static_cast<uint32_t>(std::size(formatStructTypes)), formatStructTypes,
+                    static_cast<uint32_t>(std::size(blocks::baseline::formatDesc)), blocks::baseline::formatDesc,
+                    blocks::baseline::chainerDesc,
+                    0, nullptr,
+                },
+            };
+            static const uint32_t variantCount = static_cast<uint32_t>(std::size(variants));
+        } // namespace baseline
+    } // namespace blocks
 
     static const VpCapabilitiesDesc capabilities[] = {
-        baseline::variantCount, baseline::variants,
+        { blocks::baseline::variantCount, blocks::baseline::variants },
     };
     static const uint32_t capabilityCount = static_cast<uint32_t>(std::size(capabilities));
 } // namespace VP_ANDROID_BASELINE_2022
@@ -9251,6 +9882,16 @@ static const VpProfileDesc profiles[] = {
         0, nullptr,
     },
 #endif // VP_ANDROID_15_MINIMUMS
+#ifdef VP_ANDROID_16_minimums
+    VpProfileDesc{
+        VpProfileProperties{ VP_ANDROID_16_MINIMUMS_NAME, VP_ANDROID_16_MINIMUMS_SPEC_VERSION },
+        VP_ANDROID_16_MINIMUMS_MIN_API_VERSION,
+        nullptr,
+        VP_ANDROID_16_MINIMUMS::profileCount, VP_ANDROID_16_MINIMUMS::profiles,
+        VP_ANDROID_16_MINIMUMS::capabilityCount, VP_ANDROID_16_MINIMUMS::capabilities,
+        0, nullptr,
+    },
+#endif // VP_ANDROID_16_MINIMUMS
 #ifdef VP_ANDROID_baseline_2021
     VpProfileDesc{
         VpProfileProperties{ VP_ANDROID_BASELINE_2021_NAME, VP_ANDROID_BASELINE_2021_SPEC_VERSION },
@@ -9297,10 +9938,13 @@ struct FeaturesChain {
     VkPhysicalDeviceDeviceGeneratedCommandsFeaturesNV physicalDeviceDeviceGeneratedCommandsFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_FEATURES_NV, nullptr };
     VkPhysicalDeviceDeviceGeneratedCommandsComputeFeaturesNV physicalDeviceDeviceGeneratedCommandsComputeFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_COMPUTE_FEATURES_NV, nullptr };
     VkPhysicalDevicePrivateDataFeatures physicalDevicePrivateDataFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES, nullptr };
+    VkPhysicalDeviceClusterAccelerationStructureFeaturesNV physicalDeviceClusterAccelerationStructureFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CLUSTER_ACCELERATION_STRUCTURE_FEATURES_NV, nullptr };
     VkPhysicalDeviceVariablePointersFeatures physicalDeviceVariablePointersFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES, nullptr };
     VkPhysicalDeviceMultiviewFeatures physicalDeviceMultiviewFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES, nullptr };
     VkPhysicalDevicePresentIdFeaturesKHR physicalDevicePresentIdFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR, nullptr };
+    VkPhysicalDevicePresentId2FeaturesKHR physicalDevicePresentId2FeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_2_FEATURES_KHR, nullptr };
     VkPhysicalDevicePresentWaitFeaturesKHR physicalDevicePresentWaitFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR, nullptr };
+    VkPhysicalDevicePresentWait2FeaturesKHR physicalDevicePresentWait2FeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_2_FEATURES_KHR, nullptr };
     VkPhysicalDevice16BitStorageFeatures physicalDevice16BitStorageFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES, nullptr };
     VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures physicalDeviceShaderSubgroupExtendedTypesFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_EXTENDED_TYPES_FEATURES, nullptr };
     VkPhysicalDeviceSamplerYcbcrConversionFeatures physicalDeviceSamplerYcbcrConversionFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES, nullptr };
@@ -9309,12 +9953,15 @@ struct FeaturesChain {
     VkPhysicalDeviceMultiDrawFeaturesEXT physicalDeviceMultiDrawFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTI_DRAW_FEATURES_EXT, nullptr };
     VkPhysicalDeviceInlineUniformBlockFeatures physicalDeviceInlineUniformBlockFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INLINE_UNIFORM_BLOCK_FEATURES, nullptr };
     VkPhysicalDeviceMaintenance4Features physicalDeviceMaintenance4Features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES, nullptr };
-    VkPhysicalDeviceMaintenance5FeaturesKHR physicalDeviceMaintenance5FeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES_KHR, nullptr };
-    VkPhysicalDeviceMaintenance6FeaturesKHR physicalDeviceMaintenance6FeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_6_FEATURES_KHR, nullptr };
+    VkPhysicalDeviceMaintenance5Features physicalDeviceMaintenance5Features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES, nullptr };
+    VkPhysicalDeviceMaintenance6Features physicalDeviceMaintenance6Features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_6_FEATURES, nullptr };
+    VkPhysicalDeviceMaintenance7FeaturesKHR physicalDeviceMaintenance7FeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_7_FEATURES_KHR, nullptr };
+    VkPhysicalDeviceMaintenance8FeaturesKHR physicalDeviceMaintenance8FeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_8_FEATURES_KHR, nullptr };
+    VkPhysicalDeviceMaintenance9FeaturesKHR physicalDeviceMaintenance9FeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_9_FEATURES_KHR, nullptr };
     VkPhysicalDeviceShaderDrawParametersFeatures physicalDeviceShaderDrawParametersFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES, nullptr };
     VkPhysicalDeviceShaderFloat16Int8Features physicalDeviceShaderFloat16Int8Features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES, nullptr };
     VkPhysicalDeviceHostQueryResetFeatures physicalDeviceHostQueryResetFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES, nullptr };
-    VkPhysicalDeviceGlobalPriorityQueryFeaturesKHR physicalDeviceGlobalPriorityQueryFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GLOBAL_PRIORITY_QUERY_FEATURES_KHR, nullptr };
+    VkPhysicalDeviceGlobalPriorityQueryFeatures physicalDeviceGlobalPriorityQueryFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GLOBAL_PRIORITY_QUERY_FEATURES, nullptr };
     VkPhysicalDeviceDeviceMemoryReportFeaturesEXT physicalDeviceDeviceMemoryReportFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_MEMORY_REPORT_FEATURES_EXT, nullptr };
     VkPhysicalDeviceDescriptorIndexingFeatures physicalDeviceDescriptorIndexingFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES, nullptr };
     VkPhysicalDeviceTimelineSemaphoreFeatures physicalDeviceTimelineSemaphoreFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES, nullptr };
@@ -9324,13 +9971,13 @@ struct FeaturesChain {
     VkPhysicalDeviceShaderAtomicInt64Features physicalDeviceShaderAtomicInt64Features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES, nullptr };
     VkPhysicalDeviceShaderAtomicFloatFeaturesEXT physicalDeviceShaderAtomicFloatFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT, nullptr };
     VkPhysicalDeviceShaderAtomicFloat2FeaturesEXT physicalDeviceShaderAtomicFloat2FeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_2_FEATURES_EXT, nullptr };
-    VkPhysicalDeviceVertexAttributeDivisorFeaturesKHR physicalDeviceVertexAttributeDivisorFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES_KHR, nullptr };
+    VkPhysicalDeviceVertexAttributeDivisorFeatures physicalDeviceVertexAttributeDivisorFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES, nullptr };
     VkPhysicalDeviceASTCDecodeFeaturesEXT physicalDeviceASTCDecodeFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ASTC_DECODE_FEATURES_EXT, nullptr };
     VkPhysicalDeviceTransformFeedbackFeaturesEXT physicalDeviceTransformFeedbackFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT, nullptr };
     VkPhysicalDeviceRepresentativeFragmentTestFeaturesNV physicalDeviceRepresentativeFragmentTestFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_REPRESENTATIVE_FRAGMENT_TEST_FEATURES_NV, nullptr };
     VkPhysicalDeviceExclusiveScissorFeaturesNV physicalDeviceExclusiveScissorFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXCLUSIVE_SCISSOR_FEATURES_NV, nullptr };
     VkPhysicalDeviceCornerSampledImageFeaturesNV physicalDeviceCornerSampledImageFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CORNER_SAMPLED_IMAGE_FEATURES_NV, nullptr };
-    VkPhysicalDeviceComputeShaderDerivativesFeaturesNV physicalDeviceComputeShaderDerivativesFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_NV, nullptr };
+    VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR physicalDeviceComputeShaderDerivativesFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR, nullptr };
     VkPhysicalDeviceShaderImageFootprintFeaturesNV physicalDeviceShaderImageFootprintFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_FOOTPRINT_FEATURES_NV, nullptr };
     VkPhysicalDeviceDedicatedAllocationImageAliasingFeaturesNV physicalDeviceDedicatedAllocationImageAliasingFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEDICATED_ALLOCATION_IMAGE_ALIASING_FEATURES_NV, nullptr };
     VkPhysicalDeviceCopyMemoryIndirectFeaturesNV physicalDeviceCopyMemoryIndirectFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COPY_MEMORY_INDIRECT_FEATURES_NV, nullptr };
@@ -9345,7 +9992,7 @@ struct FeaturesChain {
     VkPhysicalDeviceRayTracingMaintenance1FeaturesKHR physicalDeviceRayTracingMaintenance1FeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_MAINTENANCE_1_FEATURES_KHR, nullptr };
     VkPhysicalDeviceFragmentDensityMapFeaturesEXT physicalDeviceFragmentDensityMapFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT, nullptr };
     VkPhysicalDeviceFragmentDensityMap2FeaturesEXT physicalDeviceFragmentDensityMap2FeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_2_FEATURES_EXT, nullptr };
-    VkPhysicalDeviceFragmentDensityMapOffsetFeaturesQCOM physicalDeviceFragmentDensityMapOffsetFeaturesQCOM{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_OFFSET_FEATURES_QCOM, nullptr };
+    VkPhysicalDeviceFragmentDensityMapOffsetFeaturesEXT physicalDeviceFragmentDensityMapOffsetFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_OFFSET_FEATURES_EXT, nullptr };
     VkPhysicalDeviceScalarBlockLayoutFeatures physicalDeviceScalarBlockLayoutFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES, nullptr };
     VkPhysicalDeviceUniformBufferStandardLayoutFeatures physicalDeviceUniformBufferStandardLayoutFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFORM_BUFFER_STANDARD_LAYOUT_FEATURES, nullptr };
     VkPhysicalDeviceDepthClipEnableFeaturesEXT physicalDeviceDepthClipEnableFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_ENABLE_FEATURES_EXT, nullptr };
@@ -9362,7 +10009,7 @@ struct FeaturesChain {
     VkPhysicalDeviceCoverageReductionModeFeaturesNV physicalDeviceCoverageReductionModeFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COVERAGE_REDUCTION_MODE_FEATURES_NV, nullptr };
     VkPhysicalDeviceShaderIntegerFunctions2FeaturesINTEL physicalDeviceShaderIntegerFunctions2FeaturesINTEL{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_FUNCTIONS_2_FEATURES_INTEL, nullptr };
     VkPhysicalDeviceShaderClockFeaturesKHR physicalDeviceShaderClockFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CLOCK_FEATURES_KHR, nullptr };
-    VkPhysicalDeviceIndexTypeUint8FeaturesEXT physicalDeviceIndexTypeUint8FeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT, nullptr };
+    VkPhysicalDeviceIndexTypeUint8Features physicalDeviceIndexTypeUint8Features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES, nullptr };
     VkPhysicalDeviceShaderSMBuiltinsFeaturesNV physicalDeviceShaderSMBuiltinsFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SM_BUILTINS_FEATURES_NV, nullptr };
     VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT physicalDeviceFragmentShaderInterlockFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_INTERLOCK_FEATURES_EXT, nullptr };
     VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures physicalDeviceSeparateDepthStencilLayoutsFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES, nullptr };
@@ -9371,21 +10018,23 @@ struct FeaturesChain {
     VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures physicalDeviceShaderDemoteToHelperInvocationFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES, nullptr };
     VkPhysicalDeviceTexelBufferAlignmentFeaturesEXT physicalDeviceTexelBufferAlignmentFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXEL_BUFFER_ALIGNMENT_FEATURES_EXT, nullptr };
     VkPhysicalDeviceSubgroupSizeControlFeatures physicalDeviceSubgroupSizeControlFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES, nullptr };
-    VkPhysicalDeviceLineRasterizationFeaturesEXT physicalDeviceLineRasterizationFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LINE_RASTERIZATION_FEATURES_EXT, nullptr };
+    VkPhysicalDeviceLineRasterizationFeatures physicalDeviceLineRasterizationFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LINE_RASTERIZATION_FEATURES, nullptr };
     VkPhysicalDevicePipelineCreationCacheControlFeatures physicalDevicePipelineCreationCacheControlFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_CREATION_CACHE_CONTROL_FEATURES, nullptr };
     VkPhysicalDeviceVulkan11Features physicalDeviceVulkan11Features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, nullptr };
     VkPhysicalDeviceVulkan12Features physicalDeviceVulkan12Features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, nullptr };
     VkPhysicalDeviceVulkan13Features physicalDeviceVulkan13Features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, nullptr };
+    VkPhysicalDeviceVulkan14Features physicalDeviceVulkan14Features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES, nullptr };
     VkPhysicalDeviceCoherentMemoryFeaturesAMD physicalDeviceCoherentMemoryFeaturesAMD{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COHERENT_MEMORY_FEATURES_AMD, nullptr };
     VkPhysicalDeviceCustomBorderColorFeaturesEXT physicalDeviceCustomBorderColorFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT, nullptr };
     VkPhysicalDeviceBorderColorSwizzleFeaturesEXT physicalDeviceBorderColorSwizzleFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BORDER_COLOR_SWIZZLE_FEATURES_EXT, nullptr };
     VkPhysicalDeviceExtendedDynamicStateFeaturesEXT physicalDeviceExtendedDynamicStateFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT, nullptr };
     VkPhysicalDeviceExtendedDynamicState2FeaturesEXT physicalDeviceExtendedDynamicState2FeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT, nullptr };
     VkPhysicalDeviceExtendedDynamicState3FeaturesEXT physicalDeviceExtendedDynamicState3FeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT, nullptr };
+    VkPhysicalDevicePartitionedAccelerationStructureFeaturesNV physicalDevicePartitionedAccelerationStructureFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PARTITIONED_ACCELERATION_STRUCTURE_FEATURES_NV, nullptr };
     VkPhysicalDeviceDiagnosticsConfigFeaturesNV physicalDeviceDiagnosticsConfigFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DIAGNOSTICS_CONFIG_FEATURES_NV, nullptr };
     VkPhysicalDeviceZeroInitializeWorkgroupMemoryFeatures physicalDeviceZeroInitializeWorkgroupMemoryFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ZERO_INITIALIZE_WORKGROUP_MEMORY_FEATURES, nullptr };
     VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR physicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_UNIFORM_CONTROL_FLOW_FEATURES_KHR, nullptr };
-    VkPhysicalDeviceRobustness2FeaturesEXT physicalDeviceRobustness2FeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT, nullptr };
+    VkPhysicalDeviceRobustness2FeaturesKHR physicalDeviceRobustness2FeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_KHR, nullptr };
     VkPhysicalDeviceImageRobustnessFeatures physicalDeviceImageRobustnessFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES, nullptr };
     VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR physicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR, nullptr };
 #ifdef VK_ENABLE_BETA_EXTENSIONS
@@ -9401,18 +10050,28 @@ struct FeaturesChain {
     VkPhysicalDeviceImage2DViewOf3DFeaturesEXT physicalDeviceImage2DViewOf3DFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT, nullptr };
     VkPhysicalDeviceImageSlicedViewOf3DFeaturesEXT physicalDeviceImageSlicedViewOf3DFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_SLICED_VIEW_OF_3D_FEATURES_EXT, nullptr };
     VkPhysicalDeviceAttachmentFeedbackLoopDynamicStateFeaturesEXT physicalDeviceAttachmentFeedbackLoopDynamicStateFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_DYNAMIC_STATE_FEATURES_EXT, nullptr };
+    VkPhysicalDeviceLegacyVertexAttributesFeaturesEXT physicalDeviceLegacyVertexAttributesFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LEGACY_VERTEX_ATTRIBUTES_FEATURES_EXT, nullptr };
     VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT physicalDeviceMutableDescriptorTypeFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MUTABLE_DESCRIPTOR_TYPE_FEATURES_EXT, nullptr };
     VkPhysicalDeviceDepthClipControlFeaturesEXT physicalDeviceDepthClipControlFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_CONTROL_FEATURES_EXT, nullptr };
+    VkPhysicalDeviceZeroInitializeDeviceMemoryFeaturesEXT physicalDeviceZeroInitializeDeviceMemoryFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ZERO_INITIALIZE_DEVICE_MEMORY_FEATURES_EXT, nullptr };
+    VkPhysicalDeviceDeviceGeneratedCommandsFeaturesEXT physicalDeviceDeviceGeneratedCommandsFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_FEATURES_EXT, nullptr };
+    VkPhysicalDeviceDepthClampControlFeaturesEXT physicalDeviceDepthClampControlFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLAMP_CONTROL_FEATURES_EXT, nullptr };
     VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT physicalDeviceVertexInputDynamicStateFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_INPUT_DYNAMIC_STATE_FEATURES_EXT, nullptr };
     VkPhysicalDeviceExternalMemoryRDMAFeaturesNV physicalDeviceExternalMemoryRDMAFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_RDMA_FEATURES_NV, nullptr };
+    VkPhysicalDeviceShaderRelaxedExtendedInstructionFeaturesKHR physicalDeviceShaderRelaxedExtendedInstructionFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_RELAXED_EXTENDED_INSTRUCTION_FEATURES_KHR, nullptr };
     VkPhysicalDeviceColorWriteEnableFeaturesEXT physicalDeviceColorWriteEnableFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COLOR_WRITE_ENABLE_FEATURES_EXT, nullptr };
     VkPhysicalDeviceSynchronization2Features physicalDeviceSynchronization2Features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES, nullptr };
-    VkPhysicalDeviceHostImageCopyFeaturesEXT physicalDeviceHostImageCopyFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_FEATURES_EXT, nullptr };
+    VkPhysicalDeviceUnifiedImageLayoutsFeaturesKHR physicalDeviceUnifiedImageLayoutsFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFIED_IMAGE_LAYOUTS_FEATURES_KHR, nullptr };
+    VkPhysicalDeviceHostImageCopyFeatures physicalDeviceHostImageCopyFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_FEATURES, nullptr };
     VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT physicalDevicePrimitivesGeneratedQueryFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIMITIVES_GENERATED_QUERY_FEATURES_EXT, nullptr };
     VkPhysicalDeviceLegacyDitheringFeaturesEXT physicalDeviceLegacyDitheringFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LEGACY_DITHERING_FEATURES_EXT, nullptr };
     VkPhysicalDeviceMultisampledRenderToSingleSampledFeaturesEXT physicalDeviceMultisampledRenderToSingleSampledFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_FEATURES_EXT, nullptr };
-    VkPhysicalDevicePipelineProtectedAccessFeaturesEXT physicalDevicePipelineProtectedAccessFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_PROTECTED_ACCESS_FEATURES_EXT, nullptr };
+    VkPhysicalDevicePipelineProtectedAccessFeatures physicalDevicePipelineProtectedAccessFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_PROTECTED_ACCESS_FEATURES, nullptr };
     VkPhysicalDeviceVideoMaintenance1FeaturesKHR physicalDeviceVideoMaintenance1FeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_MAINTENANCE_1_FEATURES_KHR, nullptr };
+    VkPhysicalDeviceVideoMaintenance2FeaturesKHR physicalDeviceVideoMaintenance2FeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_MAINTENANCE_2_FEATURES_KHR, nullptr };
+    VkPhysicalDeviceVideoDecodeVP9FeaturesKHR physicalDeviceVideoDecodeVP9FeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_DECODE_VP9_FEATURES_KHR, nullptr };
+    VkPhysicalDeviceVideoEncodeQuantizationMapFeaturesKHR physicalDeviceVideoEncodeQuantizationMapFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_ENCODE_QUANTIZATION_MAP_FEATURES_KHR, nullptr };
+    VkPhysicalDeviceVideoEncodeAV1FeaturesKHR physicalDeviceVideoEncodeAV1FeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_ENCODE_AV1_FEATURES_KHR, nullptr };
     VkPhysicalDeviceInheritedViewportScissorFeaturesNV physicalDeviceInheritedViewportScissorFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INHERITED_VIEWPORT_SCISSOR_FEATURES_NV, nullptr };
     VkPhysicalDeviceYcbcr2Plane444FormatsFeaturesEXT physicalDeviceYcbcr2Plane444FormatsFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_YCBCR_2_PLANE_444_FORMATS_FEATURES_EXT, nullptr };
     VkPhysicalDeviceProvokingVertexFeaturesEXT physicalDeviceProvokingVertexFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROVOKING_VERTEX_FEATURES_EXT, nullptr };
@@ -9420,12 +10079,15 @@ struct FeaturesChain {
     VkPhysicalDeviceShaderIntegerDotProductFeatures physicalDeviceShaderIntegerDotProductFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES, nullptr };
     VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR physicalDeviceFragmentShaderBarycentricFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR, nullptr };
     VkPhysicalDeviceRayTracingMotionBlurFeaturesNV physicalDeviceRayTracingMotionBlurFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_MOTION_BLUR_FEATURES_NV, nullptr };
+    VkPhysicalDeviceRayTracingValidationFeaturesNV physicalDeviceRayTracingValidationFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_VALIDATION_FEATURES_NV, nullptr };
+    VkPhysicalDeviceRayTracingLinearSweptSpheresFeaturesNV physicalDeviceRayTracingLinearSweptSpheresFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_LINEAR_SWEPT_SPHERES_FEATURES_NV, nullptr };
     VkPhysicalDeviceRGBA10X6FormatsFeaturesEXT physicalDeviceRGBA10X6FormatsFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RGBA10X6_FORMATS_FEATURES_EXT, nullptr };
     VkPhysicalDeviceDynamicRenderingFeatures physicalDeviceDynamicRenderingFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES, nullptr };
     VkPhysicalDeviceImageViewMinLodFeaturesEXT physicalDeviceImageViewMinLodFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_VIEW_MIN_LOD_FEATURES_EXT, nullptr };
     VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT physicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_FEATURES_EXT, nullptr };
     VkPhysicalDeviceLinearColorAttachmentFeaturesNV physicalDeviceLinearColorAttachmentFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LINEAR_COLOR_ATTACHMENT_FEATURES_NV, nullptr };
     VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT physicalDeviceGraphicsPipelineLibraryFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT, nullptr };
+    VkPhysicalDevicePipelineBinaryFeaturesKHR physicalDevicePipelineBinaryFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_BINARY_FEATURES_KHR, nullptr };
     VkPhysicalDeviceDescriptorSetHostMappingFeaturesVALVE physicalDeviceDescriptorSetHostMappingFeaturesVALVE{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_SET_HOST_MAPPING_FEATURES_VALVE, nullptr };
     VkPhysicalDeviceNestedCommandBufferFeaturesEXT physicalDeviceNestedCommandBufferFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_NESTED_COMMAND_BUFFER_FEATURES_EXT, nullptr };
     VkPhysicalDeviceShaderModuleIdentifierFeaturesEXT physicalDeviceShaderModuleIdentifierFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MODULE_IDENTIFIER_FEATURES_EXT, nullptr };
@@ -9439,12 +10101,11 @@ struct FeaturesChain {
     VkPhysicalDevicePipelinePropertiesFeaturesEXT physicalDevicePipelinePropertiesFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_PROPERTIES_FEATURES_EXT, nullptr };
     VkPhysicalDeviceShaderEarlyAndLateFragmentTestsFeaturesAMD physicalDeviceShaderEarlyAndLateFragmentTestsFeaturesAMD{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_EARLY_AND_LATE_FRAGMENT_TESTS_FEATURES_AMD, nullptr };
     VkPhysicalDeviceNonSeamlessCubeMapFeaturesEXT physicalDeviceNonSeamlessCubeMapFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_NON_SEAMLESS_CUBE_MAP_FEATURES_EXT, nullptr };
-    VkPhysicalDevicePipelineRobustnessFeaturesEXT physicalDevicePipelineRobustnessFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES_EXT, nullptr };
+    VkPhysicalDevicePipelineRobustnessFeatures physicalDevicePipelineRobustnessFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES, nullptr };
     VkPhysicalDeviceImageProcessingFeaturesQCOM physicalDeviceImageProcessingFeaturesQCOM{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_PROCESSING_FEATURES_QCOM, nullptr };
     VkPhysicalDeviceTilePropertiesFeaturesQCOM physicalDeviceTilePropertiesFeaturesQCOM{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TILE_PROPERTIES_FEATURES_QCOM, nullptr };
     VkPhysicalDeviceAmigoProfilingFeaturesSEC physicalDeviceAmigoProfilingFeaturesSEC{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_AMIGO_PROFILING_FEATURES_SEC, nullptr };
     VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT physicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_FEATURES_EXT, nullptr };
-    VkPhysicalDeviceDepthClampZeroOneFeaturesEXT physicalDeviceDepthClampZeroOneFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLAMP_ZERO_ONE_FEATURES_EXT, nullptr };
     VkPhysicalDeviceAddressBindingReportFeaturesEXT physicalDeviceAddressBindingReportFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ADDRESS_BINDING_REPORT_FEATURES_EXT, nullptr };
     VkPhysicalDeviceOpticalFlowFeaturesNV physicalDeviceOpticalFlowFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPTICAL_FLOW_FEATURES_NV, nullptr };
     VkPhysicalDeviceFaultFeaturesEXT physicalDeviceFaultFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT, nullptr };
@@ -9468,6 +10129,8 @@ struct FeaturesChain {
 #ifdef VK_ENABLE_BETA_EXTENSIONS
     VkPhysicalDeviceShaderEnqueueFeaturesAMDX physicalDeviceShaderEnqueueFeaturesAMDX{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ENQUEUE_FEATURES_AMDX, nullptr };
 #endif
+    VkPhysicalDeviceAntiLagFeaturesAMD physicalDeviceAntiLagFeaturesAMD{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ANTI_LAG_FEATURES_AMD, nullptr };
+    VkPhysicalDeviceTileMemoryHeapFeaturesQCOM physicalDeviceTileMemoryHeapFeaturesQCOM{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TILE_MEMORY_HEAP_FEATURES_QCOM, nullptr };
     VkPhysicalDeviceCubicClampFeaturesQCOM physicalDeviceCubicClampFeaturesQCOM{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUBIC_CLAMP_FEATURES_QCOM, nullptr };
     VkPhysicalDeviceYcbcrDegammaFeaturesQCOM physicalDeviceYcbcrDegammaFeaturesQCOM{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_YCBCR_DEGAMMA_FEATURES_QCOM, nullptr };
     VkPhysicalDeviceCubicWeightsFeaturesQCOM physicalDeviceCubicWeightsFeaturesQCOM{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUBIC_WEIGHTS_FEATURES_QCOM, nullptr };
@@ -9477,10 +10140,40 @@ struct FeaturesChain {
 #ifdef VK_USE_PLATFORM_ANDROID_KHR
     VkPhysicalDeviceExternalFormatResolveFeaturesANDROID physicalDeviceExternalFormatResolveFeaturesANDROID{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_FORMAT_RESOLVE_FEATURES_ANDROID, nullptr };
 #endif
+#ifdef VK_ENABLE_BETA_EXTENSIONS
     VkPhysicalDeviceCudaKernelLaunchFeaturesNV physicalDeviceCudaKernelLaunchFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUDA_KERNEL_LAUNCH_FEATURES_NV, nullptr };
+#endif
     VkPhysicalDeviceSchedulingControlsFeaturesARM physicalDeviceSchedulingControlsFeaturesARM{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCHEDULING_CONTROLS_FEATURES_ARM, nullptr };
     VkPhysicalDeviceRelaxedLineRasterizationFeaturesIMG physicalDeviceRelaxedLineRasterizationFeaturesIMG{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RELAXED_LINE_RASTERIZATION_FEATURES_IMG, nullptr };
     VkPhysicalDeviceRenderPassStripedFeaturesARM physicalDeviceRenderPassStripedFeaturesARM{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RENDER_PASS_STRIPED_FEATURES_ARM, nullptr };
+    VkPhysicalDevicePipelineOpacityMicromapFeaturesARM physicalDevicePipelineOpacityMicromapFeaturesARM{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_OPACITY_MICROMAP_FEATURES_ARM, nullptr };
+    VkPhysicalDeviceShaderMaximalReconvergenceFeaturesKHR physicalDeviceShaderMaximalReconvergenceFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MAXIMAL_RECONVERGENCE_FEATURES_KHR, nullptr };
+    VkPhysicalDeviceShaderSubgroupRotateFeatures physicalDeviceShaderSubgroupRotateFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_ROTATE_FEATURES, nullptr };
+    VkPhysicalDeviceShaderExpectAssumeFeatures physicalDeviceShaderExpectAssumeFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_EXPECT_ASSUME_FEATURES, nullptr };
+    VkPhysicalDeviceShaderFloatControls2Features physicalDeviceShaderFloatControls2Features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT_CONTROLS_2_FEATURES, nullptr };
+    VkPhysicalDeviceDynamicRenderingLocalReadFeatures physicalDeviceDynamicRenderingLocalReadFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES, nullptr };
+    VkPhysicalDeviceShaderQuadControlFeaturesKHR physicalDeviceShaderQuadControlFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_QUAD_CONTROL_FEATURES_KHR, nullptr };
+    VkPhysicalDeviceShaderAtomicFloat16VectorFeaturesNV physicalDeviceShaderAtomicFloat16VectorFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT16_VECTOR_FEATURES_NV, nullptr };
+    VkPhysicalDeviceMapMemoryPlacedFeaturesEXT physicalDeviceMapMemoryPlacedFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAP_MEMORY_PLACED_FEATURES_EXT, nullptr };
+    VkPhysicalDeviceShaderBfloat16FeaturesKHR physicalDeviceShaderBfloat16FeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_BFLOAT16_FEATURES_KHR, nullptr };
+    VkPhysicalDeviceRawAccessChainsFeaturesNV physicalDeviceRawAccessChainsFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAW_ACCESS_CHAINS_FEATURES_NV, nullptr };
+    VkPhysicalDeviceCommandBufferInheritanceFeaturesNV physicalDeviceCommandBufferInheritanceFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMMAND_BUFFER_INHERITANCE_FEATURES_NV, nullptr };
+    VkPhysicalDeviceImageAlignmentControlFeaturesMESA physicalDeviceImageAlignmentControlFeaturesMESA{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ALIGNMENT_CONTROL_FEATURES_MESA, nullptr };
+    VkPhysicalDeviceShaderReplicatedCompositesFeaturesEXT physicalDeviceShaderReplicatedCompositesFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_REPLICATED_COMPOSITES_FEATURES_EXT, nullptr };
+    VkPhysicalDevicePresentModeFifoLatestReadyFeaturesEXT physicalDevicePresentModeFifoLatestReadyFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_MODE_FIFO_LATEST_READY_FEATURES_EXT, nullptr };
+    VkPhysicalDeviceCooperativeMatrix2FeaturesNV physicalDeviceCooperativeMatrix2FeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_2_FEATURES_NV, nullptr };
+    VkPhysicalDeviceHdrVividFeaturesHUAWEI physicalDeviceHdrVividFeaturesHUAWEI{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HDR_VIVID_FEATURES_HUAWEI, nullptr };
+    VkPhysicalDeviceVertexAttributeRobustnessFeaturesEXT physicalDeviceVertexAttributeRobustnessFeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_ROBUSTNESS_FEATURES_EXT, nullptr };
+    VkPhysicalDeviceDepthClampZeroOneFeaturesKHR physicalDeviceDepthClampZeroOneFeaturesKHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLAMP_ZERO_ONE_FEATURES_KHR, nullptr };
+    VkPhysicalDeviceCooperativeVectorFeaturesNV physicalDeviceCooperativeVectorFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_VECTOR_FEATURES_NV, nullptr };
+    VkPhysicalDeviceTileShadingFeaturesQCOM physicalDeviceTileShadingFeaturesQCOM{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TILE_SHADING_FEATURES_QCOM, nullptr };
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    VkPhysicalDevicePresentMeteringFeaturesNV physicalDevicePresentMeteringFeaturesNV{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_METERING_FEATURES_NV, nullptr };
+#endif
+    VkPhysicalDeviceFormatPackFeaturesARM physicalDeviceFormatPackFeaturesARM{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FORMAT_PACK_FEATURES_ARM, nullptr };
+    VkPhysicalDeviceTensorFeaturesARM physicalDeviceTensorFeaturesARM{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TENSOR_FEATURES_ARM, nullptr };
+    VkPhysicalDeviceDescriptorBufferTensorFeaturesARM physicalDeviceDescriptorBufferTensorFeaturesARM{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_TENSOR_FEATURES_ARM, nullptr };
+    VkPhysicalDeviceShaderFloat8FeaturesEXT physicalDeviceShaderFloat8FeaturesEXT{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT, nullptr };
     VkPhysicalDeviceFeatures2KHR physicalDeviceFeatures2KHR{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR, nullptr };
 
     FeaturesChain() {
@@ -9488,10 +10181,13 @@ struct FeaturesChain {
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_FEATURES_NV, size<VkPhysicalDeviceDeviceGeneratedCommandsFeaturesNV>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_COMPUTE_FEATURES_NV, size<VkPhysicalDeviceDeviceGeneratedCommandsComputeFeaturesNV>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES, size<VkPhysicalDevicePrivateDataFeatures>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CLUSTER_ACCELERATION_STRUCTURE_FEATURES_NV, size<VkPhysicalDeviceClusterAccelerationStructureFeaturesNV>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES, size<VkPhysicalDeviceVariablePointersFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES, size<VkPhysicalDeviceMultiviewFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR, size<VkPhysicalDevicePresentIdFeaturesKHR>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_2_FEATURES_KHR, size<VkPhysicalDevicePresentId2FeaturesKHR>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR, size<VkPhysicalDevicePresentWaitFeaturesKHR>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_2_FEATURES_KHR, size<VkPhysicalDevicePresentWait2FeaturesKHR>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES, size<VkPhysicalDevice16BitStorageFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_EXTENDED_TYPES_FEATURES, size<VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES, size<VkPhysicalDeviceSamplerYcbcrConversionFeatures>() });
@@ -9500,12 +10196,15 @@ struct FeaturesChain {
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTI_DRAW_FEATURES_EXT, size<VkPhysicalDeviceMultiDrawFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INLINE_UNIFORM_BLOCK_FEATURES, size<VkPhysicalDeviceInlineUniformBlockFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES, size<VkPhysicalDeviceMaintenance4Features>() });
-        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES_KHR, size<VkPhysicalDeviceMaintenance5FeaturesKHR>() });
-        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_6_FEATURES_KHR, size<VkPhysicalDeviceMaintenance6FeaturesKHR>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES, size<VkPhysicalDeviceMaintenance5Features>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_6_FEATURES, size<VkPhysicalDeviceMaintenance6Features>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_7_FEATURES_KHR, size<VkPhysicalDeviceMaintenance7FeaturesKHR>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_8_FEATURES_KHR, size<VkPhysicalDeviceMaintenance8FeaturesKHR>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_9_FEATURES_KHR, size<VkPhysicalDeviceMaintenance9FeaturesKHR>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES, size<VkPhysicalDeviceShaderDrawParametersFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES, size<VkPhysicalDeviceShaderFloat16Int8Features>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES, size<VkPhysicalDeviceHostQueryResetFeatures>() });
-        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GLOBAL_PRIORITY_QUERY_FEATURES_KHR, size<VkPhysicalDeviceGlobalPriorityQueryFeaturesKHR>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GLOBAL_PRIORITY_QUERY_FEATURES, size<VkPhysicalDeviceGlobalPriorityQueryFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_MEMORY_REPORT_FEATURES_EXT, size<VkPhysicalDeviceDeviceMemoryReportFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES, size<VkPhysicalDeviceDescriptorIndexingFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES, size<VkPhysicalDeviceTimelineSemaphoreFeatures>() });
@@ -9515,13 +10214,13 @@ struct FeaturesChain {
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES, size<VkPhysicalDeviceShaderAtomicInt64Features>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT, size<VkPhysicalDeviceShaderAtomicFloatFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_2_FEATURES_EXT, size<VkPhysicalDeviceShaderAtomicFloat2FeaturesEXT>() });
-        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES_KHR, size<VkPhysicalDeviceVertexAttributeDivisorFeaturesKHR>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES, size<VkPhysicalDeviceVertexAttributeDivisorFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ASTC_DECODE_FEATURES_EXT, size<VkPhysicalDeviceASTCDecodeFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT, size<VkPhysicalDeviceTransformFeedbackFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_REPRESENTATIVE_FRAGMENT_TEST_FEATURES_NV, size<VkPhysicalDeviceRepresentativeFragmentTestFeaturesNV>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXCLUSIVE_SCISSOR_FEATURES_NV, size<VkPhysicalDeviceExclusiveScissorFeaturesNV>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CORNER_SAMPLED_IMAGE_FEATURES_NV, size<VkPhysicalDeviceCornerSampledImageFeaturesNV>() });
-        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_NV, size<VkPhysicalDeviceComputeShaderDerivativesFeaturesNV>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR, size<VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_FOOTPRINT_FEATURES_NV, size<VkPhysicalDeviceShaderImageFootprintFeaturesNV>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEDICATED_ALLOCATION_IMAGE_ALIASING_FEATURES_NV, size<VkPhysicalDeviceDedicatedAllocationImageAliasingFeaturesNV>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COPY_MEMORY_INDIRECT_FEATURES_NV, size<VkPhysicalDeviceCopyMemoryIndirectFeaturesNV>() });
@@ -9536,7 +10235,7 @@ struct FeaturesChain {
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_MAINTENANCE_1_FEATURES_KHR, size<VkPhysicalDeviceRayTracingMaintenance1FeaturesKHR>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT, size<VkPhysicalDeviceFragmentDensityMapFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_2_FEATURES_EXT, size<VkPhysicalDeviceFragmentDensityMap2FeaturesEXT>() });
-        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_OFFSET_FEATURES_QCOM, size<VkPhysicalDeviceFragmentDensityMapOffsetFeaturesQCOM>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_OFFSET_FEATURES_EXT, size<VkPhysicalDeviceFragmentDensityMapOffsetFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES, size<VkPhysicalDeviceScalarBlockLayoutFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFORM_BUFFER_STANDARD_LAYOUT_FEATURES, size<VkPhysicalDeviceUniformBufferStandardLayoutFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_ENABLE_FEATURES_EXT, size<VkPhysicalDeviceDepthClipEnableFeaturesEXT>() });
@@ -9553,7 +10252,7 @@ struct FeaturesChain {
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COVERAGE_REDUCTION_MODE_FEATURES_NV, size<VkPhysicalDeviceCoverageReductionModeFeaturesNV>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_FUNCTIONS_2_FEATURES_INTEL, size<VkPhysicalDeviceShaderIntegerFunctions2FeaturesINTEL>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CLOCK_FEATURES_KHR, size<VkPhysicalDeviceShaderClockFeaturesKHR>() });
-        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_EXT, size<VkPhysicalDeviceIndexTypeUint8FeaturesEXT>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES, size<VkPhysicalDeviceIndexTypeUint8Features>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SM_BUILTINS_FEATURES_NV, size<VkPhysicalDeviceShaderSMBuiltinsFeaturesNV>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_INTERLOCK_FEATURES_EXT, size<VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES, size<VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures>() });
@@ -9562,21 +10261,23 @@ struct FeaturesChain {
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES, size<VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXEL_BUFFER_ALIGNMENT_FEATURES_EXT, size<VkPhysicalDeviceTexelBufferAlignmentFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES, size<VkPhysicalDeviceSubgroupSizeControlFeatures>() });
-        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LINE_RASTERIZATION_FEATURES_EXT, size<VkPhysicalDeviceLineRasterizationFeaturesEXT>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LINE_RASTERIZATION_FEATURES, size<VkPhysicalDeviceLineRasterizationFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_CREATION_CACHE_CONTROL_FEATURES, size<VkPhysicalDevicePipelineCreationCacheControlFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, size<VkPhysicalDeviceVulkan11Features>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, size<VkPhysicalDeviceVulkan12Features>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, size<VkPhysicalDeviceVulkan13Features>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES, size<VkPhysicalDeviceVulkan14Features>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COHERENT_MEMORY_FEATURES_AMD, size<VkPhysicalDeviceCoherentMemoryFeaturesAMD>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT, size<VkPhysicalDeviceCustomBorderColorFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BORDER_COLOR_SWIZZLE_FEATURES_EXT, size<VkPhysicalDeviceBorderColorSwizzleFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT, size<VkPhysicalDeviceExtendedDynamicStateFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT, size<VkPhysicalDeviceExtendedDynamicState2FeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT, size<VkPhysicalDeviceExtendedDynamicState3FeaturesEXT>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PARTITIONED_ACCELERATION_STRUCTURE_FEATURES_NV, size<VkPhysicalDevicePartitionedAccelerationStructureFeaturesNV>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DIAGNOSTICS_CONFIG_FEATURES_NV, size<VkPhysicalDeviceDiagnosticsConfigFeaturesNV>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ZERO_INITIALIZE_WORKGROUP_MEMORY_FEATURES, size<VkPhysicalDeviceZeroInitializeWorkgroupMemoryFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_UNIFORM_CONTROL_FLOW_FEATURES_KHR, size<VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR>() });
-        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT, size<VkPhysicalDeviceRobustness2FeaturesEXT>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_KHR, size<VkPhysicalDeviceRobustness2FeaturesKHR>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES, size<VkPhysicalDeviceImageRobustnessFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR, size<VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR>() });
 #ifdef VK_ENABLE_BETA_EXTENSIONS
@@ -9592,18 +10293,28 @@ struct FeaturesChain {
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT, size<VkPhysicalDeviceImage2DViewOf3DFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_SLICED_VIEW_OF_3D_FEATURES_EXT, size<VkPhysicalDeviceImageSlicedViewOf3DFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_DYNAMIC_STATE_FEATURES_EXT, size<VkPhysicalDeviceAttachmentFeedbackLoopDynamicStateFeaturesEXT>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LEGACY_VERTEX_ATTRIBUTES_FEATURES_EXT, size<VkPhysicalDeviceLegacyVertexAttributesFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MUTABLE_DESCRIPTOR_TYPE_FEATURES_EXT, size<VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_CONTROL_FEATURES_EXT, size<VkPhysicalDeviceDepthClipControlFeaturesEXT>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ZERO_INITIALIZE_DEVICE_MEMORY_FEATURES_EXT, size<VkPhysicalDeviceZeroInitializeDeviceMemoryFeaturesEXT>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_FEATURES_EXT, size<VkPhysicalDeviceDeviceGeneratedCommandsFeaturesEXT>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLAMP_CONTROL_FEATURES_EXT, size<VkPhysicalDeviceDepthClampControlFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_INPUT_DYNAMIC_STATE_FEATURES_EXT, size<VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_RDMA_FEATURES_NV, size<VkPhysicalDeviceExternalMemoryRDMAFeaturesNV>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_RELAXED_EXTENDED_INSTRUCTION_FEATURES_KHR, size<VkPhysicalDeviceShaderRelaxedExtendedInstructionFeaturesKHR>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COLOR_WRITE_ENABLE_FEATURES_EXT, size<VkPhysicalDeviceColorWriteEnableFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES, size<VkPhysicalDeviceSynchronization2Features>() });
-        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_FEATURES_EXT, size<VkPhysicalDeviceHostImageCopyFeaturesEXT>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFIED_IMAGE_LAYOUTS_FEATURES_KHR, size<VkPhysicalDeviceUnifiedImageLayoutsFeaturesKHR>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_FEATURES, size<VkPhysicalDeviceHostImageCopyFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIMITIVES_GENERATED_QUERY_FEATURES_EXT, size<VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LEGACY_DITHERING_FEATURES_EXT, size<VkPhysicalDeviceLegacyDitheringFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_FEATURES_EXT, size<VkPhysicalDeviceMultisampledRenderToSingleSampledFeaturesEXT>() });
-        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_PROTECTED_ACCESS_FEATURES_EXT, size<VkPhysicalDevicePipelineProtectedAccessFeaturesEXT>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_PROTECTED_ACCESS_FEATURES, size<VkPhysicalDevicePipelineProtectedAccessFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_MAINTENANCE_1_FEATURES_KHR, size<VkPhysicalDeviceVideoMaintenance1FeaturesKHR>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_MAINTENANCE_2_FEATURES_KHR, size<VkPhysicalDeviceVideoMaintenance2FeaturesKHR>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_DECODE_VP9_FEATURES_KHR, size<VkPhysicalDeviceVideoDecodeVP9FeaturesKHR>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_ENCODE_QUANTIZATION_MAP_FEATURES_KHR, size<VkPhysicalDeviceVideoEncodeQuantizationMapFeaturesKHR>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_ENCODE_AV1_FEATURES_KHR, size<VkPhysicalDeviceVideoEncodeAV1FeaturesKHR>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INHERITED_VIEWPORT_SCISSOR_FEATURES_NV, size<VkPhysicalDeviceInheritedViewportScissorFeaturesNV>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_YCBCR_2_PLANE_444_FORMATS_FEATURES_EXT, size<VkPhysicalDeviceYcbcr2Plane444FormatsFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROVOKING_VERTEX_FEATURES_EXT, size<VkPhysicalDeviceProvokingVertexFeaturesEXT>() });
@@ -9611,12 +10322,15 @@ struct FeaturesChain {
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES, size<VkPhysicalDeviceShaderIntegerDotProductFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR, size<VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_MOTION_BLUR_FEATURES_NV, size<VkPhysicalDeviceRayTracingMotionBlurFeaturesNV>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_VALIDATION_FEATURES_NV, size<VkPhysicalDeviceRayTracingValidationFeaturesNV>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_LINEAR_SWEPT_SPHERES_FEATURES_NV, size<VkPhysicalDeviceRayTracingLinearSweptSpheresFeaturesNV>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RGBA10X6_FORMATS_FEATURES_EXT, size<VkPhysicalDeviceRGBA10X6FormatsFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES, size<VkPhysicalDeviceDynamicRenderingFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_VIEW_MIN_LOD_FEATURES_EXT, size<VkPhysicalDeviceImageViewMinLodFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_FEATURES_EXT, size<VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LINEAR_COLOR_ATTACHMENT_FEATURES_NV, size<VkPhysicalDeviceLinearColorAttachmentFeaturesNV>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT, size<VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_BINARY_FEATURES_KHR, size<VkPhysicalDevicePipelineBinaryFeaturesKHR>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_SET_HOST_MAPPING_FEATURES_VALVE, size<VkPhysicalDeviceDescriptorSetHostMappingFeaturesVALVE>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_NESTED_COMMAND_BUFFER_FEATURES_EXT, size<VkPhysicalDeviceNestedCommandBufferFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MODULE_IDENTIFIER_FEATURES_EXT, size<VkPhysicalDeviceShaderModuleIdentifierFeaturesEXT>() });
@@ -9630,12 +10344,11 @@ struct FeaturesChain {
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_PROPERTIES_FEATURES_EXT, size<VkPhysicalDevicePipelinePropertiesFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_EARLY_AND_LATE_FRAGMENT_TESTS_FEATURES_AMD, size<VkPhysicalDeviceShaderEarlyAndLateFragmentTestsFeaturesAMD>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_NON_SEAMLESS_CUBE_MAP_FEATURES_EXT, size<VkPhysicalDeviceNonSeamlessCubeMapFeaturesEXT>() });
-        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES_EXT, size<VkPhysicalDevicePipelineRobustnessFeaturesEXT>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES, size<VkPhysicalDevicePipelineRobustnessFeatures>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_PROCESSING_FEATURES_QCOM, size<VkPhysicalDeviceImageProcessingFeaturesQCOM>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TILE_PROPERTIES_FEATURES_QCOM, size<VkPhysicalDeviceTilePropertiesFeaturesQCOM>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_AMIGO_PROFILING_FEATURES_SEC, size<VkPhysicalDeviceAmigoProfilingFeaturesSEC>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_FEATURES_EXT, size<VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT>() });
-        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLAMP_ZERO_ONE_FEATURES_EXT, size<VkPhysicalDeviceDepthClampZeroOneFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ADDRESS_BINDING_REPORT_FEATURES_EXT, size<VkPhysicalDeviceAddressBindingReportFeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPTICAL_FLOW_FEATURES_NV, size<VkPhysicalDeviceOpticalFlowFeaturesNV>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT, size<VkPhysicalDeviceFaultFeaturesEXT>() });
@@ -9659,6 +10372,8 @@ struct FeaturesChain {
 #ifdef VK_ENABLE_BETA_EXTENSIONS
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ENQUEUE_FEATURES_AMDX, size<VkPhysicalDeviceShaderEnqueueFeaturesAMDX>() });
 #endif
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ANTI_LAG_FEATURES_AMD, size<VkPhysicalDeviceAntiLagFeaturesAMD>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TILE_MEMORY_HEAP_FEATURES_QCOM, size<VkPhysicalDeviceTileMemoryHeapFeaturesQCOM>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUBIC_CLAMP_FEATURES_QCOM, size<VkPhysicalDeviceCubicClampFeaturesQCOM>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_YCBCR_DEGAMMA_FEATURES_QCOM, size<VkPhysicalDeviceYcbcrDegammaFeaturesQCOM>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUBIC_WEIGHTS_FEATURES_QCOM, size<VkPhysicalDeviceCubicWeightsFeaturesQCOM>() });
@@ -9668,10 +10383,40 @@ struct FeaturesChain {
 #ifdef VK_USE_PLATFORM_ANDROID_KHR
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_FORMAT_RESOLVE_FEATURES_ANDROID, size<VkPhysicalDeviceExternalFormatResolveFeaturesANDROID>() });
 #endif
+#ifdef VK_ENABLE_BETA_EXTENSIONS
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUDA_KERNEL_LAUNCH_FEATURES_NV, size<VkPhysicalDeviceCudaKernelLaunchFeaturesNV>() });
+#endif
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCHEDULING_CONTROLS_FEATURES_ARM, size<VkPhysicalDeviceSchedulingControlsFeaturesARM>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RELAXED_LINE_RASTERIZATION_FEATURES_IMG, size<VkPhysicalDeviceRelaxedLineRasterizationFeaturesIMG>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RENDER_PASS_STRIPED_FEATURES_ARM, size<VkPhysicalDeviceRenderPassStripedFeaturesARM>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_OPACITY_MICROMAP_FEATURES_ARM, size<VkPhysicalDevicePipelineOpacityMicromapFeaturesARM>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MAXIMAL_RECONVERGENCE_FEATURES_KHR, size<VkPhysicalDeviceShaderMaximalReconvergenceFeaturesKHR>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_ROTATE_FEATURES, size<VkPhysicalDeviceShaderSubgroupRotateFeatures>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_EXPECT_ASSUME_FEATURES, size<VkPhysicalDeviceShaderExpectAssumeFeatures>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT_CONTROLS_2_FEATURES, size<VkPhysicalDeviceShaderFloatControls2Features>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES, size<VkPhysicalDeviceDynamicRenderingLocalReadFeatures>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_QUAD_CONTROL_FEATURES_KHR, size<VkPhysicalDeviceShaderQuadControlFeaturesKHR>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT16_VECTOR_FEATURES_NV, size<VkPhysicalDeviceShaderAtomicFloat16VectorFeaturesNV>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAP_MEMORY_PLACED_FEATURES_EXT, size<VkPhysicalDeviceMapMemoryPlacedFeaturesEXT>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_BFLOAT16_FEATURES_KHR, size<VkPhysicalDeviceShaderBfloat16FeaturesKHR>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAW_ACCESS_CHAINS_FEATURES_NV, size<VkPhysicalDeviceRawAccessChainsFeaturesNV>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMMAND_BUFFER_INHERITANCE_FEATURES_NV, size<VkPhysicalDeviceCommandBufferInheritanceFeaturesNV>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ALIGNMENT_CONTROL_FEATURES_MESA, size<VkPhysicalDeviceImageAlignmentControlFeaturesMESA>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_REPLICATED_COMPOSITES_FEATURES_EXT, size<VkPhysicalDeviceShaderReplicatedCompositesFeaturesEXT>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_MODE_FIFO_LATEST_READY_FEATURES_EXT, size<VkPhysicalDevicePresentModeFifoLatestReadyFeaturesEXT>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_2_FEATURES_NV, size<VkPhysicalDeviceCooperativeMatrix2FeaturesNV>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HDR_VIVID_FEATURES_HUAWEI, size<VkPhysicalDeviceHdrVividFeaturesHUAWEI>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_ROBUSTNESS_FEATURES_EXT, size<VkPhysicalDeviceVertexAttributeRobustnessFeaturesEXT>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLAMP_ZERO_ONE_FEATURES_KHR, size<VkPhysicalDeviceDepthClampZeroOneFeaturesKHR>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_VECTOR_FEATURES_NV, size<VkPhysicalDeviceCooperativeVectorFeaturesNV>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TILE_SHADING_FEATURES_QCOM, size<VkPhysicalDeviceTileShadingFeaturesQCOM>() });
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_METERING_FEATURES_NV, size<VkPhysicalDevicePresentMeteringFeaturesNV>() });
+#endif
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FORMAT_PACK_FEATURES_ARM, size<VkPhysicalDeviceFormatPackFeaturesARM>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TENSOR_FEATURES_ARM, size<VkPhysicalDeviceTensorFeaturesARM>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_TENSOR_FEATURES_ARM, size<VkPhysicalDeviceDescriptorBufferTensorFeaturesARM>() });
+        this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT, size<VkPhysicalDeviceShaderFloat8FeaturesEXT>() });
         this->structureSize.insert({ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR, size<VkPhysicalDeviceFeatures2KHR>() });
 
         //Initializing the full list of available structure features
@@ -9682,14 +10427,20 @@ struct FeaturesChain {
         pNext = &physicalDeviceDeviceGeneratedCommandsComputeFeaturesNV;
         physicalDevicePrivateDataFeatures.pNext = pNext;
         pNext = &physicalDevicePrivateDataFeatures;
+        physicalDeviceClusterAccelerationStructureFeaturesNV.pNext = pNext;
+        pNext = &physicalDeviceClusterAccelerationStructureFeaturesNV;
         physicalDeviceVariablePointersFeatures.pNext = pNext;
         pNext = &physicalDeviceVariablePointersFeatures;
         physicalDeviceMultiviewFeatures.pNext = pNext;
         pNext = &physicalDeviceMultiviewFeatures;
         physicalDevicePresentIdFeaturesKHR.pNext = pNext;
         pNext = &physicalDevicePresentIdFeaturesKHR;
+        physicalDevicePresentId2FeaturesKHR.pNext = pNext;
+        pNext = &physicalDevicePresentId2FeaturesKHR;
         physicalDevicePresentWaitFeaturesKHR.pNext = pNext;
         pNext = &physicalDevicePresentWaitFeaturesKHR;
+        physicalDevicePresentWait2FeaturesKHR.pNext = pNext;
+        pNext = &physicalDevicePresentWait2FeaturesKHR;
         physicalDevice16BitStorageFeatures.pNext = pNext;
         pNext = &physicalDevice16BitStorageFeatures;
         physicalDeviceShaderSubgroupExtendedTypesFeatures.pNext = pNext;
@@ -9706,18 +10457,24 @@ struct FeaturesChain {
         pNext = &physicalDeviceInlineUniformBlockFeatures;
         physicalDeviceMaintenance4Features.pNext = pNext;
         pNext = &physicalDeviceMaintenance4Features;
-        physicalDeviceMaintenance5FeaturesKHR.pNext = pNext;
-        pNext = &physicalDeviceMaintenance5FeaturesKHR;
-        physicalDeviceMaintenance6FeaturesKHR.pNext = pNext;
-        pNext = &physicalDeviceMaintenance6FeaturesKHR;
+        physicalDeviceMaintenance5Features.pNext = pNext;
+        pNext = &physicalDeviceMaintenance5Features;
+        physicalDeviceMaintenance6Features.pNext = pNext;
+        pNext = &physicalDeviceMaintenance6Features;
+        physicalDeviceMaintenance7FeaturesKHR.pNext = pNext;
+        pNext = &physicalDeviceMaintenance7FeaturesKHR;
+        physicalDeviceMaintenance8FeaturesKHR.pNext = pNext;
+        pNext = &physicalDeviceMaintenance8FeaturesKHR;
+        physicalDeviceMaintenance9FeaturesKHR.pNext = pNext;
+        pNext = &physicalDeviceMaintenance9FeaturesKHR;
         physicalDeviceShaderDrawParametersFeatures.pNext = pNext;
         pNext = &physicalDeviceShaderDrawParametersFeatures;
         physicalDeviceShaderFloat16Int8Features.pNext = pNext;
         pNext = &physicalDeviceShaderFloat16Int8Features;
         physicalDeviceHostQueryResetFeatures.pNext = pNext;
         pNext = &physicalDeviceHostQueryResetFeatures;
-        physicalDeviceGlobalPriorityQueryFeaturesKHR.pNext = pNext;
-        pNext = &physicalDeviceGlobalPriorityQueryFeaturesKHR;
+        physicalDeviceGlobalPriorityQueryFeatures.pNext = pNext;
+        pNext = &physicalDeviceGlobalPriorityQueryFeatures;
         physicalDeviceDeviceMemoryReportFeaturesEXT.pNext = pNext;
         pNext = &physicalDeviceDeviceMemoryReportFeaturesEXT;
         physicalDeviceDescriptorIndexingFeatures.pNext = pNext;
@@ -9736,8 +10493,8 @@ struct FeaturesChain {
         pNext = &physicalDeviceShaderAtomicFloatFeaturesEXT;
         physicalDeviceShaderAtomicFloat2FeaturesEXT.pNext = pNext;
         pNext = &physicalDeviceShaderAtomicFloat2FeaturesEXT;
-        physicalDeviceVertexAttributeDivisorFeaturesKHR.pNext = pNext;
-        pNext = &physicalDeviceVertexAttributeDivisorFeaturesKHR;
+        physicalDeviceVertexAttributeDivisorFeatures.pNext = pNext;
+        pNext = &physicalDeviceVertexAttributeDivisorFeatures;
         physicalDeviceASTCDecodeFeaturesEXT.pNext = pNext;
         pNext = &physicalDeviceASTCDecodeFeaturesEXT;
         physicalDeviceTransformFeedbackFeaturesEXT.pNext = pNext;
@@ -9748,8 +10505,8 @@ struct FeaturesChain {
         pNext = &physicalDeviceExclusiveScissorFeaturesNV;
         physicalDeviceCornerSampledImageFeaturesNV.pNext = pNext;
         pNext = &physicalDeviceCornerSampledImageFeaturesNV;
-        physicalDeviceComputeShaderDerivativesFeaturesNV.pNext = pNext;
-        pNext = &physicalDeviceComputeShaderDerivativesFeaturesNV;
+        physicalDeviceComputeShaderDerivativesFeaturesKHR.pNext = pNext;
+        pNext = &physicalDeviceComputeShaderDerivativesFeaturesKHR;
         physicalDeviceShaderImageFootprintFeaturesNV.pNext = pNext;
         pNext = &physicalDeviceShaderImageFootprintFeaturesNV;
         physicalDeviceDedicatedAllocationImageAliasingFeaturesNV.pNext = pNext;
@@ -9778,8 +10535,8 @@ struct FeaturesChain {
         pNext = &physicalDeviceFragmentDensityMapFeaturesEXT;
         physicalDeviceFragmentDensityMap2FeaturesEXT.pNext = pNext;
         pNext = &physicalDeviceFragmentDensityMap2FeaturesEXT;
-        physicalDeviceFragmentDensityMapOffsetFeaturesQCOM.pNext = pNext;
-        pNext = &physicalDeviceFragmentDensityMapOffsetFeaturesQCOM;
+        physicalDeviceFragmentDensityMapOffsetFeaturesEXT.pNext = pNext;
+        pNext = &physicalDeviceFragmentDensityMapOffsetFeaturesEXT;
         physicalDeviceScalarBlockLayoutFeatures.pNext = pNext;
         pNext = &physicalDeviceScalarBlockLayoutFeatures;
         physicalDeviceUniformBufferStandardLayoutFeatures.pNext = pNext;
@@ -9812,8 +10569,8 @@ struct FeaturesChain {
         pNext = &physicalDeviceShaderIntegerFunctions2FeaturesINTEL;
         physicalDeviceShaderClockFeaturesKHR.pNext = pNext;
         pNext = &physicalDeviceShaderClockFeaturesKHR;
-        physicalDeviceIndexTypeUint8FeaturesEXT.pNext = pNext;
-        pNext = &physicalDeviceIndexTypeUint8FeaturesEXT;
+        physicalDeviceIndexTypeUint8Features.pNext = pNext;
+        pNext = &physicalDeviceIndexTypeUint8Features;
         physicalDeviceShaderSMBuiltinsFeaturesNV.pNext = pNext;
         pNext = &physicalDeviceShaderSMBuiltinsFeaturesNV;
         physicalDeviceFragmentShaderInterlockFeaturesEXT.pNext = pNext;
@@ -9830,8 +10587,8 @@ struct FeaturesChain {
         pNext = &physicalDeviceTexelBufferAlignmentFeaturesEXT;
         physicalDeviceSubgroupSizeControlFeatures.pNext = pNext;
         pNext = &physicalDeviceSubgroupSizeControlFeatures;
-        physicalDeviceLineRasterizationFeaturesEXT.pNext = pNext;
-        pNext = &physicalDeviceLineRasterizationFeaturesEXT;
+        physicalDeviceLineRasterizationFeatures.pNext = pNext;
+        pNext = &physicalDeviceLineRasterizationFeatures;
         physicalDevicePipelineCreationCacheControlFeatures.pNext = pNext;
         pNext = &physicalDevicePipelineCreationCacheControlFeatures;
         physicalDeviceVulkan11Features.pNext = pNext;
@@ -9840,6 +10597,8 @@ struct FeaturesChain {
         pNext = &physicalDeviceVulkan12Features;
         physicalDeviceVulkan13Features.pNext = pNext;
         pNext = &physicalDeviceVulkan13Features;
+        physicalDeviceVulkan14Features.pNext = pNext;
+        pNext = &physicalDeviceVulkan14Features;
         physicalDeviceCoherentMemoryFeaturesAMD.pNext = pNext;
         pNext = &physicalDeviceCoherentMemoryFeaturesAMD;
         physicalDeviceCustomBorderColorFeaturesEXT.pNext = pNext;
@@ -9852,14 +10611,16 @@ struct FeaturesChain {
         pNext = &physicalDeviceExtendedDynamicState2FeaturesEXT;
         physicalDeviceExtendedDynamicState3FeaturesEXT.pNext = pNext;
         pNext = &physicalDeviceExtendedDynamicState3FeaturesEXT;
+        physicalDevicePartitionedAccelerationStructureFeaturesNV.pNext = pNext;
+        pNext = &physicalDevicePartitionedAccelerationStructureFeaturesNV;
         physicalDeviceDiagnosticsConfigFeaturesNV.pNext = pNext;
         pNext = &physicalDeviceDiagnosticsConfigFeaturesNV;
         physicalDeviceZeroInitializeWorkgroupMemoryFeatures.pNext = pNext;
         pNext = &physicalDeviceZeroInitializeWorkgroupMemoryFeatures;
         physicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR.pNext = pNext;
         pNext = &physicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR;
-        physicalDeviceRobustness2FeaturesEXT.pNext = pNext;
-        pNext = &physicalDeviceRobustness2FeaturesEXT;
+        physicalDeviceRobustness2FeaturesKHR.pNext = pNext;
+        pNext = &physicalDeviceRobustness2FeaturesKHR;
         physicalDeviceImageRobustnessFeatures.pNext = pNext;
         pNext = &physicalDeviceImageRobustnessFeatures;
         physicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR.pNext = pNext;
@@ -9888,30 +10649,50 @@ struct FeaturesChain {
         pNext = &physicalDeviceImageSlicedViewOf3DFeaturesEXT;
         physicalDeviceAttachmentFeedbackLoopDynamicStateFeaturesEXT.pNext = pNext;
         pNext = &physicalDeviceAttachmentFeedbackLoopDynamicStateFeaturesEXT;
+        physicalDeviceLegacyVertexAttributesFeaturesEXT.pNext = pNext;
+        pNext = &physicalDeviceLegacyVertexAttributesFeaturesEXT;
         physicalDeviceMutableDescriptorTypeFeaturesEXT.pNext = pNext;
         pNext = &physicalDeviceMutableDescriptorTypeFeaturesEXT;
         physicalDeviceDepthClipControlFeaturesEXT.pNext = pNext;
         pNext = &physicalDeviceDepthClipControlFeaturesEXT;
+        physicalDeviceZeroInitializeDeviceMemoryFeaturesEXT.pNext = pNext;
+        pNext = &physicalDeviceZeroInitializeDeviceMemoryFeaturesEXT;
+        physicalDeviceDeviceGeneratedCommandsFeaturesEXT.pNext = pNext;
+        pNext = &physicalDeviceDeviceGeneratedCommandsFeaturesEXT;
+        physicalDeviceDepthClampControlFeaturesEXT.pNext = pNext;
+        pNext = &physicalDeviceDepthClampControlFeaturesEXT;
         physicalDeviceVertexInputDynamicStateFeaturesEXT.pNext = pNext;
         pNext = &physicalDeviceVertexInputDynamicStateFeaturesEXT;
         physicalDeviceExternalMemoryRDMAFeaturesNV.pNext = pNext;
         pNext = &physicalDeviceExternalMemoryRDMAFeaturesNV;
+        physicalDeviceShaderRelaxedExtendedInstructionFeaturesKHR.pNext = pNext;
+        pNext = &physicalDeviceShaderRelaxedExtendedInstructionFeaturesKHR;
         physicalDeviceColorWriteEnableFeaturesEXT.pNext = pNext;
         pNext = &physicalDeviceColorWriteEnableFeaturesEXT;
         physicalDeviceSynchronization2Features.pNext = pNext;
         pNext = &physicalDeviceSynchronization2Features;
-        physicalDeviceHostImageCopyFeaturesEXT.pNext = pNext;
-        pNext = &physicalDeviceHostImageCopyFeaturesEXT;
+        physicalDeviceUnifiedImageLayoutsFeaturesKHR.pNext = pNext;
+        pNext = &physicalDeviceUnifiedImageLayoutsFeaturesKHR;
+        physicalDeviceHostImageCopyFeatures.pNext = pNext;
+        pNext = &physicalDeviceHostImageCopyFeatures;
         physicalDevicePrimitivesGeneratedQueryFeaturesEXT.pNext = pNext;
         pNext = &physicalDevicePrimitivesGeneratedQueryFeaturesEXT;
         physicalDeviceLegacyDitheringFeaturesEXT.pNext = pNext;
         pNext = &physicalDeviceLegacyDitheringFeaturesEXT;
         physicalDeviceMultisampledRenderToSingleSampledFeaturesEXT.pNext = pNext;
         pNext = &physicalDeviceMultisampledRenderToSingleSampledFeaturesEXT;
-        physicalDevicePipelineProtectedAccessFeaturesEXT.pNext = pNext;
-        pNext = &physicalDevicePipelineProtectedAccessFeaturesEXT;
+        physicalDevicePipelineProtectedAccessFeatures.pNext = pNext;
+        pNext = &physicalDevicePipelineProtectedAccessFeatures;
         physicalDeviceVideoMaintenance1FeaturesKHR.pNext = pNext;
         pNext = &physicalDeviceVideoMaintenance1FeaturesKHR;
+        physicalDeviceVideoMaintenance2FeaturesKHR.pNext = pNext;
+        pNext = &physicalDeviceVideoMaintenance2FeaturesKHR;
+        physicalDeviceVideoDecodeVP9FeaturesKHR.pNext = pNext;
+        pNext = &physicalDeviceVideoDecodeVP9FeaturesKHR;
+        physicalDeviceVideoEncodeQuantizationMapFeaturesKHR.pNext = pNext;
+        pNext = &physicalDeviceVideoEncodeQuantizationMapFeaturesKHR;
+        physicalDeviceVideoEncodeAV1FeaturesKHR.pNext = pNext;
+        pNext = &physicalDeviceVideoEncodeAV1FeaturesKHR;
         physicalDeviceInheritedViewportScissorFeaturesNV.pNext = pNext;
         pNext = &physicalDeviceInheritedViewportScissorFeaturesNV;
         physicalDeviceYcbcr2Plane444FormatsFeaturesEXT.pNext = pNext;
@@ -9926,6 +10707,10 @@ struct FeaturesChain {
         pNext = &physicalDeviceFragmentShaderBarycentricFeaturesKHR;
         physicalDeviceRayTracingMotionBlurFeaturesNV.pNext = pNext;
         pNext = &physicalDeviceRayTracingMotionBlurFeaturesNV;
+        physicalDeviceRayTracingValidationFeaturesNV.pNext = pNext;
+        pNext = &physicalDeviceRayTracingValidationFeaturesNV;
+        physicalDeviceRayTracingLinearSweptSpheresFeaturesNV.pNext = pNext;
+        pNext = &physicalDeviceRayTracingLinearSweptSpheresFeaturesNV;
         physicalDeviceRGBA10X6FormatsFeaturesEXT.pNext = pNext;
         pNext = &physicalDeviceRGBA10X6FormatsFeaturesEXT;
         physicalDeviceDynamicRenderingFeatures.pNext = pNext;
@@ -9938,6 +10723,8 @@ struct FeaturesChain {
         pNext = &physicalDeviceLinearColorAttachmentFeaturesNV;
         physicalDeviceGraphicsPipelineLibraryFeaturesEXT.pNext = pNext;
         pNext = &physicalDeviceGraphicsPipelineLibraryFeaturesEXT;
+        physicalDevicePipelineBinaryFeaturesKHR.pNext = pNext;
+        pNext = &physicalDevicePipelineBinaryFeaturesKHR;
         physicalDeviceDescriptorSetHostMappingFeaturesVALVE.pNext = pNext;
         pNext = &physicalDeviceDescriptorSetHostMappingFeaturesVALVE;
         physicalDeviceNestedCommandBufferFeaturesEXT.pNext = pNext;
@@ -9962,8 +10749,8 @@ struct FeaturesChain {
         pNext = &physicalDeviceShaderEarlyAndLateFragmentTestsFeaturesAMD;
         physicalDeviceNonSeamlessCubeMapFeaturesEXT.pNext = pNext;
         pNext = &physicalDeviceNonSeamlessCubeMapFeaturesEXT;
-        physicalDevicePipelineRobustnessFeaturesEXT.pNext = pNext;
-        pNext = &physicalDevicePipelineRobustnessFeaturesEXT;
+        physicalDevicePipelineRobustnessFeatures.pNext = pNext;
+        pNext = &physicalDevicePipelineRobustnessFeatures;
         physicalDeviceImageProcessingFeaturesQCOM.pNext = pNext;
         pNext = &physicalDeviceImageProcessingFeaturesQCOM;
         physicalDeviceTilePropertiesFeaturesQCOM.pNext = pNext;
@@ -9972,8 +10759,6 @@ struct FeaturesChain {
         pNext = &physicalDeviceAmigoProfilingFeaturesSEC;
         physicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT.pNext = pNext;
         pNext = &physicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT;
-        physicalDeviceDepthClampZeroOneFeaturesEXT.pNext = pNext;
-        pNext = &physicalDeviceDepthClampZeroOneFeaturesEXT;
         physicalDeviceAddressBindingReportFeaturesEXT.pNext = pNext;
         pNext = &physicalDeviceAddressBindingReportFeaturesEXT;
         physicalDeviceOpticalFlowFeaturesNV.pNext = pNext;
@@ -10016,6 +10801,10 @@ struct FeaturesChain {
         physicalDeviceShaderEnqueueFeaturesAMDX.pNext = pNext;
         pNext = &physicalDeviceShaderEnqueueFeaturesAMDX;
 #endif
+        physicalDeviceAntiLagFeaturesAMD.pNext = pNext;
+        pNext = &physicalDeviceAntiLagFeaturesAMD;
+        physicalDeviceTileMemoryHeapFeaturesQCOM.pNext = pNext;
+        pNext = &physicalDeviceTileMemoryHeapFeaturesQCOM;
         physicalDeviceCubicClampFeaturesQCOM.pNext = pNext;
         pNext = &physicalDeviceCubicClampFeaturesQCOM;
         physicalDeviceYcbcrDegammaFeaturesQCOM.pNext = pNext;
@@ -10032,14 +10821,70 @@ struct FeaturesChain {
         physicalDeviceExternalFormatResolveFeaturesANDROID.pNext = pNext;
         pNext = &physicalDeviceExternalFormatResolveFeaturesANDROID;
 #endif
+#ifdef VK_ENABLE_BETA_EXTENSIONS
         physicalDeviceCudaKernelLaunchFeaturesNV.pNext = pNext;
         pNext = &physicalDeviceCudaKernelLaunchFeaturesNV;
+#endif
         physicalDeviceSchedulingControlsFeaturesARM.pNext = pNext;
         pNext = &physicalDeviceSchedulingControlsFeaturesARM;
         physicalDeviceRelaxedLineRasterizationFeaturesIMG.pNext = pNext;
         pNext = &physicalDeviceRelaxedLineRasterizationFeaturesIMG;
         physicalDeviceRenderPassStripedFeaturesARM.pNext = pNext;
         pNext = &physicalDeviceRenderPassStripedFeaturesARM;
+        physicalDevicePipelineOpacityMicromapFeaturesARM.pNext = pNext;
+        pNext = &physicalDevicePipelineOpacityMicromapFeaturesARM;
+        physicalDeviceShaderMaximalReconvergenceFeaturesKHR.pNext = pNext;
+        pNext = &physicalDeviceShaderMaximalReconvergenceFeaturesKHR;
+        physicalDeviceShaderSubgroupRotateFeatures.pNext = pNext;
+        pNext = &physicalDeviceShaderSubgroupRotateFeatures;
+        physicalDeviceShaderExpectAssumeFeatures.pNext = pNext;
+        pNext = &physicalDeviceShaderExpectAssumeFeatures;
+        physicalDeviceShaderFloatControls2Features.pNext = pNext;
+        pNext = &physicalDeviceShaderFloatControls2Features;
+        physicalDeviceDynamicRenderingLocalReadFeatures.pNext = pNext;
+        pNext = &physicalDeviceDynamicRenderingLocalReadFeatures;
+        physicalDeviceShaderQuadControlFeaturesKHR.pNext = pNext;
+        pNext = &physicalDeviceShaderQuadControlFeaturesKHR;
+        physicalDeviceShaderAtomicFloat16VectorFeaturesNV.pNext = pNext;
+        pNext = &physicalDeviceShaderAtomicFloat16VectorFeaturesNV;
+        physicalDeviceMapMemoryPlacedFeaturesEXT.pNext = pNext;
+        pNext = &physicalDeviceMapMemoryPlacedFeaturesEXT;
+        physicalDeviceShaderBfloat16FeaturesKHR.pNext = pNext;
+        pNext = &physicalDeviceShaderBfloat16FeaturesKHR;
+        physicalDeviceRawAccessChainsFeaturesNV.pNext = pNext;
+        pNext = &physicalDeviceRawAccessChainsFeaturesNV;
+        physicalDeviceCommandBufferInheritanceFeaturesNV.pNext = pNext;
+        pNext = &physicalDeviceCommandBufferInheritanceFeaturesNV;
+        physicalDeviceImageAlignmentControlFeaturesMESA.pNext = pNext;
+        pNext = &physicalDeviceImageAlignmentControlFeaturesMESA;
+        physicalDeviceShaderReplicatedCompositesFeaturesEXT.pNext = pNext;
+        pNext = &physicalDeviceShaderReplicatedCompositesFeaturesEXT;
+        physicalDevicePresentModeFifoLatestReadyFeaturesEXT.pNext = pNext;
+        pNext = &physicalDevicePresentModeFifoLatestReadyFeaturesEXT;
+        physicalDeviceCooperativeMatrix2FeaturesNV.pNext = pNext;
+        pNext = &physicalDeviceCooperativeMatrix2FeaturesNV;
+        physicalDeviceHdrVividFeaturesHUAWEI.pNext = pNext;
+        pNext = &physicalDeviceHdrVividFeaturesHUAWEI;
+        physicalDeviceVertexAttributeRobustnessFeaturesEXT.pNext = pNext;
+        pNext = &physicalDeviceVertexAttributeRobustnessFeaturesEXT;
+        physicalDeviceDepthClampZeroOneFeaturesKHR.pNext = pNext;
+        pNext = &physicalDeviceDepthClampZeroOneFeaturesKHR;
+        physicalDeviceCooperativeVectorFeaturesNV.pNext = pNext;
+        pNext = &physicalDeviceCooperativeVectorFeaturesNV;
+        physicalDeviceTileShadingFeaturesQCOM.pNext = pNext;
+        pNext = &physicalDeviceTileShadingFeaturesQCOM;
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+        physicalDevicePresentMeteringFeaturesNV.pNext = pNext;
+        pNext = &physicalDevicePresentMeteringFeaturesNV;
+#endif
+        physicalDeviceFormatPackFeaturesARM.pNext = pNext;
+        pNext = &physicalDeviceFormatPackFeaturesARM;
+        physicalDeviceTensorFeaturesARM.pNext = pNext;
+        pNext = &physicalDeviceTensorFeaturesARM;
+        physicalDeviceDescriptorBufferTensorFeaturesARM.pNext = pNext;
+        pNext = &physicalDeviceDescriptorBufferTensorFeaturesARM;
+        physicalDeviceShaderFloat8FeaturesEXT.pNext = pNext;
+        pNext = &physicalDeviceShaderFloat8FeaturesEXT;
         physicalDeviceFeatures2KHR.pNext = pNext;
 
     }
@@ -10090,8 +10935,8 @@ struct FeaturesChain {
         const std::size_t offset = sizeof(VkBaseOutStructure);
         const VkBaseOutStructure* q = reinterpret_cast<const VkBaseOutStructure*>(pCreateInfo->pCreateInfo->pNext);
         while (q) {
-            std::size_t count = this->structureSize[q->sType];
-            for (std::size_t i = 0, n = count; i < n; ++i) {
+            const std::size_t count = this->structureSize[q->sType];
+            for (std::size_t index = 0; index < count; ++index) {
                 const VkBaseOutStructure* pInputStruct = reinterpret_cast<const VkBaseOutStructure*>(q);
                 VkBaseOutStructure* pOutputStruct = reinterpret_cast<VkBaseOutStructure*>(detail::vpGetStructure(&this->requiredFeaturesChain, q->sType));
                 const uint8_t* pInputData = reinterpret_cast<const uint8_t*>(pInputStruct) + offset;
@@ -10099,7 +10944,7 @@ struct FeaturesChain {
                 const VkBool32* input = reinterpret_cast<const VkBool32*>(pInputData);
                 VkBool32* output = reinterpret_cast<VkBool32*>(pOutputData);
 
-                output[i] = (output[i] == VK_TRUE || input[i] == VK_TRUE) ? VK_TRUE : VK_FALSE;
+                output[index] = (output[index] == VK_TRUE || input[index] == VK_TRUE) ? VK_TRUE : VK_FALSE;
             }
             q = q->pNext;
         }
@@ -10107,7 +10952,7 @@ struct FeaturesChain {
         this->ApplyRobustness(pCreateInfo);
     }
 
-    void PushBack(VkBaseOutStructure* found) { 
+    void PushBack(VkBaseOutStructure* found) {
         VkBaseOutStructure* last = reinterpret_cast<VkBaseOutStructure*>(&requiredFeaturesChain);
         while (last->pNext != nullptr) {
             last = last->pNext;
@@ -10133,27 +10978,29 @@ struct FeaturesChain {
 }; // struct FeaturesChain
 
 VPAPI_ATTR const VpProfileDesc* vpGetProfileDesc(const char profileName[VP_MAX_PROFILE_NAME_SIZE]) {
-    for (uint32_t i = 0; i < profileCount; ++i) {
-        if (strncmp(profiles[i].props.profileName, profileName, VP_MAX_PROFILE_NAME_SIZE) == 0) return &profiles[i];
+    for (uint32_t profileIndex = 0; profileIndex < profileCount; ++profileIndex) {
+        if (strncmp(profiles[profileIndex].props.profileName, profileName, VP_MAX_PROFILE_NAME_SIZE) == 0) {
+            return &profiles[profileIndex];
+        }
     }
     return nullptr;
 }
 
 VPAPI_ATTR std::vector<VpProfileProperties> GatherProfiles(const VpProfileProperties& profile, const char* pBlockName = nullptr) {
-    std::vector<VpProfileProperties> profiles;
+    std::vector<VpProfileProperties> gatheredProfiles;
 
     if (pBlockName == nullptr) {
-        const detail::VpProfileDesc* profile_desc = detail::vpGetProfileDesc(profile.profileName);
-        if (profile_desc != nullptr) {
-            for (uint32_t profile_index = 0; profile_index < profile_desc->requiredProfileCount; ++profile_index) {
-                profiles.push_back(profile_desc->pRequiredProfiles[profile_index]);
+        const detail::VpProfileDesc* profileDesc = detail::vpGetProfileDesc(profile.profileName);
+        if (profileDesc != nullptr) {
+            for (uint32_t profileIndex = 0; profileIndex < profileDesc->requiredProfileCount; ++profileIndex) {
+                gatheredProfiles.push_back(profileDesc->pRequiredProfiles[profileIndex]);
             }
         }
     }
 
-    profiles.push_back(profile);
+    gatheredProfiles.push_back(profile);
 
-    return profiles;
+    return gatheredProfiles;
 }
 
 VPAPI_ATTR bool vpCheckVersion(uint32_t actual, uint32_t expected) {
@@ -10198,11 +11045,11 @@ VPAPI_ATTR bool CheckExtension(const std::vector<const char*>& extensions, const
 }
 
 VPAPI_ATTR void GetExtensions(uint32_t extensionCount, const VkExtensionProperties *pExtensions, std::vector<const char *> &extensions) {
-    for (uint32_t i = 0; i < extensionCount; ++i) {
-        if (CheckExtension(extensions, pExtensions[i].extensionName)) {
+    for (uint32_t ext_index = 0; ext_index < extensionCount; ++ext_index) {
+        if (CheckExtension(extensions, pExtensions[ext_index].extensionName)) {
             continue;
         }
-        extensions.push_back(pExtensions[i].extensionName);
+        extensions.push_back(pExtensions[ext_index].extensionName);
     }
 }
 
@@ -10211,25 +11058,29 @@ VPAPI_ATTR std::vector<VpBlockProperties> GatherBlocks(
     uint32_t enabledProfileBlockCount, const VpBlockProperties* pEnabledProfileBlocks) {
     std::vector<VpBlockProperties> results;
 
-    for (std::size_t i = 0; i < enabledFullProfileCount; ++i) {
-        const std::vector<VpProfileProperties>& profiles = GatherProfiles(pEnabledFullProfiles[i]);
+    for (std::size_t profile_index = 0; profile_index < enabledFullProfileCount; ++profile_index) {
+        const std::vector<VpProfileProperties>& gathered_profiles = GatherProfiles(pEnabledFullProfiles[profile_index]);
 
-        for (std::size_t j = 0; j < profiles.size(); ++j) {
-            VpBlockProperties block{profiles[j], 0, ""};
+        for (std::size_t gathered_index = 0; gathered_index < gathered_profiles.size(); ++gathered_index) {
+            VpBlockProperties block{gathered_profiles[gathered_index], 0, ""};
             results.push_back(block);
         }
     }
 
-    for (std::size_t i = 0; i < enabledProfileBlockCount; ++i) {
-        results.push_back(pEnabledProfileBlocks[i]);
+    for (std::size_t block_index = 0; block_index < enabledProfileBlockCount; ++block_index) {
+        results.push_back(pEnabledProfileBlocks[block_index]);
     }
 
     return results;
 }
 
 VPAPI_ATTR VkResult vpGetInstanceProfileSupportSingleProfile(
-    uint32_t api_version, const std::vector<VkExtensionProperties>& supported_extensions,
-    const VpProfileProperties* pProfile, VkBool32* pSupported, std::vector<VpBlockProperties>& supportedBlocks, std::vector<VpBlockProperties>& unsupportedBlocks) {
+    uint32_t                                    api_version,
+    const std::vector<VkExtensionProperties>&   supported_extensions,
+    const VpProfileProperties*                  pProfile,
+    VkBool32*                                   pSupported,
+    std::vector<VpBlockProperties>&             supportedBlocks,
+    std::vector<VpBlockProperties>&             unsupportedBlocks) {
     assert(pProfile != nullptr);
 
     const detail::VpProfileDesc* pProfileDesc = vpGetProfileDesc(pProfile->profileName);
@@ -10248,16 +11099,8 @@ VPAPI_ATTR VkResult vpGetInstanceProfileSupportSingleProfile(
     // Required API version is built in root profile, not need to check dependent profile API versions
     if (api_version != 0) {
         if (!vpCheckVersion(api_version, pProfileDesc->minApiVersion)) {
-            const uint32_t version_min_major = VK_API_VERSION_MAJOR(pProfileDesc->minApiVersion);
-            const uint32_t version_min_minor = VK_API_VERSION_MINOR(pProfileDesc->minApiVersion);
-            const uint32_t version_min_patch = VK_API_VERSION_PATCH(pProfileDesc->minApiVersion);
+            VP_DEBUG_MSGF("Unsupported Profile API version %u.%u.%u on a Vulkan system with version %u.%u.%u", VK_API_VERSION_MAJOR(pProfileDesc->minApiVersion), VK_API_VERSION_MINOR(pProfileDesc->minApiVersion), VK_API_VERSION_PATCH(pProfileDesc->minApiVersion), VK_API_VERSION_MAJOR(api_version), VK_API_VERSION_MINOR(api_version), VK_API_VERSION_PATCH(api_version));
 
-            const uint32_t version_major = VK_API_VERSION_MAJOR(api_version);
-            const uint32_t version_minor = VK_API_VERSION_MINOR(api_version);
-            const uint32_t version_patch = VK_API_VERSION_PATCH(api_version);
-
-            VP_DEBUG_MSGF("Unsupported Profile API version %u.%u.%u on a Vulkan system with version %u.%u.%u", version_min_major, version_min_minor, version_min_patch, version_major, version_minor, version_patch);
-            
             *pSupported = VK_FALSE;
             unsupportedBlocks.push_back(block);
         }
@@ -10299,25 +11142,38 @@ VPAPI_ATTR VkResult vpGetInstanceProfileSupportSingleProfile(
 enum structure_type {
     STRUCTURE_FEATURE = 0,
     STRUCTURE_PROPERTY,
+    STRUCTURE_QUEUE_FAMILY,
     STRUCTURE_FORMAT
 };
 
-VPAPI_ATTR VkResult vpGetProfileStructureTypes(const VpProfileProperties *pProfile, const char* pBlockName, structure_type type, uint32_t *pStructureTypeCount, VkStructureType *pStructureTypes) {
+VPAPI_ATTR VkResult vpGetProfileStructureTypes(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    structure_type                              type,
+    uint32_t*                                   pStructureTypeCount,
+    VkStructureType*                            pStructureTypes) {
+#ifdef VP_USE_OBJECT
+    (void)capabilities;
+#endif//VP_USE_OBJECT
+
     VkResult result = pBlockName == nullptr ? VK_SUCCESS : VK_INCOMPLETE;
 
     std::vector<VkStructureType> results;
 
-    const std::vector<VpProfileProperties>& profiles = detail::GatherProfiles(*pProfile);
+    const std::vector<VpProfileProperties>& gathered_profiles = detail::GatherProfiles(*pProfile);
 
-    for (std::size_t profile_index = 0, profile_count = profiles.size(); profile_index < profile_count; ++profile_index) {
-        const detail::VpProfileDesc* profile_desc = detail::vpGetProfileDesc(profiles[profile_index].profileName);
+    for (std::size_t profile_index = 0, profile_count = gathered_profiles.size(); profile_index < profile_count; ++profile_index) {
+        const detail::VpProfileDesc* profile_desc = detail::vpGetProfileDesc(gathered_profiles[profile_index].profileName);
         if (profile_desc == nullptr) return VK_ERROR_UNKNOWN;
 
         for (uint32_t capability_index = 0; capability_index < profile_desc->requiredCapabilityCount; ++capability_index) {
-            const detail::VpCapabilitiesDesc& capabilities = profile_desc->pRequiredCapabilities[capability_index];
+            const detail::VpCapabilitiesDesc& cap_desc = profile_desc->pRequiredCapabilities[capability_index];
 
-            for (uint32_t variant_index = 0; variant_index < capabilities.variantCount; ++variant_index) {
-                const detail::VpVariantDesc& variant = capabilities.pVariants[variant_index];
+            for (uint32_t variant_index = 0; variant_index < cap_desc.variantCount; ++variant_index) {
+                const detail::VpVariantDesc& variant = cap_desc.pVariants[variant_index];
                 if (pBlockName != nullptr) {
                     if (strcmp(variant.blockName, pBlockName) != 0) {
                         continue;
@@ -10338,16 +11194,20 @@ VPAPI_ATTR VkResult vpGetProfileStructureTypes(const VpProfileProperties *pProfi
                         count = variant.propertyStructTypeCount;
                         data = variant.pPropertyStructTypes;
                         break;
+                    case STRUCTURE_QUEUE_FAMILY:
+                        count = variant.queueFamilyStructTypeCount;
+                        data = variant.pQueueFamilyStructTypes;
+                        break;
                     case STRUCTURE_FORMAT:
                         count = variant.formatStructTypeCount;
                         data = variant.pFormatStructTypes;
                         break;
                 }
 
-                for (uint32_t i = 0; i < count; ++i) {
-                    const VkStructureType type = data[i];
-                    if (std::find(results.begin(), results.end(), type) == std::end(results)) {
-                        results.push_back(type);
+                for (uint32_t type_index = 0; type_index < count; ++type_index) {
+                    const VkStructureType dataType = data[type_index];
+                    if (std::find(results.begin(), results.end(), dataType) == std::end(results)) {
+                        results.push_back(dataType);
                     }
                 }
             }
@@ -10379,22 +11239,36 @@ enum ExtensionType {
     EXTENSION_DEVICE,
 };
 
-VPAPI_ATTR VkResult vpGetProfileExtensionProperties(const VpProfileProperties *pProfile, const char* pBlockName, ExtensionType type, uint32_t *pPropertyCount, VkExtensionProperties *pProperties) {
+VPAPI_ATTR VkResult vpGetProfileExtensionProperties(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    ExtensionType                               type,
+    uint32_t*                                   pPropertyCount,
+    VkExtensionProperties*                      pProperties) {
+#ifdef VP_USE_OBJECT
+    (void)capabilities;
+#endif//VP_USE_OBJECT
+
     VkResult result = pBlockName == nullptr ? VK_SUCCESS : VK_INCOMPLETE;
 
     std::vector<VkExtensionProperties> results;
 
-    const std::vector<VpProfileProperties>& profiles = detail::GatherProfiles(*pProfile, pBlockName);
+    const std::vector<VpProfileProperties>& gathered_profiles = detail::GatherProfiles(*pProfile, pBlockName);
 
-    for (std::size_t profile_index = 0, profile_count = profiles.size(); profile_index < profile_count; ++profile_index) {
-        const detail::VpProfileDesc* profile_desc = detail::vpGetProfileDesc(profiles[profile_index].profileName);
-        if (profile_desc == nullptr) return VK_ERROR_UNKNOWN;
+    for (std::size_t profile_index = 0, profile_count = gathered_profiles.size(); profile_index < profile_count; ++profile_index) {
+        const detail::VpProfileDesc* profile_desc = detail::vpGetProfileDesc(gathered_profiles[profile_index].profileName);
+        if (profile_desc == nullptr) {
+            return VK_ERROR_UNKNOWN;
+        }
 
         for (uint32_t capability_index = 0; capability_index < profile_desc->requiredCapabilityCount; ++capability_index) {
-            const detail::VpCapabilitiesDesc& capabilities = profile_desc->pRequiredCapabilities[capability_index];
+            const detail::VpCapabilitiesDesc& cap_desc = profile_desc->pRequiredCapabilities[capability_index];
 
-            for (uint32_t variant_index = 0; variant_index < capabilities.variantCount; ++variant_index) {
-                const detail::VpVariantDesc& variant = capabilities.pVariants[variant_index];
+            for (uint32_t variant_index = 0; variant_index < cap_desc.variantCount; ++variant_index) {
+                const detail::VpVariantDesc& variant = cap_desc.pVariants[variant_index];
                 if (pBlockName != nullptr) {
                     if (strcmp(variant.blockName, pBlockName) != 0) {
                         continue;
@@ -10405,19 +11279,19 @@ VPAPI_ATTR VkResult vpGetProfileExtensionProperties(const VpProfileProperties *p
                 switch (type) {
                     default:
                     case EXTENSION_INSTANCE:
-                        for (uint32_t i = 0; i < variant.instanceExtensionCount; ++i) {
-                            if (detail::HasExtension(results, variant.pInstanceExtensions[i])) {
+                        for (uint32_t ext_index = 0; ext_index < variant.instanceExtensionCount; ++ext_index) {
+                            if (detail::HasExtension(results, variant.pInstanceExtensions[ext_index])) {
                                 continue;
                             }
-                            results.push_back(variant.pInstanceExtensions[i]);
+                            results.push_back(variant.pInstanceExtensions[ext_index]);
                         }
                         break;
                     case EXTENSION_DEVICE:
-                        for (uint32_t i = 0; i < variant.deviceExtensionCount; ++i) {
-                            if (detail::HasExtension(results, variant.pDeviceExtensions[i])) {
+                        for (uint32_t ext_index = 0; ext_index < variant.deviceExtensionCount; ++ext_index) {
+                            if (detail::HasExtension(results, variant.pDeviceExtensions[ext_index])) {
                                 continue;
                             }
-                            results.push_back(variant.pDeviceExtensions[i]);
+                            results.push_back(variant.pDeviceExtensions[ext_index]);
                         }
                         break;
                 }
@@ -10443,9 +11317,244 @@ VPAPI_ATTR VkResult vpGetProfileExtensionProperties(const VpProfileProperties *p
     return result;
 }
 
+VPAPI_ATTR VkResult vpGetProfileVideoProfileDesc(
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    uint32_t                                    videoProfileIndex,
+    const detail::VpVideoProfileDesc**          ppVideoProfileDesc) {
+    VkResult result = pBlockName == nullptr ? VK_SUCCESS : VK_INCOMPLETE;
+
+    uint32_t curr_base_video_profile_index = 0;
+
+    const std::vector<VpProfileProperties>& gathered_profiles = detail::GatherProfiles(*pProfile);
+
+    for (std::size_t profile_index = 0, profile_count = gathered_profiles.size(); profile_index < profile_count; ++profile_index) {
+        const detail::VpProfileDesc* profile_desc = detail::vpGetProfileDesc(gathered_profiles[profile_index].profileName);
+        if (profile_desc == nullptr) return VK_ERROR_UNKNOWN;
+
+        for (uint32_t capability_index = 0; capability_index < profile_desc->requiredCapabilityCount; ++capability_index) {
+            const detail::VpCapabilitiesDesc& cap_desc = profile_desc->pRequiredCapabilities[capability_index];
+
+            for (uint32_t variant_index = 0; variant_index < cap_desc.variantCount; ++variant_index) {
+                const detail::VpVariantDesc& variant = cap_desc.pVariants[variant_index];
+                if (pBlockName != nullptr) {
+                    if (strcmp(variant.blockName, pBlockName) != 0) {
+                        continue;
+                    }
+                    result = VK_SUCCESS;
+                }
+
+                if (videoProfileIndex < curr_base_video_profile_index + variant.videoProfileCount) {
+                    *ppVideoProfileDesc = &variant.pVideoProfiles[videoProfileIndex - curr_base_video_profile_index];
+                    return result;
+                } else {
+                    curr_base_video_profile_index += variant.videoProfileCount;
+                }
+            }
+        }
+    }
+
+    *ppVideoProfileDesc = nullptr;
+    return VK_ERROR_UNKNOWN;
+}
+
 } // namespace detail
 
-VPAPI_ATTR VkResult vpGetProfiles(uint32_t *pPropertyCount, VpProfileProperties *pProperties) {
+struct VpCapabilities_T : public VpVulkanFunctions {
+    bool singleton = false;
+    uint32_t apiVersion = VK_API_VERSION_1_0;
+
+    static VpCapabilities_T& Get() {
+        static VpCapabilities_T instance;
+        VpCapabilitiesCreateInfo createInfo{};
+        createInfo.flags = VP_PROFILE_CREATE_STATIC_BIT;
+        instance.init(&createInfo);
+        instance.singleton = true;
+        return instance;
+    }
+
+    VpCapabilities_T() {
+        this->GetInstanceProcAddr = nullptr;
+        this->GetDeviceProcAddr = nullptr;
+        this->EnumerateInstanceVersion = nullptr;
+        this->EnumerateInstanceExtensionProperties = nullptr;
+        this->EnumerateDeviceExtensionProperties = nullptr;
+        this->GetPhysicalDeviceFeatures2 = nullptr;
+        this->GetPhysicalDeviceProperties2 = nullptr;
+        this->GetPhysicalDeviceFormatProperties2 = nullptr;
+        this->GetPhysicalDeviceQueueFamilyProperties2 = nullptr;
+        this->CreateInstance = nullptr;
+        this->CreateDevice = nullptr;
+    }
+
+    VkResult init(const VpCapabilitiesCreateInfo* pCreateInfo) {
+        assert(pCreateInfo != nullptr);
+
+        return ImportVulkanFunctions(pCreateInfo);
+    }
+
+    VkResult ImportVulkanFunctions(const VpCapabilitiesCreateInfo* pCreateInfo) {
+        if (pCreateInfo->flags & VP_PROFILE_CREATE_STATIC_BIT) {
+            ImportVulkanFunctions_Static();
+        }
+
+        if (pCreateInfo->pVulkanFunctions != nullptr) {
+            ImportVulkanFunctions_Custom((VpVulkanFunctions*)pCreateInfo->pVulkanFunctions);
+        }
+/*
+        if (pCreateInfo->flags & VP_PROFILE_CREATE_DYNAMIC_BIT) {
+            ImportVulkanFunctions_Dynamic();
+        }
+*/
+        return ValidateVulkanFunctions();
+    }
+
+    void ImportVulkanFunctions_Static() {
+        // Vulkan 1.1
+        this->GetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)vkGetInstanceProcAddr;
+        this->GetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)vkGetDeviceProcAddr;
+
+        this->EnumerateInstanceVersion = (PFN_vkEnumerateInstanceVersion)vkEnumerateInstanceVersion;
+        this->EnumerateInstanceExtensionProperties = (PFN_vkEnumerateInstanceExtensionProperties)vkEnumerateInstanceExtensionProperties;
+        this->EnumerateDeviceExtensionProperties = (PFN_vkEnumerateDeviceExtensionProperties)vkEnumerateDeviceExtensionProperties;
+
+        this->GetPhysicalDeviceFeatures2 = (PFN_vkGetPhysicalDeviceFeatures2)vkGetPhysicalDeviceFeatures2;
+        this->GetPhysicalDeviceProperties2 = (PFN_vkGetPhysicalDeviceProperties2)vkGetPhysicalDeviceProperties2;
+        this->GetPhysicalDeviceFormatProperties2 = (PFN_vkGetPhysicalDeviceFormatProperties2)vkGetPhysicalDeviceFormatProperties2;
+        this->GetPhysicalDeviceQueueFamilyProperties2 = (PFN_vkGetPhysicalDeviceQueueFamilyProperties2)vkGetPhysicalDeviceQueueFamilyProperties2;
+
+        this->CreateInstance = (PFN_vkCreateInstance)vkCreateInstance;
+        this->CreateDevice = (PFN_vkCreateDevice)vkCreateDevice;
+    }
+
+    void ImportVulkanFunctions_Custom(VpVulkanFunctions* pFunctions) {
+    #define VP_COPY_IF_NOT_NULL(funcName)         if(pFunctions->funcName != nullptr) this->funcName = pFunctions->funcName;
+
+        VP_COPY_IF_NOT_NULL(GetInstanceProcAddr);
+        VP_COPY_IF_NOT_NULL(GetDeviceProcAddr);
+
+        VP_COPY_IF_NOT_NULL(EnumerateInstanceVersion);
+        VP_COPY_IF_NOT_NULL(EnumerateInstanceExtensionProperties);
+        VP_COPY_IF_NOT_NULL(EnumerateDeviceExtensionProperties);
+
+        VP_COPY_IF_NOT_NULL(GetPhysicalDeviceFeatures2);
+        VP_COPY_IF_NOT_NULL(GetPhysicalDeviceProperties2);
+        VP_COPY_IF_NOT_NULL(GetPhysicalDeviceFormatProperties2);
+        VP_COPY_IF_NOT_NULL(GetPhysicalDeviceQueueFamilyProperties2);
+
+        VP_COPY_IF_NOT_NULL(CreateInstance);
+        VP_COPY_IF_NOT_NULL(CreateDevice);
+    #undef VP_COPY_IF_NOT_NULL
+    }
+/*
+    VkResult ImportVulkanFunctions_Dynamic() {
+        // To use VP_PROFILE_CREATE_DYNAMIC_BIT you have to pass VpVulkanFunctions::vkGetInstanceProcAddr and vkGetDeviceProcAddr as VpCapabilitiesCreateInfo::pVulkanFunctions. Other members can be null.
+        if (this->GetInstanceProcAddr == nullptr || this->GetDeviceProcAddr == nullptr) {
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+
+    #define VP_FETCH_INSTANCE_FUNC(memberName, functionNameString)         if(this->memberName == nullptr)            this->memberName = (PFN_vk##memberName)this->GetInstanceProcAddr(m_hInstance, functionNameString);
+    #define VP_FETCH_DEVICE_FUNC(memberName, functionNameString)         if(this->memberName == nullptr)             this->memberName = (PFN_vk##memberName)this->GetDeviceProcAddr(m_hDevice, functionNameString);
+
+        VP_FETCH_INSTANCE_FUNC(GetInstanceProcAddr, "vkGetInstanceProcAddr");
+        VP_FETCH_DEVICE_FUNC(GetDeviceProcAddr, "vkGetDeviceProcAddr");
+
+        VP_FETCH_INSTANCE_FUNC(EnumerateInstanceVersion, "vkEnumerateInstanceVersion");
+        VP_FETCH_INSTANCE_FUNC(EnumerateInstanceExtensionProperties, "vkEnumerateInstanceExtensionProperties");
+        VP_FETCH_DEVICE_FUNC(EnumerateDeviceExtensionProperties, "vkEnumerateDeviceExtensionProperties");
+
+        VP_FETCH_DEVICE_FUNC(GetPhysicalDeviceFeatures2, "vkGetPhysicalDeviceFeatures2");
+        VP_FETCH_DEVICE_FUNC(GetPhysicalDeviceProperties2, "vkGetPhysicalDeviceProperties2");
+        VP_FETCH_DEVICE_FUNC(GetPhysicalDeviceFormatProperties2, "vkGetPhysicalDeviceFormatProperties2");
+        VP_FETCH_DEVICE_FUNC(GetPhysicalDeviceQueueFamilyProperties2, "vkGetPhysicalDeviceQueueFamilyProperties2");
+
+        VP_FETCH_INSTANCE_FUNC(CreateInstance, "vkCreateInstance");
+        VP_FETCH_DEVICE_FUNC(CreateDevice, "vkCreateDevice");
+    #undef VP_FETCH_DEVICE_FUNC
+    #undef VP_FETCH_INSTANCE_FUNC
+    }
+*/
+    VkResult ValidateVulkanFunctions() {
+        if (this->GetInstanceProcAddr == nullptr) {
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+
+        if (this->GetDeviceProcAddr == nullptr) {
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+
+        if (this->EnumerateInstanceVersion == nullptr && apiVersion >= VK_API_VERSION_1_1) {
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+
+        if (this->EnumerateInstanceExtensionProperties == nullptr) {
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+
+        if (this->EnumerateDeviceExtensionProperties == nullptr) {
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+
+        if (this->GetPhysicalDeviceFeatures2 == nullptr) {
+            return apiVersion >= VK_API_VERSION_1_1 ? VK_ERROR_INITIALIZATION_FAILED : VK_ERROR_EXTENSION_NOT_PRESENT;
+        }
+
+        if (this->GetPhysicalDeviceProperties2 == nullptr) {
+            return apiVersion >= VK_API_VERSION_1_1 ? VK_ERROR_INITIALIZATION_FAILED : VK_ERROR_EXTENSION_NOT_PRESENT;
+        }
+
+        if (this->GetPhysicalDeviceFormatProperties2 == nullptr) {
+            return apiVersion >= VK_API_VERSION_1_1 ? VK_ERROR_INITIALIZATION_FAILED : VK_ERROR_EXTENSION_NOT_PRESENT;
+        }
+
+        if (this->GetPhysicalDeviceQueueFamilyProperties2 == nullptr) {
+            return apiVersion >= VK_API_VERSION_1_1 ? VK_ERROR_INITIALIZATION_FAILED : VK_ERROR_EXTENSION_NOT_PRESENT;
+        }
+
+        if (this->CreateInstance == nullptr) {
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+
+        if (this->CreateDevice == nullptr) {
+            return VK_ERROR_INITIALIZATION_FAILED;
+        }
+
+        return VK_SUCCESS;
+    }
+};
+
+VPAPI_ATTR VkResult vpCreateCapabilities(
+    const VpCapabilitiesCreateInfo*             pCreateInfo,
+    const VkAllocationCallbacks*                pAllocator,
+    VpCapabilities*                             pCapabilities) {
+    (void)pAllocator;
+
+    VpCapabilities_T* capabilities = new VpCapabilities_T();
+    VkResult result = capabilities->init(pCreateInfo);
+    *pCapabilities = capabilities;
+
+    return result;
+}
+
+/// Destroys allocator object.
+VPAPI_ATTR void vpDestroyCapabilities(
+    VpCapabilities                              capabilities,
+    const VkAllocationCallbacks*                pAllocator) {
+    (void)pAllocator;
+    
+    delete capabilities;
+}
+
+VPAPI_ATTR VkResult vpGetProfiles(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    uint32_t*                                   pPropertyCount,
+    VpProfileProperties*                        pProperties) {
+#ifdef VP_USE_OBJECT
+    (void)capabilities;
+#endif//VP_USE_OBJECT
+
     VkResult result = VK_SUCCESS;
 
     if (pProperties == nullptr) {
@@ -10456,83 +11565,128 @@ VPAPI_ATTR VkResult vpGetProfiles(uint32_t *pPropertyCount, VpProfileProperties 
         } else {
             *pPropertyCount = detail::profileCount;
         }
-        for (uint32_t i = 0; i < *pPropertyCount; ++i) {
-            pProperties[i] = detail::profiles[i].props;
+        for (uint32_t property_index = 0; property_index < *pPropertyCount; ++property_index) {
+            pProperties[property_index] = detail::profiles[property_index].props;
         }
     }
     return result;
 }
 
-VPAPI_ATTR VkResult vpGetProfileRequiredProfiles(const VpProfileProperties *pProfile, uint32_t *pPropertyCount, VpProfileProperties *pProperties) {
+VPAPI_ATTR VkResult vpGetProfileRequiredProfiles(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    uint32_t*                                   pPropertyCount,
+    VpProfileProperties*                        pProperties) {
+#ifdef VP_USE_OBJECT
+    (void)capabilities;
+#endif//VP_USE_OBJECT
+
     VkResult result = VK_SUCCESS;
 
-    const detail::VpProfileDesc* pDesc = detail::vpGetProfileDesc(pProfile->profileName);
-    if (pDesc == nullptr) return VK_ERROR_UNKNOWN;
+    const detail::VpProfileDesc* desc = detail::vpGetProfileDesc(pProfile->profileName);
+    if (desc == nullptr) {
+        return VK_ERROR_UNKNOWN;
+    }
 
     if (pProperties == nullptr) {
-        *pPropertyCount = pDesc->requiredProfileCount;
+        *pPropertyCount = desc->requiredProfileCount;
     } else {
-        if (*pPropertyCount < pDesc->requiredProfileCount) {
+        if (*pPropertyCount < desc->requiredProfileCount) {
             result = VK_INCOMPLETE;
         } else {
-            *pPropertyCount = pDesc->requiredProfileCount;
+            *pPropertyCount = desc->requiredProfileCount;
         }
-        for (uint32_t i = 0; i < *pPropertyCount; ++i) {
-            pProperties[i] = pDesc->pRequiredProfiles[i];
+        for (uint32_t property_index = 0; property_index < *pPropertyCount; ++property_index) {
+            pProperties[property_index] = desc->pRequiredProfiles[property_index];
         }
     }
     return result;
 }
 
-VPAPI_ATTR uint32_t vpGetProfileAPIVersion(const VpProfileProperties* pProfile) {
-    const std::vector<VpProfileProperties>& profiles = detail::GatherProfiles(*pProfile, nullptr);
+VPAPI_ATTR uint32_t vpGetProfileAPIVersion(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile) {
+#ifdef VP_USE_OBJECT
+    (void)capabilities;
+#endif//VP_USE_OBJECT
+
+    const std::vector<VpProfileProperties>& gathered_profiles = detail::GatherProfiles(*pProfile, nullptr);
 
     uint32_t major = 0;
     uint32_t minor = 0;
     uint32_t patch = 0;
 
-    for (std::size_t i = 0, n = profiles.size(); i < n; ++i) {
-        const detail::VpProfileDesc* pDesc = detail::vpGetProfileDesc(profiles[i].profileName);
-        if (pDesc == nullptr) return 0;
+    for (std::size_t profile_index = 0, profile_count = gathered_profiles.size(); profile_index < profile_count; ++profile_index) {
+        const detail::VpProfileDesc* desc = detail::vpGetProfileDesc(gathered_profiles[profile_index].profileName);
+        if (desc == nullptr) {
+            return 0;
+        }
 
-        major = std::max<uint32_t>(major, VK_API_VERSION_MAJOR(pDesc->minApiVersion));
-        minor = std::max<uint32_t>(minor, VK_API_VERSION_MINOR(pDesc->minApiVersion));
-        patch = std::max<uint32_t>(patch, VK_API_VERSION_PATCH(pDesc->minApiVersion));
+        major = std::max<uint32_t>(major, VK_API_VERSION_MAJOR(desc->minApiVersion));
+        minor = std::max<uint32_t>(minor, VK_API_VERSION_MINOR(desc->minApiVersion));
+        patch = std::max<uint32_t>(patch, VK_API_VERSION_PATCH(desc->minApiVersion));
     }
 
     return VK_MAKE_API_VERSION(0, major, minor, patch);
 }
 
-VPAPI_ATTR VkResult vpGetProfileFallbacks(const VpProfileProperties *pProfile, uint32_t *pPropertyCount, VpProfileProperties *pProperties) {
+VPAPI_ATTR VkResult vpGetProfileFallbacks(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    uint32_t*                                   pPropertyCount,
+    VpProfileProperties*                        pProperties) {
+#ifdef VP_USE_OBJECT
+    (void)capabilities;
+#endif//VP_USE_OBJECT
+
     VkResult result = VK_SUCCESS;
 
-    const detail::VpProfileDesc* pDesc = detail::vpGetProfileDesc(pProfile->profileName);
-    if (pDesc == nullptr) return VK_ERROR_UNKNOWN;
+    const detail::VpProfileDesc* desc = detail::vpGetProfileDesc(pProfile->profileName);
+    if (desc == nullptr) {
+        return VK_ERROR_UNKNOWN;
+    }
 
     if (pProperties == nullptr) {
-        *pPropertyCount = pDesc->fallbackCount;
+        *pPropertyCount = desc->fallbackCount;
     } else {
-        if (*pPropertyCount < pDesc->fallbackCount) {
+        if (*pPropertyCount < desc->fallbackCount) {
             result = VK_INCOMPLETE;
         } else {
-            *pPropertyCount = pDesc->fallbackCount;
+            *pPropertyCount = desc->fallbackCount;
         }
         for (uint32_t i = 0; i < *pPropertyCount; ++i) {
-            pProperties[i] = pDesc->pFallbacks[i];
+            pProperties[i] = desc->pFallbacks[i];
         }
     }
     return result;
 }
 
-VPAPI_ATTR VkResult vpHasMultipleVariantsProfile(const VpProfileProperties *pProfile, VkBool32 *pHasMultipleVariants) {
-    const std::vector<VpProfileProperties>& profiles = detail::GatherProfiles(*pProfile, nullptr);
+VPAPI_ATTR VkResult vpHasMultipleVariantsProfile(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    VkBool32*                                   pHasMultipleVariants) {
+#ifdef VP_USE_OBJECT
+    (void)capabilities;
+#endif//VP_USE_OBJECT
 
-    for (std::size_t profile_index = 0, profile_count = profiles.size(); profile_index < profile_count; ++profile_index) {
-        const detail::VpProfileDesc* pDesc = detail::vpGetProfileDesc(profiles[profile_index].profileName);
-        if (pDesc == nullptr) return VK_ERROR_UNKNOWN;
+    const std::vector<VpProfileProperties>& gathered_profiles = detail::GatherProfiles(*pProfile, nullptr);
 
-        for (uint32_t capabilities_index = 0, n = pDesc->requiredCapabilityCount; capabilities_index < n; ++capabilities_index) {
-            if (pDesc->pRequiredCapabilities[capabilities_index].variantCount > 1) {
+    for (std::size_t profile_index = 0, profile_count = gathered_profiles.size(); profile_index < profile_count; ++profile_index) {
+        const detail::VpProfileDesc* desc = detail::vpGetProfileDesc(gathered_profiles[profile_index].profileName);
+        if (desc == nullptr) {
+            return VK_ERROR_UNKNOWN;
+        }
+
+        for (uint32_t caps_index = 0, caps_count = desc->requiredCapabilityCount; caps_index < caps_count; ++caps_index) {
+            if (desc->pRequiredCapabilities[caps_index].variantCount > 1) {
                 *pHasMultipleVariants = VK_TRUE;
                 return VK_SUCCESS;
             }
@@ -10543,22 +11697,38 @@ VPAPI_ATTR VkResult vpHasMultipleVariantsProfile(const VpProfileProperties *pPro
     return VK_SUCCESS;
 }
 
-VPAPI_ATTR VkResult vpGetInstanceProfileVariantsSupport(const char *pLayerName, const VpProfileProperties *pProfile, VkBool32 *pSupported, uint32_t *pPropertyCount, VpBlockProperties* pProperties) {
+VPAPI_ATTR VkResult vpGetInstanceProfileVariantsSupport(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                      capabilities,
+#endif//VP_USE_OBJECT
+    const char*                         pLayerName,
+    const VpProfileProperties*          pProfile,
+    VkBool32*                           pSupported,
+    uint32_t*                           pPropertyCount,
+    VpBlockProperties*                  pProperties) {
+#ifdef VP_USE_OBJECT
+    const VpCapabilities_T& vp = capabilities == nullptr ? VpCapabilities_T::Get() : *capabilities;
+#else
+    const VpCapabilities_T& vp = VpCapabilities_T::Get();
+#endif//VP_USE_OBJECT
+
     VkResult result = VK_SUCCESS;
 
-    uint32_t api_version = VK_MAKE_API_VERSION(0, 1, 0, 0);
-    static PFN_vkEnumerateInstanceVersion pfnEnumerateInstanceVersion =
-        (PFN_vkEnumerateInstanceVersion)vkGetInstanceProcAddr(VK_NULL_HANDLE, "vkEnumerateInstanceVersion");
+    uint32_t api_version = VK_API_VERSION_1_0;
+    PFN_vkEnumerateInstanceVersion pfnEnumerateInstanceVersion = vp.singleton ?
+        (PFN_vkEnumerateInstanceVersion)vkGetInstanceProcAddr(VK_NULL_HANDLE, "vkEnumerateInstanceVersion") : vp.EnumerateInstanceVersion;
     if (pfnEnumerateInstanceVersion != nullptr) {
         result = pfnEnumerateInstanceVersion(&api_version);
         if (result != VK_SUCCESS) {
             *pSupported = VK_FALSE;
             return result;
-        }
+        } /* else {
+            VP_DEBUG_MSGF("Instance API version %u.%u.%u", VK_API_VERSION_MAJOR(api_version), VK_API_VERSION_MINOR(api_version), VK_API_VERSION_PATCH(api_version));
+        } */
     }
 
     uint32_t supported_instance_extension_count = 0;
-    result = vkEnumerateInstanceExtensionProperties(pLayerName, &supported_instance_extension_count, nullptr);
+    result = vp.EnumerateInstanceExtensionProperties(pLayerName, &supported_instance_extension_count, nullptr);
     if (result != VK_SUCCESS) {
         *pSupported = VK_FALSE;
         return result;
@@ -10567,7 +11737,7 @@ VPAPI_ATTR VkResult vpGetInstanceProfileVariantsSupport(const char *pLayerName, 
     if (supported_instance_extension_count > 0) {
         supported_instance_extensions.resize(supported_instance_extension_count);
     }
-    result = vkEnumerateInstanceExtensionProperties(pLayerName, &supported_instance_extension_count, supported_instance_extensions.data());
+    result = vp.EnumerateInstanceExtensionProperties(pLayerName, &supported_instance_extension_count, supported_instance_extensions.data());
     if (result != VK_SUCCESS) {
         *pSupported = VK_FALSE;
         return result;
@@ -10578,8 +11748,8 @@ VPAPI_ATTR VkResult vpGetInstanceProfileVariantsSupport(const char *pLayerName, 
     // We require VK_KHR_get_physical_device_properties2 if we are on Vulkan 1.0
     if (api_version < VK_API_VERSION_1_1) {
         bool foundGPDP2 = false;
-        for (size_t i = 0; i < supported_instance_extensions.size(); ++i) {
-            if (strcmp(supported_instance_extensions[i].extensionName, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME) == 0) {
+        for (size_t ext_index = 0, ext_count = supported_instance_extensions.size(); ext_index < ext_count; ++ext_index) {
+            if (strcmp(supported_instance_extensions[ext_index].extensionName, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME) == 0) {
                 foundGPDP2 = true;
                 break;
             }
@@ -10601,9 +11771,9 @@ VPAPI_ATTR VkResult vpGetInstanceProfileVariantsSupport(const char *pLayerName, 
         *pSupported = supported;
         return result;
     }
- 
-    for (std::size_t i = 0; i < pProfileDesc->requiredProfileCount; ++i) {
-        result = detail::vpGetInstanceProfileSupportSingleProfile(0, supported_instance_extensions, &pProfileDesc->pRequiredProfiles[i], &supported, supported_blocks, unsupported_blocks);
+
+    for (std::size_t required_profile_index = 0; required_profile_index < pProfileDesc->requiredProfileCount; ++required_profile_index) {
+        result = detail::vpGetInstanceProfileSupportSingleProfile(0, supported_instance_extensions, &pProfileDesc->pRequiredProfiles[required_profile_index], &supported, supported_blocks, unsupported_blocks);
         if (result != VK_SUCCESS) {
             *pSupported = supported;
             return result;
@@ -10620,8 +11790,8 @@ VPAPI_ATTR VkResult vpGetInstanceProfileVariantsSupport(const char *pLayerName, 
         } else {
             *pPropertyCount = static_cast<uint32_t>(blocks.size());
         }
-        for (uint32_t i = 0, n = static_cast<uint32_t>(blocks.size()); i < n; ++i) {
-            pProperties[i] = blocks[i];
+        for (uint32_t block_index = 0, block_count = static_cast<uint32_t>(blocks.size()); block_index < block_count; ++block_index) {
+            pProperties[block_index] = blocks[block_index];
         }
     }
 
@@ -10629,16 +11799,37 @@ VPAPI_ATTR VkResult vpGetInstanceProfileVariantsSupport(const char *pLayerName, 
     return result;
 }
 
-VPAPI_ATTR VkResult vpGetInstanceProfileSupport(const char *pLayerName, const VpProfileProperties *pProfile, VkBool32 *pSupported) {
+VPAPI_ATTR VkResult vpGetInstanceProfileSupport(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const char*                                 pLayerName,
+    const VpProfileProperties*                  pProfile,
+    VkBool32*                                   pSupported) {
     uint32_t count = 0;
-    return vpGetInstanceProfileVariantsSupport(pLayerName, pProfile, pSupported, &count, nullptr);
+
+    return vpGetInstanceProfileVariantsSupport(
+#ifdef VP_USE_OBJECT
+        capabilities,
+#endif//VP_USE_OBJECT
+        pLayerName, pProfile, pSupported, &count, nullptr);
 }
 
+VPAPI_ATTR VkResult vpCreateInstance(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpInstanceCreateInfo*                 pCreateInfo,
+    const VkAllocationCallbacks*                pAllocator,
+    VkInstance*                                 pInstance) {
+#ifdef VP_USE_OBJECT
+    const VpCapabilities_T& vp = capabilities == nullptr ? VpCapabilities_T::Get() : *capabilities;
+#else
+    const VpCapabilities_T& vp = VpCapabilities_T::Get();
+#endif//VP_USE_OBJECT
 
-VPAPI_ATTR VkResult vpCreateInstance(const VpInstanceCreateInfo *pCreateInfo,
-                                     const VkAllocationCallbacks *pAllocator, VkInstance *pInstance) {
     if (pCreateInfo == nullptr || pInstance == nullptr) {
-        return vkCreateInstance(pCreateInfo == nullptr ? nullptr : pCreateInfo->pCreateInfo, pAllocator, pInstance);
+        return vp.CreateInstance(pCreateInfo == nullptr ? nullptr : pCreateInfo->pCreateInfo, pAllocator, pInstance);
     }
 
     const std::vector<VpBlockProperties>& blocks = detail::GatherBlocks(
@@ -10646,22 +11837,24 @@ VPAPI_ATTR VkResult vpCreateInstance(const VpInstanceCreateInfo *pCreateInfo,
         pCreateInfo->enabledProfileBlockCount, pCreateInfo->pEnabledProfileBlocks);
 
     std::vector<const char*> extensions;
-    for (std::uint32_t i = 0, n = pCreateInfo->pCreateInfo->enabledExtensionCount; i < n; ++i) {
-        extensions.push_back(pCreateInfo->pCreateInfo->ppEnabledExtensionNames[i]);
+    for (std::uint32_t ext_index = 0, ext_count = pCreateInfo->pCreateInfo->enabledExtensionCount; ext_index < ext_count; ++ext_index) {
+        extensions.push_back(pCreateInfo->pCreateInfo->ppEnabledExtensionNames[ext_index]);
     }
 
-    for (std::size_t i = 0, n = blocks.size(); i < n; ++i) {
-        const detail::VpProfileDesc* pProfileDesc = detail::vpGetProfileDesc(blocks[i].profiles.profileName);
-        if (pProfileDesc == nullptr) return VK_ERROR_UNKNOWN;
+    for (std::size_t block_index = 0, block_count = blocks.size(); block_index < block_count; ++block_index) {
+        const detail::VpProfileDesc* profile_desc = detail::vpGetProfileDesc(blocks[block_index].profiles.profileName);
+        if (profile_desc == nullptr) {
+            return VK_ERROR_UNKNOWN;
+        }
 
-        for (std::size_t j = 0, p = pProfileDesc->requiredCapabilityCount; j < p; ++j) {
-            const detail::VpCapabilitiesDesc* pCapsDesc = &pProfileDesc->pRequiredCapabilities[j];
+        for (std::size_t caps_index = 0, caps_count = profile_desc->requiredCapabilityCount; caps_index < caps_count; ++caps_index) {
+            const detail::VpCapabilitiesDesc* caps_desc = &profile_desc->pRequiredCapabilities[caps_index];
 
-            for (std::size_t v = 0, q = pCapsDesc->variantCount; v < q; ++v) {
-                const detail::VpVariantDesc* variant = &pCapsDesc->pVariants[v];
+            for (std::size_t variant_index = 0, variant_count = caps_desc->variantCount; variant_index < variant_count; ++variant_index) {
+                const detail::VpVariantDesc* variant = &caps_desc->pVariants[variant_index];
 
-                if (strcmp(blocks[i].blockName, "") != 0) {
-                    if (strcmp(variant->blockName, blocks[i].blockName) != 0) {
+                if (strcmp(blocks[block_index].blockName, "") != 0) {
+                    if (strcmp(variant->blockName, blocks[block_index].blockName) != 0) {
                         continue;
                     }
                 }
@@ -10675,7 +11868,11 @@ VPAPI_ATTR VkResult vpCreateInstance(const VpInstanceCreateInfo *pCreateInfo,
     if (pCreateInfo->pCreateInfo->pApplicationInfo != nullptr) {
         appInfo = *pCreateInfo->pCreateInfo->pApplicationInfo;
     } else if (!blocks.empty()) {
-        appInfo.apiVersion = vpGetProfileAPIVersion(&blocks[0].profiles);
+        appInfo.apiVersion = vpGetProfileAPIVersion(
+#ifdef VP_USE_OBJECT
+            capabilities,
+#endif//VP_USE_OBJECT
+            &blocks[0].profiles);
     }
 
     VkInstanceCreateInfo createInfo = *pCreateInfo->pCreateInfo;
@@ -10684,8 +11881,8 @@ VPAPI_ATTR VkResult vpCreateInstance(const VpInstanceCreateInfo *pCreateInfo,
     // Need to include VK_KHR_get_physical_device_properties2 if we are on Vulkan 1.0
     if (createInfo.pApplicationInfo->apiVersion < VK_API_VERSION_1_1) {
         bool foundGPDP2 = false;
-        for (size_t i = 0; i < extensions.size(); ++i) {
-            if (strcmp(extensions[i], VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME) == 0) {
+        for (size_t ext_index = 0, ext_count = extensions.size(); ext_index < ext_count; ++ext_index) {
+            if (strcmp(extensions[ext_index], VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME) == 0) {
                 foundGPDP2 = true;
                 break;
             }
@@ -10697,8 +11894,8 @@ VPAPI_ATTR VkResult vpCreateInstance(const VpInstanceCreateInfo *pCreateInfo,
 
 #ifdef __APPLE__
     bool has_portability_ext = false;
-    for (std::size_t i = 0, n = extensions.size(); i < n; ++i) {
-        if (strcmp(extensions[i], VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0) {
+    for (std::size_t ext_index = 0, ext_count = extensions.size(); ext_index < ext_count; ++ext_index) {
+        if (strcmp(extensions[ext_index], VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0) {
             has_portability_ext = true;
             break;
         }
@@ -10716,15 +11913,29 @@ VPAPI_ATTR VkResult vpCreateInstance(const VpInstanceCreateInfo *pCreateInfo,
         createInfo.ppEnabledExtensionNames = extensions.data();
     }
 
-    return vkCreateInstance(&createInfo, pAllocator, pInstance);
+    return vp.CreateInstance(&createInfo, pAllocator, pInstance);
 }
 
-VPAPI_ATTR VkResult vpGetPhysicalDeviceProfileVariantsSupport(VkInstance instance, VkPhysicalDevice physicalDevice,
-                                                              const VpProfileProperties *pProfile, VkBool32 *pSupported, uint32_t *pPropertyCount, VpBlockProperties* pProperties) {
+VPAPI_ATTR VkResult vpGetPhysicalDeviceProfileVariantsSupport(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    VkInstance instance,
+    VkPhysicalDevice physicalDevice,
+    const VpProfileProperties *pProfile,
+    VkBool32 *pSupported,
+    uint32_t *pPropertyCount,
+    VpBlockProperties* pProperties) {
+#ifdef VP_USE_OBJECT
+    const VpCapabilities_T& vp = capabilities == nullptr ? VpCapabilities_T::Get() : *capabilities;
+#else
+    const VpCapabilities_T& vp = VpCapabilities_T::Get();
+#endif//VP_USE_OBJECT
+
     VkResult result = VK_SUCCESS;
 
     uint32_t supported_device_extension_count = 0;
-    result = vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &supported_device_extension_count, nullptr);
+    result = vp.EnumerateDeviceExtensionProperties(physicalDevice, nullptr, &supported_device_extension_count, nullptr);
     if (result != VK_SUCCESS) {
         return result;
     }
@@ -10732,7 +11943,7 @@ VPAPI_ATTR VkResult vpGetPhysicalDeviceProfileVariantsSupport(VkInstance instanc
     if (supported_device_extension_count > 0) {
         supported_device_extensions.resize(supported_device_extension_count);
     }
-    result = vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &supported_device_extension_count, supported_device_extensions.data());
+    result = vp.EnumerateDeviceExtensionProperties(physicalDevice, nullptr, &supported_device_extension_count, supported_device_extensions.data());
     if (result != VK_SUCCESS) {
         return result;
     }
@@ -10742,8 +11953,12 @@ VPAPI_ATTR VkResult vpGetPhysicalDeviceProfileVariantsSupport(VkInstance instanc
         supported_device_extensions.resize(supported_device_extension_count);
     }
 
-    const detail::VpProfileDesc* pProfileDesc = detail::vpGetProfileDesc(pProfile->profileName);
-    if (pProfileDesc == nullptr) return VK_ERROR_UNKNOWN;
+    {
+        const detail::VpProfileDesc* pProfileDesc = detail::vpGetProfileDesc(pProfile->profileName);
+        if (pProfileDesc == nullptr) {
+            return VK_ERROR_UNKNOWN;
+        }
+    }
 
     struct GPDP2EntryPoints {
         PFN_vkGetPhysicalDeviceFeatures2KHR                 pfnGetPhysicalDeviceFeatures2;
@@ -10751,6 +11966,18 @@ VPAPI_ATTR VkResult vpGetPhysicalDeviceProfileVariantsSupport(VkInstance instanc
         PFN_vkGetPhysicalDeviceFormatProperties2KHR         pfnGetPhysicalDeviceFormatProperties2;
         PFN_vkGetPhysicalDeviceQueueFamilyProperties2KHR    pfnGetPhysicalDeviceQueueFamilyProperties2;
     };
+
+#ifdef VK_KHR_video_queue
+    struct VideoInfo {
+        PFN_vkGetPhysicalDeviceVideoCapabilitiesKHR         pfnGetPhysicalDeviceVideoCapabilitiesKHR;
+        PFN_vkGetPhysicalDeviceVideoFormatPropertiesKHR     pfnGetPhysicalDeviceVideoFormatPropertiesKHR;
+        const detail::VpVideoProfileDesc*                   pProfileDesc;
+        VkVideoProfileInfoKHR                               profileInfo;
+        VkPhysicalDeviceVideoFormatInfoKHR                  formatInfo;
+        bool                                                supportedProfile;
+        uint32_t                                            matchingProfiles;
+    };
+#endif  // VK_KHR_video_queue
 
     std::vector<VpBlockProperties> supported_blocks;
     std::vector<VpBlockProperties> unsupported_blocks;
@@ -10761,21 +11988,32 @@ VPAPI_ATTR VkResult vpGetPhysicalDeviceProfileVariantsSupport(VkInstance instanc
         std::vector<VpBlockProperties>& unsupported_blocks;
         const detail::VpVariantDesc* variant;
         GPDP2EntryPoints gpdp2;
+#ifdef VK_KHR_video_queue
+        VideoInfo video;
+#endif  // VK_KHR_video_queue
         uint32_t index;
-        uint32_t count;
         detail::PFN_vpStructChainerCb pfnCb;
         bool supported;
     } userData{physicalDevice, supported_blocks, unsupported_blocks};
 
+    if (!vp.singleton) {
+        userData.gpdp2.pfnGetPhysicalDeviceFeatures2 = vp.GetPhysicalDeviceFeatures2;
+        userData.gpdp2.pfnGetPhysicalDeviceProperties2 = vp.GetPhysicalDeviceProperties2;
+        userData.gpdp2.pfnGetPhysicalDeviceFormatProperties2 = vp.GetPhysicalDeviceFormatProperties2;
+        userData.gpdp2.pfnGetPhysicalDeviceQueueFamilyProperties2 = vp.GetPhysicalDeviceQueueFamilyProperties2;
+    }
+
     // Attempt to load core versions of the GPDP2 entry points
-    userData.gpdp2.pfnGetPhysicalDeviceFeatures2 =
-        (PFN_vkGetPhysicalDeviceFeatures2KHR)vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceFeatures2");
-    userData.gpdp2.pfnGetPhysicalDeviceProperties2 =
-        (PFN_vkGetPhysicalDeviceProperties2KHR)vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceProperties2");
-    userData.gpdp2.pfnGetPhysicalDeviceFormatProperties2 =
-        (PFN_vkGetPhysicalDeviceFormatProperties2KHR)vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceFormatProperties2");
-    userData.gpdp2.pfnGetPhysicalDeviceQueueFamilyProperties2 =
-        (PFN_vkGetPhysicalDeviceQueueFamilyProperties2KHR)vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceQueueFamilyProperties2");
+    if (userData.gpdp2.pfnGetPhysicalDeviceFeatures2 == nullptr) {
+        userData.gpdp2.pfnGetPhysicalDeviceFeatures2 =
+            (PFN_vkGetPhysicalDeviceFeatures2KHR)vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceFeatures2");
+        userData.gpdp2.pfnGetPhysicalDeviceProperties2 =
+            (PFN_vkGetPhysicalDeviceProperties2KHR)vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceProperties2");
+        userData.gpdp2.pfnGetPhysicalDeviceFormatProperties2 =
+            (PFN_vkGetPhysicalDeviceFormatProperties2KHR)vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceFormatProperties2");
+        userData.gpdp2.pfnGetPhysicalDeviceQueueFamilyProperties2 =
+            (PFN_vkGetPhysicalDeviceQueueFamilyProperties2KHR)vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceQueueFamilyProperties2");
+    }
 
     // If not successful, try to load KHR variant
     if (userData.gpdp2.pfnGetPhysicalDeviceFeatures2 == nullptr) {
@@ -10796,36 +12034,46 @@ VPAPI_ATTR VkResult vpGetPhysicalDeviceProfileVariantsSupport(VkInstance instanc
         return VK_ERROR_EXTENSION_NOT_PRESENT;
     }
 
-    VP_DEBUG_MSGF("Checking device support for profile %s (%s). You may find the details of the capabilities of this device on https://vulkan.gpuinfo.org/", pProfile->profileName, detail::vpGetDeviceAndDriverInfoString(physicalDevice, userData.gpdp2.pfnGetPhysicalDeviceProperties2).c_str());
+#ifdef VK_KHR_video_queue
+    PFN_vkGetInstanceProcAddr gipa = vp.singleton ? vkGetInstanceProcAddr : vp.GetInstanceProcAddr;
+    userData.video.pfnGetPhysicalDeviceVideoCapabilitiesKHR =
+        (PFN_vkGetPhysicalDeviceVideoCapabilitiesKHR)gipa(instance, "vkGetPhysicalDeviceVideoCapabilitiesKHR");
+    userData.video.pfnGetPhysicalDeviceVideoFormatPropertiesKHR =
+        (PFN_vkGetPhysicalDeviceVideoFormatPropertiesKHR)gipa(instance, "vkGetPhysicalDeviceVideoFormatPropertiesKHR");
+#endif  // VK_KHR_video_queue
 
     bool supported = true;
 
-    const std::vector<VpProfileProperties>& profiles = detail::GatherProfiles(*pProfile);
+    const std::vector<VpProfileProperties>& gathered_profiles = detail::GatherProfiles(*pProfile);
 
-    for (std::size_t i = 0, n = profiles.size(); i < n; ++i) {
-        const char* profile_name = profiles[i].profileName;
+    for (std::size_t profile_index = 0, profile_count = gathered_profiles.size(); profile_index < profile_count; ++profile_index) {
+        const char* profile_name = gathered_profiles[profile_index].profileName;
 
-        const detail::VpProfileDesc* pProfileDesc = detail::vpGetProfileDesc(profile_name);
-        if (pProfileDesc == nullptr) return VK_ERROR_UNKNOWN;
+        const detail::VpProfileDesc* profile_desc = detail::vpGetProfileDesc(profile_name);
+        if (profile_desc == nullptr) {
+            return VK_ERROR_UNKNOWN;
+        }
 
         bool supported_profile = true;
 
-
-        if (pProfileDesc->props.specVersion < pProfile->specVersion) {
+        if (profile_desc->props.specVersion < gathered_profiles[profile_index].specVersion) {
+            VP_DEBUG_MSGF("Unsupported requested %s profile version: %u, profile supported at version %u", profile_name, profile_desc->props.specVersion, pProfile->specVersion);
             supported_profile = false;
         }
 
-        VpBlockProperties block{profiles[i], pProfileDesc->minApiVersion};
+        VpBlockProperties block{gathered_profiles[profile_index], profile_desc->minApiVersion};
 
-        VkPhysicalDeviceProperties props{};
-        vkGetPhysicalDeviceProperties(physicalDevice, &props);
-        if (!detail::vpCheckVersion(props.apiVersion, pProfileDesc->minApiVersion)) {
-            VP_DEBUG_MSGF("Unsupported API version: %u.%u.%u", VK_API_VERSION_MAJOR(pProfileDesc->minApiVersion), VK_API_VERSION_MINOR(pProfileDesc->minApiVersion), VK_API_VERSION_PATCH(pProfileDesc->minApiVersion));
-            supported_profile = false;
+        {
+            VkPhysicalDeviceProperties2KHR properties2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR };
+            userData.gpdp2.pfnGetPhysicalDeviceProperties2(physicalDevice, &properties2);
+            if (!detail::vpCheckVersion(properties2.properties.apiVersion, profile_desc->minApiVersion)) {
+                VP_DEBUG_MSGF("Unsupported API version: %u.%u.%u", VK_API_VERSION_MAJOR(profile_desc->minApiVersion), VK_API_VERSION_MINOR(profile_desc->minApiVersion), VK_API_VERSION_PATCH(profile_desc->minApiVersion));
+                supported_profile = false;
+            }
         }
 
-        for (uint32_t required_capability_index = 0; required_capability_index < pProfileDesc->requiredCapabilityCount; ++required_capability_index) {
-            const detail::VpCapabilitiesDesc* required_capabilities = &pProfileDesc->pRequiredCapabilities[required_capability_index];
+        for (uint32_t required_capability_index = 0; required_capability_index < profile_desc->requiredCapabilityCount; ++required_capability_index) {
+            const detail::VpCapabilitiesDesc* required_capabilities = &profile_desc->pRequiredCapabilities[required_capability_index];
 
             bool supported_block = false;
 
@@ -10834,8 +12082,8 @@ VPAPI_ATTR VkResult vpGetPhysicalDeviceProfileVariantsSupport(VkInstance instanc
 
                 bool supported_variant = true;
 
-                for (uint32_t i = 0; i < variant_desc.deviceExtensionCount; ++i) {
-                    const char *requested_extension = variant_desc.pDeviceExtensions[i].extensionName;
+                for (uint32_t ext_index = 0; ext_index < variant_desc.deviceExtensionCount; ++ext_index) {
+                    const char *requested_extension = variant_desc.pDeviceExtensions[ext_index].extensionName;
                     if (!detail::CheckExtension(supported_device_extensions.data(), supported_device_extensions.size(), requested_extension)) {
                         supported_variant = false;
                     }
@@ -10848,8 +12096,10 @@ VPAPI_ATTR VkResult vpGetPhysicalDeviceProfileVariantsSupport(VkInstance instanc
                     static_cast<VkBaseOutStructure*>(static_cast<void*>(&features)), &userData,
                     [](VkBaseOutStructure* p, void* pUser) {
                         UserData* pUserData = static_cast<UserData*>(pUser);
-                        pUserData->gpdp2.pfnGetPhysicalDeviceFeatures2(pUserData->physicalDevice,
-                                                                        static_cast<VkPhysicalDeviceFeatures2KHR*>(static_cast<void*>(p)));
+                        pUserData->gpdp2.pfnGetPhysicalDeviceFeatures2(
+                            pUserData->physicalDevice,
+                            static_cast<VkPhysicalDeviceFeatures2KHR*>(static_cast<void*>(p)));
+
                         pUserData->supported = true;
                         while (p != nullptr) {
                             if (!pUserData->variant->feature.pfnComparator(p)) {
@@ -10863,13 +12113,15 @@ VPAPI_ATTR VkResult vpGetPhysicalDeviceProfileVariantsSupport(VkInstance instanc
                     supported_variant = false;
                 }
 
-                VkPhysicalDeviceProperties2KHR props{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR };
+                VkPhysicalDeviceProperties2KHR device_properties2{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR };
                 userData.variant->chainers.pfnProperty(
-                    static_cast<VkBaseOutStructure*>(static_cast<void*>(&props)), &userData,
+                    static_cast<VkBaseOutStructure*>(static_cast<void*>(&device_properties2)), &userData,
                     [](VkBaseOutStructure* p, void* pUser) {
                         UserData* pUserData = static_cast<UserData*>(pUser);
-                        pUserData->gpdp2.pfnGetPhysicalDeviceProperties2(pUserData->physicalDevice,
-                                                                         static_cast<VkPhysicalDeviceProperties2KHR*>(static_cast<void*>(p)));
+                        pUserData->gpdp2.pfnGetPhysicalDeviceProperties2(
+                            pUserData->physicalDevice,
+                            static_cast<VkPhysicalDeviceProperties2KHR*>(static_cast<void*>(p)));
+
                         pUserData->supported = true;
                         while (p != nullptr) {
                             if (!pUserData->variant->property.pfnComparator(p)) {
@@ -10883,15 +12135,56 @@ VPAPI_ATTR VkResult vpGetPhysicalDeviceProfileVariantsSupport(VkInstance instanc
                     supported_variant = false;
                 }
 
-                for (uint32_t i = 0; i < userData.variant->formatCount && supported_variant; ++i) {
-                    userData.index = i;
-                    VkFormatProperties2KHR props{ VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR };
+                if (userData.variant->queueFamilyCount > 0) {
+                    uint32_t queue_family_count = 0;
+                    userData.gpdp2.pfnGetPhysicalDeviceQueueFamilyProperties2(physicalDevice, &queue_family_count, nullptr);
+                    std::vector<VkQueueFamilyProperties2KHR> queueFamilyProps(queue_family_count, { VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2_KHR });
+                    userData.variant->chainers.pfnQueueFamily(
+                        queue_family_count, static_cast<VkBaseOutStructure*>(static_cast<void*>(queueFamilyProps.data())), &userData,
+                        [](uint32_t queue_family_count, VkBaseOutStructure* pBaseArray, void* pUser) {
+                            UserData* pUserData = static_cast<UserData*>(pUser);
+                            VkQueueFamilyProperties2KHR* pArray = static_cast<VkQueueFamilyProperties2KHR*>(static_cast<void*>(pBaseArray));
+                            pUserData->gpdp2.pfnGetPhysicalDeviceQueueFamilyProperties2(pUserData->physicalDevice, &queue_family_count, pArray);
+                            pUserData->supported = true;
+                            for (uint32_t profile_qf_idx = 0; profile_qf_idx < pUserData->variant->queueFamilyCount; ++profile_qf_idx) {
+                                bool found_matching = false;
+                                for (uint32_t queue_family_index = 0; queue_family_index < queue_family_count; ++queue_family_index) {
+                                    bool this_matches = true;
+                                    VkBaseOutStructure* p = static_cast<VkBaseOutStructure*>(static_cast<void*>(&pArray[queue_family_index]));
+                                    while (p != nullptr) {
+                                        if (!pUserData->variant->pQueueFamilies[profile_qf_idx].pfnComparator(p)) {
+                                            this_matches = false;
+                                        }
+                                        p = p->pNext;
+                                    }
+                                    if (this_matches) {
+                                        found_matching = true;
+                                        break;
+                                    }
+                                }
+                                if (!found_matching) {
+                                    pUserData->supported = false;
+                                    break;
+                                }
+                            }
+                        }
+                    );
+                    if (!userData.supported) {
+                        supported_variant = false;
+                    }
+                }
+
+                for (uint32_t format_index = 0; format_index < userData.variant->formatCount && supported_variant; ++format_index) {
+                    userData.index = format_index;
+                    VkFormatProperties2KHR format_properties2{ VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR };
                     userData.variant->chainers.pfnFormat(
-                        static_cast<VkBaseOutStructure*>(static_cast<void*>(&props)), &userData,
+                        static_cast<VkBaseOutStructure*>(static_cast<void*>(&format_properties2)), &userData,
                         [](VkBaseOutStructure* p, void* pUser) {
                             UserData* pUserData = static_cast<UserData*>(pUser);
-                            pUserData->gpdp2.pfnGetPhysicalDeviceFormatProperties2(pUserData->physicalDevice, pUserData->variant->pFormats[pUserData->index].format,
-                                                                                   static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p)));
+                            pUserData->gpdp2.pfnGetPhysicalDeviceFormatProperties2(
+                                pUserData->physicalDevice,
+                                pUserData->variant->pFormats[pUserData->index].format,
+                                static_cast<VkFormatProperties2KHR*>(static_cast<void*>(p)));
                             pUserData->supported = true;
                             while (p != nullptr) {
                                 if (!pUserData->variant->pFormats[pUserData->index].pfnComparator(p)) {
@@ -10905,6 +12198,113 @@ VPAPI_ATTR VkResult vpGetPhysicalDeviceProfileVariantsSupport(VkInstance instanc
                         supported_variant = false;
                     }
                 }
+
+#ifdef VK_KHR_video_queue
+                if (userData.variant->videoProfileCount > 0) {
+                    VkVideoProfileListInfoKHR profile_list{ VK_STRUCTURE_TYPE_VIDEO_PROFILE_LIST_INFO_KHR };
+                    profile_list.profileCount = 1;
+                    profile_list.pProfiles = &userData.video.profileInfo;
+                    userData.video.formatInfo.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_FORMAT_INFO_KHR;
+                    userData.video.formatInfo.pNext = &profile_list;
+
+                    if (userData.video.pfnGetPhysicalDeviceVideoCapabilitiesKHR != nullptr &&
+                        userData.video.pfnGetPhysicalDeviceVideoFormatPropertiesKHR != nullptr) {
+                        for (uint32_t video_profile_index = 0; video_profile_index < userData.variant->videoProfileCount; ++video_profile_index) {
+                            userData.video.profileInfo = VkVideoProfileInfoKHR{ VK_STRUCTURE_TYPE_VIDEO_PROFILE_INFO_KHR };
+                            userData.video.pProfileDesc = &userData.variant->pVideoProfiles[video_profile_index];
+                            userData.supported = true;
+                            userData.video.matchingProfiles = 0;
+
+                            detail::vpForEachMatchingVideoProfiles(&userData.video.profileInfo, &userData,
+                                [](VkBaseOutStructure* p, void* pUser) {
+                                    UserData* pUserData = static_cast<UserData*>(pUser);
+                                    while (p != nullptr) {
+                                        if (!pUserData->video.pProfileDesc->info.pfnComparator(p)) {
+                                            return;
+                                        }
+                                        p = p->pNext;
+                                    }
+
+                                    pUserData->video.supportedProfile = true;
+
+                                    VkVideoCapabilitiesKHR capabilities{ VK_STRUCTURE_TYPE_VIDEO_CAPABILITIES_KHR };
+                                    pUserData->video.pProfileDesc->chainers.pfnCapability(
+                                        static_cast<VkBaseOutStructure*>(static_cast<void*>(&capabilities)), pUserData,
+                                        [](VkBaseOutStructure* p, void* pUser) {
+                                            UserData* pUserData = static_cast<UserData*>(pUser);
+                                            VkResult result = pUserData->video.pfnGetPhysicalDeviceVideoCapabilitiesKHR(
+                                                pUserData->physicalDevice,
+                                                &pUserData->video.profileInfo,
+                                                static_cast<VkVideoCapabilitiesKHR*>(static_cast<void*>(p)));
+                                            if (result != VK_SUCCESS) {
+                                                pUserData->video.supportedProfile = false;
+                                                return;
+                                            }
+                                            while (p != nullptr) {
+                                                if (!pUserData->video.pProfileDesc->capability.pfnComparator(p)) {
+                                                    pUserData->supported = false;
+                                                }
+                                                p = p->pNext;
+                                            }
+                                        }
+                                    );
+
+                                    if (pUserData->video.supportedProfile) {
+                                        pUserData->video.matchingProfiles++;
+                                    } else {
+                                        return;
+                                    }
+
+                                    std::vector<VkVideoFormatPropertiesKHR> format_props;
+                                    for (uint32_t format_index = 0; format_index < pUserData->video.pProfileDesc->formatCount; ++format_index) {
+                                        pUserData->index = format_index;
+                                        {
+                                            VkVideoFormatPropertiesKHR tmp_props{ VK_STRUCTURE_TYPE_VIDEO_FORMAT_PROPERTIES_KHR };
+                                            pUserData->video.pProfileDesc->pFormats[format_index].pfnFiller(static_cast<VkBaseOutStructure*>(static_cast<void*>(&tmp_props)));
+                                            pUserData->video.formatInfo.imageUsage = tmp_props.imageUsageFlags;
+                                        }
+
+                                        uint32_t format_count = 0;
+                                        pUserData->video.pfnGetPhysicalDeviceVideoFormatPropertiesKHR(pUserData->physicalDevice, &pUserData->video.formatInfo, &format_count, nullptr);
+                                        format_props.resize(format_count, { VK_STRUCTURE_TYPE_VIDEO_FORMAT_PROPERTIES_KHR });
+                                        pUserData->video.pProfileDesc->chainers.pfnFormat(
+                                            format_count, static_cast<VkBaseOutStructure*>(static_cast<void*>(format_props.data())), pUserData,
+                                            [](uint32_t format_count, VkBaseOutStructure* pBaseArray, void* pUser) {
+                                                UserData* pUserData = static_cast<UserData*>(pUser);
+                                                VkVideoFormatPropertiesKHR* pArray = static_cast<VkVideoFormatPropertiesKHR*>(static_cast<void*>(pBaseArray));
+                                                pUserData->video.pfnGetPhysicalDeviceVideoFormatPropertiesKHR(pUserData->physicalDevice, &pUserData->video.formatInfo, &format_count, pArray);
+                                                bool found_matching = false;
+                                                for (uint32_t i = 0; i < format_count; ++i) {
+                                                    bool this_matches = true;
+                                                    VkBaseOutStructure* p = static_cast<VkBaseOutStructure*>(static_cast<void*>(&pArray[i]));
+                                                    while (p != nullptr) {
+                                                        if (!pUserData->video.pProfileDesc->pFormats[pUserData->index].pfnComparator(p)) {
+                                                            this_matches = false;
+                                                        }
+                                                        p = p->pNext;
+                                                    }
+                                                    if (this_matches) {
+                                                        found_matching = true;
+                                                        break;
+                                                    }
+                                                }
+                                                if (!found_matching) {
+                                                    pUserData->supported = false;
+                                                }
+                                            }
+                                        );
+                                    }
+                                }
+                            );
+                            if (!userData.supported || userData.video.matchingProfiles == 0) {
+                                supported_variant = false;
+                            }
+                        }
+                    } else {
+                        supported_variant = false;
+                    }
+                }
+#endif  // VK_KHR_video_queue
 
                 memcpy(block.blockName, variant_desc.blockName, VP_MAX_PROFILE_NAME_SIZE * sizeof(char));
                 if (supported_variant) {
@@ -10945,16 +12345,39 @@ VPAPI_ATTR VkResult vpGetPhysicalDeviceProfileVariantsSupport(VkInstance instanc
     return VK_SUCCESS;
 }
 
-VPAPI_ATTR VkResult vpGetPhysicalDeviceProfileSupport(VkInstance instance, VkPhysicalDevice physicalDevice,
-                                                      const VpProfileProperties *pProfile, VkBool32 *pSupported) {
+VPAPI_ATTR VkResult vpGetPhysicalDeviceProfileSupport(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    VkInstance                                  instance,
+    VkPhysicalDevice                            physicalDevice,
+    const VpProfileProperties*                  pProfile,
+    VkBool32 *pSupported) {
     uint32_t count = 0;
-    return vpGetPhysicalDeviceProfileVariantsSupport(instance, physicalDevice, pProfile, pSupported, &count, nullptr);
+
+    return vpGetPhysicalDeviceProfileVariantsSupport(
+#ifdef VP_USE_OBJECT
+        capabilities,
+#endif//VP_USE_OBJECT
+        instance, physicalDevice, pProfile, pSupported, &count, nullptr);
 }
 
-VPAPI_ATTR VkResult vpCreateDevice(VkPhysicalDevice physicalDevice, const VpDeviceCreateInfo *pCreateInfo,
-                                   const VkAllocationCallbacks *pAllocator, VkDevice *pDevice) {
+VPAPI_ATTR VkResult vpCreateDevice(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    VkPhysicalDevice                            physicalDevice,
+    const VpDeviceCreateInfo*                   pCreateInfo,
+    const VkAllocationCallbacks*                pAllocator,
+    VkDevice*                                   pDevice) {
+#ifdef VP_USE_OBJECT
+    const VpCapabilities_T& vp = capabilities == nullptr ? VpCapabilities_T::Get() : *capabilities;
+#else
+    const VpCapabilities_T& vp = VpCapabilities_T::Get();
+#endif//VP_USE_OBJECT
+
     if (physicalDevice == VK_NULL_HANDLE || pCreateInfo == nullptr || pDevice == nullptr) {
-        return vkCreateDevice(physicalDevice, pCreateInfo == nullptr ? nullptr : pCreateInfo->pCreateInfo, pAllocator, pDevice);
+        return vp.CreateDevice(physicalDevice, pCreateInfo == nullptr ? nullptr : pCreateInfo->pCreateInfo, pAllocator, pDevice);
     }
 
     const std::vector<VpBlockProperties>& blocks = detail::GatherBlocks(
@@ -10965,28 +12388,28 @@ VPAPI_ATTR VkResult vpCreateDevice(VkPhysicalDevice physicalDevice, const VpDevi
     std::vector<VkStructureType> structureTypes;
 
     std::vector<const char*> extensions;
-    for (std::uint32_t i = 0, n = pCreateInfo->pCreateInfo->enabledExtensionCount; i < n; ++i) {
-        extensions.push_back(pCreateInfo->pCreateInfo->ppEnabledExtensionNames[i]);
+    for (std::uint32_t ext_index = 0, ext_count = pCreateInfo->pCreateInfo->enabledExtensionCount; ext_index < ext_count; ++ext_index) {
+        extensions.push_back(pCreateInfo->pCreateInfo->ppEnabledExtensionNames[ext_index]);
     }
 
-    for (std::size_t i = 0, n = blocks.size(); i < n; ++i) {
-        const detail::VpProfileDesc* pProfileDesc = detail::vpGetProfileDesc(blocks[i].profiles.profileName);
+    for (std::size_t block_index = 0, block_count = blocks.size(); block_index < block_count; ++block_index) {
+        const detail::VpProfileDesc* pProfileDesc = detail::vpGetProfileDesc(blocks[block_index].profiles.profileName);
         if (pProfileDesc == nullptr) return VK_ERROR_UNKNOWN;
 
-        for (std::size_t j = 0, p = pProfileDesc->requiredCapabilityCount; j < p; ++j) {
-            const detail::VpCapabilitiesDesc* pCapsDesc = &pProfileDesc->pRequiredCapabilities[j];
+        for (std::size_t caps_index = 0, caps_count = pProfileDesc->requiredCapabilityCount; caps_index < caps_count; ++caps_index) {
+            const detail::VpCapabilitiesDesc* pCapsDesc = &pProfileDesc->pRequiredCapabilities[caps_index];
 
-            for (std::size_t v = 0, q = pCapsDesc->variantCount; v < q; ++v) {
-                const detail::VpVariantDesc* variant = &pCapsDesc->pVariants[v];
+            for (std::size_t variant_index = 0, variant_count = pCapsDesc->variantCount; variant_index < variant_count; ++variant_index) {
+                const detail::VpVariantDesc* variant = &pCapsDesc->pVariants[variant_index];
 
-                if (strcmp(blocks[i].blockName, "") != 0) {
-                    if (strcmp(variant->blockName, blocks[i].blockName) != 0) {
+                if (strcmp(blocks[block_index].blockName, "") != 0) {
+                    if (strcmp(variant->blockName, blocks[block_index].blockName) != 0) {
                         continue;
                     }
                 }
 
-                for (uint32_t t = 0; t < variant->featureStructTypeCount; ++t) {
-                    const VkStructureType type = variant->pFeatureStructTypes[t];
+                for (uint32_t type_index = 0; type_index < variant->featureStructTypeCount; ++type_index) {
+                    const VkStructureType type = variant->pFeatureStructTypes[type_index];
                     if (std::find(structureTypes.begin(), structureTypes.end(), type) == std::end(structureTypes)) {
                         structureTypes.push_back(type);
                     }
@@ -11007,21 +12430,23 @@ VPAPI_ATTR VkResult vpCreateDevice(VkPhysicalDevice physicalDevice, const VpDevi
         pFeatures->features = *pCreateInfo->pCreateInfo->pEnabledFeatures;
     }
 
-    for (std::size_t i = 0, n = blocks.size(); i < n; ++i) {
-        const detail::VpProfileDesc* pProfileDesc = detail::vpGetProfileDesc(blocks[i].profiles.profileName);
-        if (pProfileDesc == nullptr) return VK_ERROR_UNKNOWN;
+    for (std::size_t block_index = 0, block_count = blocks.size(); block_index < block_count; ++block_index) {
+        const detail::VpProfileDesc* pProfileDesc = detail::vpGetProfileDesc(blocks[block_index].profiles.profileName);
+        if (pProfileDesc == nullptr) {
+            return VK_ERROR_UNKNOWN;
+        }
 
-        for (std::size_t j = 0, p = pProfileDesc->requiredCapabilityCount; j < p; ++j) {
-            const detail::VpCapabilitiesDesc* pCapsDesc = &pProfileDesc->pRequiredCapabilities[j];
+        for (std::size_t caps_index = 0, caps_count = pProfileDesc->requiredCapabilityCount; caps_index < caps_count; ++caps_index) {
+            const detail::VpCapabilitiesDesc* pCapsDesc = &pProfileDesc->pRequiredCapabilities[caps_index];
 
-            for (std::size_t v = 0, q = pCapsDesc->variantCount; v < q; ++v) {
-                const detail::VpVariantDesc* variant = &pCapsDesc->pVariants[v];
+            for (std::size_t variant_index = 0, variant_count = pCapsDesc->variantCount; variant_index < variant_count; ++variant_index) {
+                const detail::VpVariantDesc* variant = &pCapsDesc->pVariants[variant_index];
 
-                VkBaseOutStructure* p = reinterpret_cast<VkBaseOutStructure*>(pFeatures);
+                VkBaseOutStructure* base_ptr = reinterpret_cast<VkBaseOutStructure*>(pFeatures);
                 if (variant->feature.pfnFiller != nullptr) {
-                    while (p != nullptr) {
-                        variant->feature.pfnFiller(p);
-                        p = p->pNext;
+                    while (base_ptr != nullptr) {
+                        variant->feature.pfnFiller(base_ptr);
+                        base_ptr = base_ptr->pNext;
                     }
                 }
             }
@@ -11041,31 +12466,63 @@ VPAPI_ATTR VkResult vpCreateDevice(VkPhysicalDevice physicalDevice, const VpDevi
     createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
     createInfo.ppEnabledExtensionNames = extensions.data();
 
-    return vkCreateDevice(physicalDevice, &createInfo, pAllocator, pDevice);
+    return vp.CreateDevice(physicalDevice, &createInfo, pAllocator, pDevice);
 }
 
-VPAPI_ATTR VkResult vpGetProfileInstanceExtensionProperties(const VpProfileProperties *pProfile, const char* pBlockName, uint32_t *pPropertyCount, VkExtensionProperties *pProperties) {
-    return detail::vpGetProfileExtensionProperties(pProfile, pBlockName, detail::EXTENSION_INSTANCE, pPropertyCount, pProperties);
+VPAPI_ATTR VkResult vpGetProfileInstanceExtensionProperties(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    uint32_t*                                   pPropertyCount,
+    VkExtensionProperties*                      pProperties) {
+    return detail::vpGetProfileExtensionProperties(
+#ifdef VP_USE_OBJECT
+        capabilities,
+#endif//VP_USE_OBJECT
+        pProfile, pBlockName, detail::EXTENSION_INSTANCE, pPropertyCount, pProperties);
 }
 
-VPAPI_ATTR VkResult vpGetProfileDeviceExtensionProperties(const VpProfileProperties *pProfile, const char* pBlockName, uint32_t *pPropertyCount, VkExtensionProperties *pProperties) {
-    return detail::vpGetProfileExtensionProperties(pProfile, pBlockName, detail::EXTENSION_DEVICE, pPropertyCount, pProperties);
+VPAPI_ATTR VkResult vpGetProfileDeviceExtensionProperties(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    uint32_t*                                   pPropertyCount,
+    VkExtensionProperties*                      pProperties) {
+    return detail::vpGetProfileExtensionProperties(
+#ifdef VP_USE_OBJECT
+        capabilities,
+#endif//VP_USE_OBJECT
+        pProfile, pBlockName, detail::EXTENSION_DEVICE, pPropertyCount, pProperties);
 }
 
-VPAPI_ATTR VkResult vpGetProfileFeatures(const VpProfileProperties *pProfile, const char* pBlockName, void *pNext) {
+VPAPI_ATTR VkResult vpGetProfileFeatures(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    void*                                       pNext) {
+#ifdef VP_USE_OBJECT
+    (void)capabilities;
+#endif//VP_USE_OBJECT
+
     VkResult result = pBlockName == nullptr ? VK_SUCCESS : VK_INCOMPLETE;
 
-    const std::vector<VpProfileProperties>& profiles = detail::GatherProfiles(*pProfile);
+    const std::vector<VpProfileProperties>& gathered_profiles = detail::GatherProfiles(*pProfile);
 
-    for (std::size_t profile_index = 0, profile_count = profiles.size(); profile_index < profile_count; ++profile_index) {
-        const detail::VpProfileDesc* profile_desc = detail::vpGetProfileDesc(profiles[profile_index].profileName);
+    for (std::size_t profile_index = 0, profile_count = gathered_profiles.size(); profile_index < profile_count; ++profile_index) {
+        const detail::VpProfileDesc* profile_desc = detail::vpGetProfileDesc(gathered_profiles[profile_index].profileName);
         if (profile_desc == nullptr) return VK_ERROR_UNKNOWN;
 
         for (uint32_t capability_index = 0; capability_index < profile_desc->requiredCapabilityCount; ++capability_index) {
-            const detail::VpCapabilitiesDesc& capabilities = profile_desc->pRequiredCapabilities[capability_index];
+            const detail::VpCapabilitiesDesc& cap_desc = profile_desc->pRequiredCapabilities[capability_index];
 
-            for (uint32_t variant_index = 0; variant_index < capabilities.variantCount; ++variant_index) {
-                const detail::VpVariantDesc& variant = capabilities.pVariants[variant_index];
+            for (uint32_t variant_index = 0; variant_index < cap_desc.variantCount; ++variant_index) {
+                const detail::VpVariantDesc& variant = cap_desc.pVariants[variant_index];
                 if (pBlockName != nullptr) {
                     if (strcmp(variant.blockName, pBlockName) != 0) {
                         continue;
@@ -11087,28 +12544,39 @@ VPAPI_ATTR VkResult vpGetProfileFeatures(const VpProfileProperties *pProfile, co
     return result;
 }
 
-VPAPI_ATTR VkResult vpGetProfileProperties(const VpProfileProperties *pProfile, const char* pBlockName, void *pNext) {
+VPAPI_ATTR VkResult vpGetProfileProperties(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    void*                                       pNext) {
     VkResult result = pBlockName == nullptr ? VK_SUCCESS : VK_INCOMPLETE;
 
     VkBool32 multiple_variants = VK_FALSE;
-    if (vpHasMultipleVariantsProfile(pProfile, &multiple_variants) == VK_ERROR_UNKNOWN) {
+    if (vpHasMultipleVariantsProfile(
+#ifdef VP_USE_OBJECT
+        capabilities,
+#endif//VP_USE_OBJECT
+        pProfile,
+        &multiple_variants) == VK_ERROR_UNKNOWN) {
         return VK_ERROR_UNKNOWN;
     }
     if (multiple_variants == VK_TRUE && pBlockName == nullptr) {
         return VK_ERROR_UNKNOWN;
     }
 
-    const std::vector<VpProfileProperties>& profiles = detail::GatherProfiles(*pProfile);
+    const std::vector<VpProfileProperties>& gathered_profiles = detail::GatherProfiles(*pProfile);
 
-    for (std::size_t profile_index = 0, profile_count = profiles.size(); profile_index < profile_count; ++profile_index) {
-        const detail::VpProfileDesc* profile_desc = detail::vpGetProfileDesc(profiles[profile_index].profileName);
+    for (std::size_t profile_index = 0, profile_count = gathered_profiles.size(); profile_index < profile_count; ++profile_index) {
+        const detail::VpProfileDesc* profile_desc = detail::vpGetProfileDesc(gathered_profiles[profile_index].profileName);
         if (profile_desc == nullptr) return VK_ERROR_UNKNOWN;
 
         for (uint32_t capability_index = 0; capability_index < profile_desc->requiredCapabilityCount; ++capability_index) {
-            const detail::VpCapabilitiesDesc& capabilities = profile_desc->pRequiredCapabilities[capability_index];
+            const detail::VpCapabilitiesDesc& cap_desc = profile_desc->pRequiredCapabilities[capability_index];
 
-            for (uint32_t variant_index = 0; variant_index < capabilities.variantCount; ++variant_index) {
-                const detail::VpVariantDesc& variant = capabilities.pVariants[variant_index];
+            for (uint32_t variant_index = 0; variant_index < cap_desc.variantCount; ++variant_index) {
+                const detail::VpVariantDesc& variant = cap_desc.pVariants[variant_index];
                 if (pBlockName != nullptr) {
                     if (strcmp(variant.blockName, pBlockName) != 0) {
                         continue;
@@ -11117,7 +12585,7 @@ VPAPI_ATTR VkResult vpGetProfileProperties(const VpProfileProperties *pProfile, 
                 }
 
                 if (variant.property.pfnFiller == nullptr) continue;
-                
+
                 VkBaseOutStructure* p = static_cast<VkBaseOutStructure*>(pNext);
                 while (p != nullptr) {
                     variant.property.pfnFiller(p);
@@ -11130,22 +12598,35 @@ VPAPI_ATTR VkResult vpGetProfileProperties(const VpProfileProperties *pProfile, 
     return result;
 }
 
-VPAPI_ATTR VkResult vpGetProfileFormats(const VpProfileProperties *pProfile, const char* pBlockName, uint32_t *pFormatCount, VkFormat *pFormats) {
+VPAPI_ATTR VkResult vpGetProfileQueueFamilyProperties(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    uint32_t*                                   pPropertyCount,
+    VkQueueFamilyProperties2KHR*                pProperties) {
+#ifdef VP_USE_OBJECT
+    (void)capabilities;
+#endif//VP_USE_OBJECT
+
+    if (pPropertyCount == nullptr) return VK_ERROR_UNKNOWN;
+
     VkResult result = pBlockName == nullptr ? VK_SUCCESS : VK_INCOMPLETE;
 
-    std::vector<VkFormat> results;
+    const std::vector<VpProfileProperties>& gathered_profiles = detail::GatherProfiles(*pProfile);
 
-    const std::vector<VpProfileProperties>& profiles = detail::GatherProfiles(*pProfile);
+    uint32_t total_queue_family_count = 0;
 
-    for (std::size_t profile_index = 0, profile_count = profiles.size(); profile_index < profile_count; ++profile_index) {
-        const detail::VpProfileDesc* profile_desc = detail::vpGetProfileDesc(profiles[profile_index].profileName);
+    for (std::size_t profile_index = 0, profile_count = gathered_profiles.size(); profile_index < profile_count; ++profile_index) {
+        const detail::VpProfileDesc* profile_desc = detail::vpGetProfileDesc(gathered_profiles[profile_index].profileName);
         if (profile_desc == nullptr) return VK_ERROR_UNKNOWN;
 
         for (uint32_t capability_index = 0; capability_index < profile_desc->requiredCapabilityCount; ++capability_index) {
-            const detail::VpCapabilitiesDesc& capabilities = profile_desc->pRequiredCapabilities[capability_index];
+            const detail::VpCapabilitiesDesc& cap_desc = profile_desc->pRequiredCapabilities[capability_index];
 
-            for (uint32_t variant_index = 0; variant_index < capabilities.variantCount; ++variant_index) {
-                const detail::VpVariantDesc& variant = capabilities.pVariants[variant_index];
+            for (uint32_t variant_index = 0; variant_index < cap_desc.variantCount; ++variant_index) {
+                const detail::VpVariantDesc& variant = cap_desc.pVariants[variant_index];
                 if (pBlockName != nullptr) {
                     if (strcmp(variant.blockName, pBlockName) != 0) {
                         continue;
@@ -11153,9 +12634,72 @@ VPAPI_ATTR VkResult vpGetProfileFormats(const VpProfileProperties *pProfile, con
                     result = VK_SUCCESS;
                 }
 
-                for (uint32_t i = 0; i < variant.formatCount; ++i) {
-                    if (std::find(results.begin(), results.end(), variant.pFormats[i].format) == std::end(results)) {
-                        results.push_back(variant.pFormats[i].format);
+                if (pProperties != nullptr) {
+                    for (uint32_t i = 0; i < variant.queueFamilyCount; ++i) {
+                        if (total_queue_family_count < *pPropertyCount) {
+                            if (variant.pQueueFamilies[i].pfnFiller == nullptr) continue;
+
+                            VkBaseOutStructure* p = reinterpret_cast<VkBaseOutStructure*>(pProperties);
+                            while (p != nullptr) {
+                                variant.pQueueFamilies[i].pfnFiller(p);
+                                p = p->pNext;
+                            }
+
+                            total_queue_family_count++;
+                            pProperties++;
+                        } else {
+                            result = VK_INCOMPLETE;
+                            break;
+                        }
+                    }
+                } else {
+                    total_queue_family_count += variant.queueFamilyCount;
+                }
+            }
+        }
+    }
+
+    *pPropertyCount = total_queue_family_count;
+    return result;
+}
+
+VPAPI_ATTR VkResult vpGetProfileFormats(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    uint32_t*                                   pFormatCount,
+    VkFormat*                                   pFormats) {
+#ifdef VP_USE_OBJECT
+    (void)capabilities;
+#endif//VP_USE_OBJECT
+
+    VkResult result = pBlockName == nullptr ? VK_SUCCESS : VK_INCOMPLETE;
+
+    std::vector<VkFormat> results;
+
+    const std::vector<VpProfileProperties>& gathered_profiles = detail::GatherProfiles(*pProfile);
+
+    for (std::size_t profile_index = 0, profile_count = gathered_profiles.size(); profile_index < profile_count; ++profile_index) {
+        const detail::VpProfileDesc* profile_desc = detail::vpGetProfileDesc(gathered_profiles[profile_index].profileName);
+        if (profile_desc == nullptr) return VK_ERROR_UNKNOWN;
+
+        for (uint32_t capability_index = 0; capability_index < profile_desc->requiredCapabilityCount; ++capability_index) {
+            const detail::VpCapabilitiesDesc& cap_desc = profile_desc->pRequiredCapabilities[capability_index];
+
+            for (uint32_t variant_index = 0; variant_index < cap_desc.variantCount; ++variant_index) {
+                const detail::VpVariantDesc& variant = cap_desc.pVariants[variant_index];
+                if (pBlockName != nullptr) {
+                    if (strcmp(variant.blockName, pBlockName) != 0) {
+                        continue;
+                    }
+                    result = VK_SUCCESS;
+                }
+
+                for (uint32_t format_index = 0; format_index < variant.formatCount; ++format_index) {
+                    if (std::find(results.begin(), results.end(), variant.pFormats[format_index].format) == std::end(results)) {
+                        results.push_back(variant.pFormats[format_index].format);
                     }
                 }
             }
@@ -11180,13 +12724,24 @@ VPAPI_ATTR VkResult vpGetProfileFormats(const VpProfileProperties *pProfile, con
     return result;
 }
 
-VPAPI_ATTR VkResult vpGetProfileFormatProperties(const VpProfileProperties *pProfile, const char* pBlockName, VkFormat format, void *pNext) {
+VPAPI_ATTR VkResult vpGetProfileFormatProperties(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    VkFormat                                    format,
+    void*                                       pNext) {
+#ifdef VP_USE_OBJECT
+    (void)capabilities;
+#endif//VP_USE_OBJECT
+
     VkResult result = pBlockName == nullptr ? VK_SUCCESS : VK_INCOMPLETE;
 
-    const std::vector<VpProfileProperties>& profiles = detail::GatherProfiles(*pProfile);
+    const std::vector<VpProfileProperties>& gathered_profiles = detail::GatherProfiles(*pProfile);
 
-    for (std::size_t i = 0, n = profiles.size(); i < n; ++i) {
-        const char* profile_name = profiles[i].profileName;
+    for (std::size_t profile_index = 0, profile_count = gathered_profiles.size(); profile_index < profile_count; ++profile_index) {
+        const char* profile_name = gathered_profiles[profile_index].profileName;
 
         const detail::VpProfileDesc* pProfileDesc = detail::vpGetProfileDesc(profile_name);
         if (pProfileDesc == nullptr) return VK_ERROR_UNKNOWN;
@@ -11204,15 +12759,15 @@ VPAPI_ATTR VkResult vpGetProfileFormatProperties(const VpProfileProperties *pPro
                     result = VK_SUCCESS;
                 }
 
-                for (uint32_t i = 0; i < variant.formatCount; ++i) {
-                    if (variant.pFormats[i].format != format) {
+                for (uint32_t format_index = 0; format_index < variant.formatCount; ++format_index) {
+                    if (variant.pFormats[format_index].format != format) {
                         continue;
                     }
 
-                    VkBaseOutStructure* p = static_cast<VkBaseOutStructure*>(static_cast<void*>(pNext));
-                    while (p != nullptr) {
-                        variant.pFormats[i].pfnFiller(p);
-                        p = p->pNext;
+                    VkBaseOutStructure* base_ptr = static_cast<VkBaseOutStructure*>(static_cast<void*>(pNext));
+                    while (base_ptr != nullptr) {
+                        variant.pFormats[format_index].pfnFiller(base_ptr);
+                        base_ptr = base_ptr->pNext;
                     }
 #if defined(VK_VERSION_1_3) || defined(VK_KHR_format_feature_flags2)
                     VkFormatProperties2KHR* fp2 = static_cast<VkFormatProperties2KHR*>(
@@ -11221,14 +12776,14 @@ VPAPI_ATTR VkResult vpGetProfileFormatProperties(const VpProfileProperties *pPro
                         detail::vpGetStructure(pNext, VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3_KHR));
                     if (fp3 != nullptr) {
                         VkFormatProperties2KHR fp{ VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2_KHR };
-                        variant.pFormats[i].pfnFiller(static_cast<VkBaseOutStructure*>(static_cast<void*>(&fp)));
+                        variant.pFormats[format_index].pfnFiller(static_cast<VkBaseOutStructure*>(static_cast<void*>(&fp)));
                         fp3->linearTilingFeatures |= static_cast<VkFormatFeatureFlags2KHR>(fp3->linearTilingFeatures | fp.formatProperties.linearTilingFeatures);
                         fp3->optimalTilingFeatures |= static_cast<VkFormatFeatureFlags2KHR>(fp3->optimalTilingFeatures | fp.formatProperties.optimalTilingFeatures);
                         fp3->bufferFeatures |= static_cast<VkFormatFeatureFlags2KHR>(fp3->bufferFeatures | fp.formatProperties.bufferFeatures);
                     }
                     if (fp2 != nullptr) {
                         VkFormatProperties3KHR fp{ VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3_KHR };
-                        variant.pFormats[i].pfnFiller(static_cast<VkBaseOutStructure*>(static_cast<void*>(&fp)));
+                        variant.pFormats[format_index].pfnFiller(static_cast<VkBaseOutStructure*>(static_cast<void*>(&fp)));
                         fp2->formatProperties.linearTilingFeatures |= static_cast<VkFormatFeatureFlags>(fp2->formatProperties.linearTilingFeatures | fp.linearTilingFeatures);
                         fp2->formatProperties.optimalTilingFeatures |= static_cast<VkFormatFeatureFlags>(fp2->formatProperties.optimalTilingFeatures | fp.optimalTilingFeatures);
                         fp2->formatProperties.bufferFeatures |= static_cast<VkFormatFeatureFlags>(fp2->formatProperties.bufferFeatures | fp.bufferFeatures);
@@ -11242,16 +12797,316 @@ VPAPI_ATTR VkResult vpGetProfileFormatProperties(const VpProfileProperties *pPro
     return result;
 }
 
-VPAPI_ATTR VkResult vpGetProfileFeatureStructureTypes(const VpProfileProperties *pProfile, const char* pBlockName, uint32_t *pStructureTypeCount, VkStructureType *pStructureTypes) {
-    return detail::vpGetProfileStructureTypes(pProfile, pBlockName, detail::STRUCTURE_FEATURE, pStructureTypeCount, pStructureTypes);
+VPAPI_ATTR VkResult vpGetProfileFeatureStructureTypes(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    uint32_t*                                   pStructureTypeCount,
+    VkStructureType*                            pStructureTypes) {
+    return detail::vpGetProfileStructureTypes(
+#ifdef VP_USE_OBJECT
+        capabilities,
+#endif//VP_USE_OBJECT
+        pProfile, pBlockName, detail::STRUCTURE_FEATURE, pStructureTypeCount, pStructureTypes);
 }
 
-VPAPI_ATTR VkResult vpGetProfilePropertyStructureTypes(const VpProfileProperties *pProfile, const char* pBlockName, uint32_t *pStructureTypeCount, VkStructureType *pStructureTypes) {
-    return detail::vpGetProfileStructureTypes(pProfile, pBlockName, detail::STRUCTURE_PROPERTY, pStructureTypeCount, pStructureTypes);
+VPAPI_ATTR VkResult vpGetProfilePropertyStructureTypes(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    uint32_t*                                   pStructureTypeCount,
+    VkStructureType*                            pStructureTypes) {
+    return detail::vpGetProfileStructureTypes(
+#ifdef VP_USE_OBJECT
+        capabilities,
+#endif//VP_USE_OBJECT
+        pProfile, pBlockName, detail::STRUCTURE_PROPERTY, pStructureTypeCount, pStructureTypes);
 }
 
-VPAPI_ATTR VkResult vpGetProfileFormatStructureTypes(const VpProfileProperties *pProfile, const char* pBlockName, uint32_t *pStructureTypeCount, VkStructureType *pStructureTypes) {
-    return detail::vpGetProfileStructureTypes(pProfile, pBlockName, detail::STRUCTURE_FORMAT, pStructureTypeCount, pStructureTypes);
+VPAPI_ATTR VkResult vpGetProfileQueueFamilyStructureTypes(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    uint32_t*                                   pStructureTypeCount,
+    VkStructureType*                            pStructureTypes) {
+    return detail::vpGetProfileStructureTypes(
+#ifdef VP_USE_OBJECT
+        capabilities,
+#endif//VP_USE_OBJECT
+        pProfile, pBlockName, detail::STRUCTURE_QUEUE_FAMILY, pStructureTypeCount, pStructureTypes);
 }
 
-// clang-format on
+VPAPI_ATTR VkResult vpGetProfileFormatStructureTypes(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    uint32_t*                                   pStructureTypeCount,
+    VkStructureType*                            pStructureTypes) {
+    return detail::vpGetProfileStructureTypes(
+#ifdef VP_USE_OBJECT
+        capabilities,
+#endif//VP_USE_OBJECT
+        pProfile, pBlockName, detail::STRUCTURE_FORMAT, pStructureTypeCount, pStructureTypes);
+}
+
+#ifdef VK_KHR_video_queue
+// Query the list of video profiles specified by the profile
+VPAPI_ATTR VkResult vpGetProfileVideoProfiles(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    uint32_t*                                   pVideoProfileCount,
+    VpVideoProfileProperties*                   pVideoProfiles) {
+#ifdef VP_USE_OBJECT
+    (void)capabilities;
+#endif//VP_USE_OBJECT
+    if (pVideoProfileCount == nullptr) return VK_ERROR_UNKNOWN;
+
+    VkResult result = pBlockName == nullptr ? VK_SUCCESS : VK_INCOMPLETE;
+
+    uint32_t total_video_profile_count = 0;
+
+    const std::vector<VpProfileProperties>& gathered_profiles = detail::GatherProfiles(*pProfile);
+
+    for (std::size_t profile_index = 0, profile_count = gathered_profiles.size(); profile_index < profile_count; ++profile_index) {
+        const detail::VpProfileDesc* profile_desc = detail::vpGetProfileDesc(gathered_profiles[profile_index].profileName);
+        if (profile_desc == nullptr) return VK_ERROR_UNKNOWN;
+
+        for (uint32_t capability_index = 0; capability_index < profile_desc->requiredCapabilityCount; ++capability_index) {
+            const detail::VpCapabilitiesDesc& cap_desc = profile_desc->pRequiredCapabilities[capability_index];
+
+            for (uint32_t variant_index = 0; variant_index < cap_desc.variantCount; ++variant_index) {
+                const detail::VpVariantDesc& variant = cap_desc.pVariants[variant_index];
+                if (pBlockName != nullptr) {
+                    if (strcmp(variant.blockName, pBlockName) != 0) {
+                        continue;
+                    }
+                    result = VK_SUCCESS;
+                }
+
+                if (pVideoProfiles != nullptr) {
+                    for (uint32_t i = 0; i < variant.videoProfileCount; ++i) {
+                        if (total_video_profile_count < *pVideoProfileCount) {
+                            *pVideoProfiles = variant.pVideoProfiles[i].properties;
+                            total_video_profile_count++;
+                            pVideoProfiles++;
+                        } else {
+                            result = VK_INCOMPLETE;
+                            break;
+                        }
+                    }
+                } else {
+                    total_video_profile_count += variant.videoProfileCount;
+                }
+            }
+        }
+    }
+
+    *pVideoProfileCount = total_video_profile_count;
+    return result;
+}
+
+VPAPI_ATTR VkResult vpGetProfileVideoProfileInfo(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    uint32_t                                    videoProfileIndex,
+    VkVideoProfileInfoKHR*                      pVideoProfileInfo) {
+#ifdef VP_USE_OBJECT
+    (void)capabilities;
+#endif//VP_USE_OBJECT
+
+    const detail::VpVideoProfileDesc* pVideoProfileDesc = nullptr;
+    VkResult result = detail::vpGetProfileVideoProfileDesc(pProfile, pBlockName, videoProfileIndex, &pVideoProfileDesc);
+
+    if (pVideoProfileDesc != nullptr) {
+        VkBaseOutStructure* p = reinterpret_cast<VkBaseOutStructure*>(pVideoProfileInfo);
+        while (p != nullptr) {
+            pVideoProfileDesc->info.pfnFiller(p);
+            p = p->pNext;
+        }
+    }
+
+    return result;
+}
+
+VPAPI_ATTR VkResult vpGetProfileVideoCapabilities(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    uint32_t                                    videoProfileIndex,
+    void*                                       pNext) {
+#ifdef VP_USE_OBJECT
+    (void)capabilities;
+#endif//VP_USE_OBJECT
+
+    const detail::VpVideoProfileDesc* pVideoProfileDesc = nullptr;
+    VkResult result = detail::vpGetProfileVideoProfileDesc(pProfile, pBlockName, videoProfileIndex, &pVideoProfileDesc);
+
+    if (pVideoProfileDesc != nullptr) {
+        VkBaseOutStructure* p = reinterpret_cast<VkBaseOutStructure*>(pNext);
+        while (p != nullptr) {
+            pVideoProfileDesc->capability.pfnFiller(p);
+            p = p->pNext;
+        }
+    }
+
+    return result;
+}
+
+VPAPI_ATTR VkResult vpGetProfileVideoFormatProperties(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    uint32_t                                    videoProfileIndex,
+    uint32_t*                                   pPropertyCount,
+    VkVideoFormatPropertiesKHR*                 pProperties) {
+#ifdef VP_USE_OBJECT
+    (void)capabilities;
+#endif//VP_USE_OBJECT
+
+    const detail::VpVideoProfileDesc* pVideoProfileDesc = nullptr;
+    VkResult result = detail::vpGetProfileVideoProfileDesc(pProfile, pBlockName, videoProfileIndex, &pVideoProfileDesc);
+
+    uint32_t property_count = 0;
+    if (pVideoProfileDesc != nullptr) {
+        if (pProperties != nullptr) {
+            for (; property_count < pVideoProfileDesc->formatCount; ++property_count) {
+                if (property_count < *pPropertyCount) {
+                    VkBaseOutStructure* p = reinterpret_cast<VkBaseOutStructure*>(&pProperties[property_count]);
+                    while (p != nullptr) {
+                        pVideoProfileDesc->pFormats[property_count].pfnFiller(p);
+                        p = p->pNext;
+                    }
+                } else {
+                    result = VK_INCOMPLETE;
+                    break;
+                }
+            }
+        } else {
+            property_count = pVideoProfileDesc->formatCount;
+        }
+    }
+
+    *pPropertyCount = property_count;
+    return result;
+}
+
+VPAPI_ATTR VkResult vpGetProfileVideoProfileInfoStructureTypes(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    uint32_t                                    videoProfileIndex,
+    uint32_t*                                   pStructureTypeCount,
+    VkStructureType*                            pStructureTypes) {
+#ifdef VP_USE_OBJECT
+    (void)capabilities;
+#endif//VP_USE_OBJECT
+
+    const detail::VpVideoProfileDesc* pVideoProfileDesc = nullptr;
+    VkResult result = detail::vpGetProfileVideoProfileDesc(pProfile, pBlockName, videoProfileIndex, &pVideoProfileDesc);
+
+    if (pVideoProfileDesc != nullptr) {
+        if (pStructureTypes != nullptr) {
+            if (*pStructureTypeCount < pVideoProfileDesc->infoStructTypeCount) {
+                result = VK_INCOMPLETE;
+            } else {
+                *pStructureTypeCount = pVideoProfileDesc->infoStructTypeCount;
+            }
+            if (*pStructureTypeCount > 0) {
+                memcpy(pStructureTypes, pVideoProfileDesc->pInfoStructTypes, *pStructureTypeCount * sizeof(VkStructureType));
+            }
+        } else {
+            *pStructureTypeCount = pVideoProfileDesc->infoStructTypeCount;
+        }
+    }
+
+    return result;
+}
+
+VPAPI_ATTR VkResult vpGetProfileVideoCapabilityStructureTypes(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    uint32_t                                    videoProfileIndex,
+    uint32_t*                                   pStructureTypeCount,
+    VkStructureType*                            pStructureTypes) {
+#ifdef VP_USE_OBJECT
+    (void)capabilities;
+#endif//VP_USE_OBJECT
+
+    const detail::VpVideoProfileDesc* pVideoProfileDesc = nullptr;
+    VkResult result = detail::vpGetProfileVideoProfileDesc(pProfile, pBlockName, videoProfileIndex, &pVideoProfileDesc);
+
+    if (pVideoProfileDesc != nullptr) {
+        if (pStructureTypes != nullptr) {
+            if (*pStructureTypeCount < pVideoProfileDesc->capabilityStructTypeCount) {
+                result = VK_INCOMPLETE;
+            } else {
+                *pStructureTypeCount = pVideoProfileDesc->capabilityStructTypeCount;
+            }
+            if (*pStructureTypeCount > 0) {
+                memcpy(pStructureTypes, pVideoProfileDesc->pCapabilityStructTypes, *pStructureTypeCount * sizeof(VkStructureType));
+            }
+        } else {
+            *pStructureTypeCount = pVideoProfileDesc->capabilityStructTypeCount;
+        }
+    }
+
+    return result;
+}
+
+VPAPI_ATTR VkResult vpGetProfileVideoFormatStructureTypes(
+#ifdef VP_USE_OBJECT
+    VpCapabilities                              capabilities,
+#endif//VP_USE_OBJECT
+    const VpProfileProperties*                  pProfile,
+    const char*                                 pBlockName,
+    uint32_t                                    videoProfileIndex,
+    uint32_t*                                   pStructureTypeCount,
+    VkStructureType*                            pStructureTypes) {
+#ifdef VP_USE_OBJECT
+    (void)capabilities;
+#endif//VP_USE_OBJECT
+
+    const detail::VpVideoProfileDesc* pVideoProfileDesc = nullptr;
+    VkResult result = detail::vpGetProfileVideoProfileDesc(pProfile, pBlockName, videoProfileIndex, &pVideoProfileDesc);
+
+    if (pVideoProfileDesc != nullptr) {
+        if (pStructureTypes != nullptr) {
+            if (*pStructureTypeCount < pVideoProfileDesc->formatStructTypeCount) {
+                result = VK_INCOMPLETE;
+            } else {
+                *pStructureTypeCount = pVideoProfileDesc->formatStructTypeCount;
+            }
+            if (*pStructureTypeCount > 0) {
+                memcpy(pStructureTypes, pVideoProfileDesc->pFormatStructTypes, *pStructureTypeCount * sizeof(VkStructureType));
+            }
+        } else {
+            *pStructureTypeCount = pVideoProfileDesc->formatStructTypeCount;
+        }
+    }
+
+    return result;
+}
+#endif  // VK_KHR_video_queue

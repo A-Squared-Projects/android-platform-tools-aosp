@@ -13,13 +13,13 @@ cc_defaults {
     defaults: [
         "aconfig_lib_cc_static_link.defaults",
         "android.hardware.graphics.composer3-ndk_shared",
-        "android.hardware.power-ndk_shared",
         "librenderengine_deps",
         "libtimestats_deps",
         "surfaceflinger_defaults",
+        "libsurfaceflinger_proto_deps",
+        "poweradvisor_deps",
     ],
     cflags: [
-        "-DLOG_TAG=\"CompositionEngine\"",
         "-DATRACE_TAG=ATRACE_TAG_GRAPHICS",
     ],
     shared_libs: [
@@ -39,19 +39,17 @@ cc_defaults {
         "libSurfaceFlingerProp",
         "libui",
         "libutils",
-        "server_configurable_flags",
     ],
     static_libs: [
-        "liblayers_proto",
+        "libguiflags",
         "libmath",
         "librenderengine",
         "libtimestats",
         "libtonemap",
         "libaidlcommonsupport",
         "libprocessgroup",
-        "libcgrouprc",
+        "libprocessgroup_util",
         "libjsoncpp",
-        "libcgrouprc_format",
     ],
     header_libs: [
         "android.hardware.graphics.composer@2.1-command-buffer",
@@ -59,7 +57,7 @@ cc_defaults {
         "android.hardware.graphics.composer@2.3-command-buffer",
         "android.hardware.graphics.composer@2.4-command-buffer",
         "android.hardware.graphics.composer3-command-buffer",
-        "libsurfaceflinger_headers",
+        "libsurfaceflinger_backend_headers",
     ],
 }
 
@@ -91,24 +89,23 @@ filegroup {
 
 cc_library {
     name: "libcompositionengine",
-    defaults: ["libcompositionengine_defaults"],
-    static_libs: [
-        "libsurfaceflinger_common",
-        "libsurfaceflingerflags",
+    defaults: [
+        "libcompositionengine_defaults",
+        "libsurfaceflinger_common_deps",
     ],
     srcs: [
         ":libcompositionengine_sources",
     ],
     local_include_dirs: ["include"],
     export_include_dirs: ["include"],
-    shared_libs: [
-        "server_configurable_flags",
-    ],
 }
 
 cc_library {
     name: "libcompositionengine_mocks",
-    defaults: ["libcompositionengine_defaults"],
+    defaults: [
+        "libcompositionengine_defaults",
+        "libsurfaceflinger_common_test_deps",
+    ],
     srcs: [
         "mock/CompositionEngine.cpp",
         "mock/Display.cpp",
@@ -124,11 +121,6 @@ cc_library {
         "libgtest",
         "libgmock",
         "libcompositionengine",
-        "libsurfaceflinger_common_test",
-        "libsurfaceflingerflags_test",
-    ],
-    shared_libs: [
-        "server_configurable_flags",
     ],
     local_include_dirs: ["include"],
     export_include_dirs: ["include"],
@@ -141,9 +133,14 @@ cc_test {
         "frameworks/native/services/surfaceflinger/common/include",
         "frameworks/native/services/surfaceflinger/tests/unittests",
     ],
-    defaults: ["libcompositionengine_defaults"],
+    defaults: [
+        "libcompositionengine_defaults",
+        "libsurfaceflinger_common_test_deps",
+    ],
     srcs: [
         ":libcompositionengine_sources",
+        ":libsurfaceflinger_backend_mock_sources",
+        ":libsurfaceflinger_backend_sources",
         "tests/planner/CachedSetTest.cpp",
         "tests/planner/FlattenerTest.cpp",
         "tests/planner/LayerStateTest.cpp",
@@ -152,29 +149,29 @@ cc_test {
         "tests/CompositionEngineTest.cpp",
         "tests/DisplayColorProfileTest.cpp",
         "tests/DisplayTest.cpp",
+        "tests/HwcAsyncWorkerTest.cpp",
         "tests/HwcBufferCacheTest.cpp",
-        "tests/MockHWC2.cpp",
-        "tests/MockHWComposer.cpp",
-        "tests/MockPowerAdvisor.cpp",
         "tests/OutputLayerTest.cpp",
         "tests/OutputTest.cpp",
         "tests/ProjectionSpaceTest.cpp",
         "tests/RenderSurfaceTest.cpp",
     ],
+    header_libs: [
+        "libsurfaceflinger_backend_mock_headers",
+    ],
     static_libs: [
         "libcompositionengine_mocks",
-        "libgui_mocks",
-        "librenderengine_mocks",
+        "libflagtest",
         "libgmock",
         "libgtest",
-        "libsurfaceflinger_common_test",
-        "libsurfaceflingerflags_test",
+        "libgui_mocks",
+        "librenderengine_mocks",
     ],
     shared_libs: [
+        "libbinder_ndk",
         // For some reason, libvulkan isn't picked up from librenderengine
         // Probably ASAN related?
         "libvulkan",
-        "server_configurable_flags",
     ],
     sanitize: {
         hwaddress: true,

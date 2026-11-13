@@ -105,6 +105,14 @@ public:
         // The noise floor for predictions.
         // Distances (r) less than this should be discarded as noise.
         float distanceNoiseFloor = 0;
+
+        // Low and high jerk thresholds (with normalized dt = 1) for predictions.
+        // High jerk means more predictions will be pruned, vice versa for low.
+        float lowJerk = 0;
+        float highJerk = 0;
+
+        // Coefficient for the first-order IIR filter for jerk calculation.
+        float jerkAlpha = 1;
     };
 
     // Creates a model from an encoded Flatbuffer model.
@@ -138,7 +146,7 @@ public:
     std::span<const float> outputPressure() const;
 
 private:
-    explicit TfLiteMotionPredictorModel(std::unique_ptr<android::base::MappedFile> model,
+    explicit TfLiteMotionPredictorModel(std::optional<android::base::MappedFile> model,
                                         Config config);
 
     void allocateTensors();
@@ -155,7 +163,7 @@ private:
     const TfLiteTensor* mOutputPhi = nullptr;
     const TfLiteTensor* mOutputPressure = nullptr;
 
-    std::unique_ptr<android::base::MappedFile> mFlatBuffer;
+    std::optional<android::base::MappedFile> mFlatBuffer;
     std::unique_ptr<tflite::ErrorReporter> mErrorReporter;
     std::unique_ptr<tflite::FlatBufferModel> mModel;
     std::unique_ptr<tflite::Interpreter> mInterpreter;

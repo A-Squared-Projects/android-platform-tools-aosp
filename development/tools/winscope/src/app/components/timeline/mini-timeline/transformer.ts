@@ -15,48 +15,49 @@
  */
 
 import {Segment} from 'app/components/timeline/segment';
-import {TimeRange, Timestamp, TimestampType} from 'common/time';
-import {NO_TIMEZONE_OFFSET_FACTORY} from 'common/timestamp_factory';
+import {TimeRange, Timestamp} from 'common/time/time';
+import {ComponentTimestampConverter} from 'common/time/timestamp_converter';
 
+/**
+ * A class for transforming timestamps to canvas coordinates and vice versa.
+ */
 export class Transformer {
-  private timestampType: TimestampType;
+  private tsRangeWidth: bigint;
+  private canvasWidth: number;
 
-  private fromWidth: bigint;
-  private targetWidth: number;
+  private tsOffset: bigint;
+  private canvasOffset: number;
 
-  private fromOffset: bigint;
-  private toOffset: number;
-
-  constructor(private fromRange: TimeRange, private toRange: Segment) {
-    this.timestampType = fromRange.from.getType();
-
-    this.fromWidth =
-      this.fromRange.to.getValueNs() - this.fromRange.from.getValueNs();
+  constructor(
+    private tsRange: TimeRange,
+    private canvasPosRange: Segment,
+    private timestampConverter: ComponentTimestampConverter,
+  ) {
+    this.tsRangeWidth = BigInt(this.tsRange.endNs - this.tsRange.startNs);
     // Needs to be a whole number to be compatible with bigints
-    this.targetWidth = Math.round(this.toRange.to - this.toRange.from);
+    this.canvasWidth = Math.round(
+      this.canvasPosRange.to - this.canvasPosRange.from,
+    );
 
-    this.fromOffset = this.fromRange.from.getValueNs();
+    this.tsOffset = this.tsRange.startNs;
     // Needs to be a whole number to be compatible with bigints
-    this.toOffset = this.toRange.from;
+    this.canvasOffset = this.canvasPosRange.from;
   }
 
   transform(x: Timestamp): number {
     return (
-      this.toOffset +
-      (this.targetWidth * Number(x.getValueNs() - this.fromOffset)) /
-        Number(this.fromWidth)
+      this.canvasOffset +
+      (this.canvasWidth * Number(x.getValueNs() - this.tsOffset)) /
+        Number(this.tsRangeWidth)
     );
   }
 
   untransform(x: number): Timestamp {
     x = Math.round(x);
     const valueNs =
-      this.fromOffset +
-      (BigInt(x - this.toOffset) * this.fromWidth) / BigInt(this.targetWidth);
-    return NO_TIMEZONE_OFFSET_FACTORY.makeTimestampFromType(
-      this.timestampType,
-      valueNs,
-      0n,
-    );
+      this.tsOffset +
+      (BigInt(x - this.canvasOffset) * this.tsRangeWidth) /
+        BigInt(this.canvasWidth);
+    return this.timestampConverter.makeTimestampFromNs(valueNs);
   }
 }

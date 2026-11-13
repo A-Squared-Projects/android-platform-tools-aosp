@@ -57,16 +57,9 @@ enum InputConfig {
     NOT_TOUCHABLE                = 1 << 3,
 
     /**
-     * Indicates that this window will not accept a touch event that is split between
-     * more than one window. When set:
-     *  - If this window receives a DOWN event with the first pointer, all successive
-     *    pointers that go down, regardless of their location on the screen, will be
-     *    directed to this window;
-     *  - If the DOWN event lands outside the touchable bounds of this window, no
-     *    successive pointers that go down, regardless of their location on the screen,
-     *    will be directed to this window.
+     * This flag is now deprecated and should not be used.
      */
-    PREVENT_SPLITTING            = 1 << 4,
+    DEPRECATED_PREVENT_SPLITTING = 1 << 4,
 
     /**
      * Indicates that this window shows the wallpaper behind it, so all touch events
@@ -157,4 +150,36 @@ enum InputConfig {
      * like StatusBar and TaskBar.
      */
     GLOBAL_STYLUS_BLOCKS_TOUCH   = 1 << 17,
+
+    /**
+     * InputConfig used to indicate that this window is privacy sensitive. This may be used to
+     * redact input interactions from tracing or screen mirroring.
+     *
+     * This must be set on windows that use {@link WindowManager.LayoutParams#FLAG_SECURE},
+     * but it may also be set without setting FLAG_SECURE. The tracing configuration will
+     * determine how these sensitive events are eventually traced.
+     */
+     SENSITIVE_FOR_PRIVACY       = 1 << 18,
+
+    /**
+     * InputConfig used to indicate that this window is topology aware. Using this flag will allow
+     * windows to receive gestures that can cross display boundaries. This flag is used for cross
+     * display drag and drop of windows and contents.
+     *
+     * Window with this flag can receive an input event stream containing events with varying
+     * displayIds in the corresponding coordinate space when the cursor crosses display boundary.
+     *
+     * When this flag is not set, window will receive a modified event stream where display Id will
+     * remain unchanged and coordinate space will extend beyond the logical display space.
+     */
+     DISPLAY_TOPOLOGY_AWARE       = 1 << 19,
+
+    /**
+     * InputConfig used to indicate that any pointer streams targeting this window should not be
+     * canceled as part of a pilferPointers request.
+     *
+     * This is only meant to be used by system components that need to be perpetually be aware of
+     * all input streams, such as the PointerLocationView used for debugging.
+     */
+     DO_NOT_PILFER                = 1 << 20,
 }

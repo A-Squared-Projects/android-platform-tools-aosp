@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#define LOG_TAG "libbinder.OS_android"
 
 #include "OS.h"
 
@@ -46,6 +47,10 @@ void trace_end(uint64_t tag) {
 
 void trace_int(uint64_t tag, const char* name, int32_t value) {
     atrace_int(tag, name, value);
+}
+
+uint64_t get_trace_enabled_tags() {
+    return atrace_enabled_tags;
 }
 
 } // namespace os

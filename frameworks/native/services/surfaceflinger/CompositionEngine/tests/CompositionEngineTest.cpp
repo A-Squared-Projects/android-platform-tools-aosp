@@ -26,10 +26,8 @@
 #include <gtest/gtest.h>
 #include <renderengine/mock/RenderEngine.h>
 
-#include "MockHWComposer.h"
 #include "TimeStats/TimeStats.h"
-
-#include <variant>
+#include "mock/DisplayHardware/MockHWComposer.h"
 
 using namespace com::android::graphics::surfaceflinger;
 
@@ -45,6 +43,10 @@ using ::testing::ReturnRef;
 using ::testing::SaveArg;
 using ::testing::StrictMock;
 
+static constexpr PhysicalDisplayId kDisplayId1 = PhysicalDisplayId::fromPort(123u);
+static constexpr PhysicalDisplayId kDisplayId2 = PhysicalDisplayId::fromPort(234u);
+static constexpr PhysicalDisplayId kDisplayId3 = PhysicalDisplayId::fromPort(567u);
+
 struct CompositionEngineTest : public testing::Test {
     std::shared_ptr<TimeStats> mTimeStats;
 
@@ -54,6 +56,31 @@ struct CompositionEngineTest : public testing::Test {
     std::shared_ptr<mock::Output> mOutput1{std::make_shared<StrictMock<mock::Output>>()};
     std::shared_ptr<mock::Output> mOutput2{std::make_shared<StrictMock<mock::Output>>()};
     std::shared_ptr<mock::Output> mOutput3{std::make_shared<StrictMock<mock::Output>>()};
+
+    std::array<impl::OutputCompositionState, 3> mOutputStates;
+
+    void SetUp() override {
+        EXPECT_CALL(*mOutput1, getDisplayId)
+                .WillRepeatedly(Return(std::make_optional<DisplayId>(kDisplayId1)));
+        EXPECT_CALL(*mOutput1, getDisplayIdVariant).WillRepeatedly(Return(kDisplayId1));
+
+        EXPECT_CALL(*mOutput2, getDisplayId)
+                .WillRepeatedly(Return(std::make_optional<DisplayId>(kDisplayId2)));
+        EXPECT_CALL(*mOutput2, getDisplayIdVariant).WillRepeatedly(Return(kDisplayId2));
+
+        EXPECT_CALL(*mOutput3, getDisplayId)
+                .WillRepeatedly(Return(std::make_optional<DisplayId>(kDisplayId3)));
+        EXPECT_CALL(*mOutput3, getDisplayIdVariant).WillRepeatedly(Return(kDisplayId3));
+
+        // Most tests will depend on the outputs being enabled.
+        for (auto& state : mOutputStates) {
+            state.isEnabled = true;
+        }
+
+        EXPECT_CALL(*mOutput1, getState).WillRepeatedly(ReturnRef(mOutputStates[0]));
+        EXPECT_CALL(*mOutput2, getState).WillRepeatedly(ReturnRef(mOutputStates[1]));
+        EXPECT_CALL(*mOutput3, getState).WillRepeatedly(ReturnRef(mOutputStates[2]));
+    }
 };
 
 TEST_F(CompositionEngineTest, canInstantiateCompositionEngine) {
@@ -63,7 +90,7 @@ TEST_F(CompositionEngineTest, canInstantiateCompositionEngine) {
 
 TEST_F(CompositionEngineTest, canSetHWComposer) {
     android::mock::HWComposer* hwc = new StrictMock<android::mock::HWComposer>();
-    mEngine.setHwComposer(std::unique_ptr<android::HWComposer>(hwc));
+    mEngine.setHwComposer(static_cast<android::HWComposer*>(hwc));
 
     EXPECT_EQ(hwc, &mEngine.getHwComposer());
 }
@@ -90,19 +117,21 @@ struct CompositionEnginePresentTest : public CompositionEngineTest {
         // These are the overridable functions CompositionEngine::present() may
         // call, and have separate test coverage.
         MOCK_METHOD1(preComposition, void(CompositionRefreshArgs&));
+        MOCK_METHOD1(postComposition, void(CompositionRefreshArgs&));
     };
 
     StrictMock<CompositionEnginePartialMock> mEngine;
 };
 
-TEST_F(CompositionEnginePresentTest, worksWithEmptyRequest) {
-    // present() always calls preComposition()
+TEST_F(CompositionEnginePresentTest, zeroOutputs) {
+    // present() always calls preComposition() and postComposition()
     EXPECT_CALL(mEngine, preComposition(Ref(mRefreshArgs)));
+    EXPECT_CALL(mEngine, postComposition(Ref(mRefreshArgs)));
 
     mEngine.present(mRefreshArgs);
 }
 
-TEST_F(CompositionEnginePresentTest, worksAsExpected) {
+TEST_F(CompositionEnginePresentTest, threeOutputs) {
     // Expect calls to in a certain sequence
     InSequence seq;
 
@@ -114,9 +143,7 @@ TEST_F(CompositionEnginePresentTest, worksAsExpected) {
     EXPECT_CALL(*mOutput2, prepare(Ref(mRefreshArgs), _));
     EXPECT_CALL(*mOutput3, prepare(Ref(mRefreshArgs), _));
 
-    // All of mOutput<i> are StrictMocks. If the flag is true, it will introduce
-    // calls to getDisplayId, which are not relevant to this test.
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, false);
+    EXPECT_CALL(*mOutput1, supportsOffloadPresent).WillOnce(Return(false));
 
     // The last step is to actually present each output.
     EXPECT_CALL(*mOutput1, present(Ref(mRefreshArgs)))
@@ -125,6 +152,9 @@ TEST_F(CompositionEnginePresentTest, worksAsExpected) {
             .WillOnce(Return(ftl::yield<std::monostate>({})));
     EXPECT_CALL(*mOutput3, present(Ref(mRefreshArgs)))
             .WillOnce(Return(ftl::yield<std::monostate>({})));
+
+    // present() always calls postComposition()
+    EXPECT_CALL(mEngine, postComposition(Ref(mRefreshArgs)));
 
     mRefreshArgs.outputs = {mOutput1, mOutput2, mOutput3};
     mEngine.present(mRefreshArgs);
@@ -214,6 +244,7 @@ struct CompositionTestPreComposition : public CompositionEngineTest {
 
 TEST_F(CompositionTestPreComposition, preCompositionSetsFrameTimestamp) {
     const nsecs_t before = systemTime(SYSTEM_TIME_MONOTONIC);
+    mRefreshArgs.refreshStartTime = systemTime(SYSTEM_TIME_MONOTONIC);
     mEngine.preComposition(mRefreshArgs);
     const nsecs_t after = systemTime(SYSTEM_TIME_MONOTONIC);
 
@@ -226,12 +257,9 @@ TEST_F(CompositionTestPreComposition, preCompositionInvokesLayerPreCompositionWi
     nsecs_t ts1 = 0;
     nsecs_t ts2 = 0;
     nsecs_t ts3 = 0;
-    EXPECT_CALL(*mLayer1FE, onPreComposition(_, _))
-            .WillOnce(DoAll(SaveArg<0>(&ts1), Return(false)));
-    EXPECT_CALL(*mLayer2FE, onPreComposition(_, _))
-            .WillOnce(DoAll(SaveArg<0>(&ts2), Return(false)));
-    EXPECT_CALL(*mLayer3FE, onPreComposition(_, _))
-            .WillOnce(DoAll(SaveArg<0>(&ts3), Return(false)));
+    EXPECT_CALL(*mLayer1FE, onPreComposition(_)).WillOnce(DoAll(SaveArg<0>(&ts1), Return(false)));
+    EXPECT_CALL(*mLayer2FE, onPreComposition(_)).WillOnce(DoAll(SaveArg<0>(&ts2), Return(false)));
+    EXPECT_CALL(*mLayer3FE, onPreComposition(_)).WillOnce(DoAll(SaveArg<0>(&ts3), Return(false)));
 
     mRefreshArgs.outputs = {mOutput1};
     mRefreshArgs.layers = {mLayer1FE, mLayer2FE, mLayer3FE};
@@ -245,9 +273,9 @@ TEST_F(CompositionTestPreComposition, preCompositionInvokesLayerPreCompositionWi
 }
 
 TEST_F(CompositionTestPreComposition, preCompositionDefaultsToNoUpdateNeeded) {
-    EXPECT_CALL(*mLayer1FE, onPreComposition(_, _)).WillOnce(Return(false));
-    EXPECT_CALL(*mLayer2FE, onPreComposition(_, _)).WillOnce(Return(false));
-    EXPECT_CALL(*mLayer3FE, onPreComposition(_, _)).WillOnce(Return(false));
+    EXPECT_CALL(*mLayer1FE, onPreComposition(_)).WillOnce(Return(false));
+    EXPECT_CALL(*mLayer2FE, onPreComposition(_)).WillOnce(Return(false));
+    EXPECT_CALL(*mLayer3FE, onPreComposition(_)).WillOnce(Return(false));
 
     mEngine.setNeedsAnotherUpdateForTest(true);
 
@@ -262,9 +290,9 @@ TEST_F(CompositionTestPreComposition, preCompositionDefaultsToNoUpdateNeeded) {
 
 TEST_F(CompositionTestPreComposition,
        preCompositionSetsNeedsAnotherUpdateIfAtLeastOneLayerRequestsIt) {
-    EXPECT_CALL(*mLayer1FE, onPreComposition(_, _)).WillOnce(Return(true));
-    EXPECT_CALL(*mLayer2FE, onPreComposition(_, _)).WillOnce(Return(false));
-    EXPECT_CALL(*mLayer3FE, onPreComposition(_, _)).WillOnce(Return(false));
+    EXPECT_CALL(*mLayer1FE, onPreComposition(_)).WillOnce(Return(true));
+    EXPECT_CALL(*mLayer2FE, onPreComposition(_)).WillOnce(Return(false));
+    EXPECT_CALL(*mLayer3FE, onPreComposition(_)).WillOnce(Return(false));
 
     mRefreshArgs.outputs = {mOutput1};
     mRefreshArgs.layers = {mLayer1FE, mLayer2FE, mLayer3FE};
@@ -283,8 +311,6 @@ struct CompositionEngineOffloadTest : public testing::Test {
     std::shared_ptr<mock::Output> mVirtualDisplay{std::make_shared<StrictMock<mock::Output>>()};
     std::shared_ptr<mock::Output> mHalVirtualDisplay{std::make_shared<StrictMock<mock::Output>>()};
 
-    static constexpr PhysicalDisplayId kDisplayId1 = PhysicalDisplayId::fromPort(123u);
-    static constexpr PhysicalDisplayId kDisplayId2 = PhysicalDisplayId::fromPort(234u);
     static constexpr GpuVirtualDisplayId kGpuVirtualDisplayId{789u};
     static constexpr HalVirtualDisplayId kHalVirtualDisplayId{456u};
 
@@ -293,12 +319,23 @@ struct CompositionEngineOffloadTest : public testing::Test {
     void SetUp() override {
         EXPECT_CALL(*mDisplay1, getDisplayId)
                 .WillRepeatedly(Return(std::make_optional<DisplayId>(kDisplayId1)));
+        EXPECT_CALL(*mDisplay1, getDisplayIdVariant).WillRepeatedly(Return(kDisplayId1));
+
         EXPECT_CALL(*mDisplay2, getDisplayId)
                 .WillRepeatedly(Return(std::make_optional<DisplayId>(kDisplayId2)));
+        EXPECT_CALL(*mDisplay2, getDisplayIdVariant).WillRepeatedly(Return(kDisplayId2));
+
         EXPECT_CALL(*mVirtualDisplay, getDisplayId)
                 .WillRepeatedly(Return(std::make_optional<DisplayId>(kGpuVirtualDisplayId)));
+        const DisplayIdVariant gpuVariant =
+                GpuVirtualDisplayId::fromValue(kGpuVirtualDisplayId.value);
+        EXPECT_CALL(*mVirtualDisplay, getDisplayIdVariant).WillRepeatedly(Return(gpuVariant));
+
         EXPECT_CALL(*mHalVirtualDisplay, getDisplayId)
                 .WillRepeatedly(Return(std::make_optional<DisplayId>(kHalVirtualDisplayId)));
+        const DisplayIdVariant halVariant =
+                HalVirtualDisplayId::fromValue(kHalVirtualDisplayId.value);
+        EXPECT_CALL(*mHalVirtualDisplay, getDisplayIdVariant).WillRepeatedly(Return(halVariant));
 
         // Most tests will depend on the outputs being enabled.
         for (auto& state : mOutputStates) {
@@ -331,7 +368,6 @@ TEST_F(CompositionEngineOffloadTest, basic) {
     EXPECT_CALL(*mDisplay1, offloadPresentNextFrame).Times(1);
     EXPECT_CALL(*mDisplay2, offloadPresentNextFrame).Times(0);
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
     setOutputs({mDisplay1, mDisplay2});
 
     mEngine.present(mRefreshArgs);
@@ -344,7 +380,6 @@ TEST_F(CompositionEngineOffloadTest, dependsOnSupport) {
     EXPECT_CALL(*mDisplay1, offloadPresentNextFrame).Times(0);
     EXPECT_CALL(*mDisplay2, offloadPresentNextFrame).Times(0);
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
     setOutputs({mDisplay1, mDisplay2});
 
     mEngine.present(mRefreshArgs);
@@ -357,20 +392,6 @@ TEST_F(CompositionEngineOffloadTest, dependsOnSupport2) {
     EXPECT_CALL(*mDisplay1, offloadPresentNextFrame).Times(0);
     EXPECT_CALL(*mDisplay2, offloadPresentNextFrame).Times(0);
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
-    setOutputs({mDisplay1, mDisplay2});
-
-    mEngine.present(mRefreshArgs);
-}
-
-TEST_F(CompositionEngineOffloadTest, dependsOnFlag) {
-    EXPECT_CALL(*mDisplay1, supportsOffloadPresent).Times(0);
-    EXPECT_CALL(*mDisplay2, supportsOffloadPresent).Times(0);
-
-    EXPECT_CALL(*mDisplay1, offloadPresentNextFrame).Times(0);
-    EXPECT_CALL(*mDisplay2, offloadPresentNextFrame).Times(0);
-
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, false);
     setOutputs({mDisplay1, mDisplay2});
 
     mEngine.present(mRefreshArgs);
@@ -381,7 +402,6 @@ TEST_F(CompositionEngineOffloadTest, oneDisplay) {
 
     EXPECT_CALL(*mDisplay1, offloadPresentNextFrame).Times(0);
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
     setOutputs({mDisplay1});
 
     mEngine.present(mRefreshArgs);
@@ -396,7 +416,6 @@ TEST_F(CompositionEngineOffloadTest, virtualDisplay) {
     EXPECT_CALL(*mDisplay2, offloadPresentNextFrame).Times(0);
     EXPECT_CALL(*mVirtualDisplay, offloadPresentNextFrame).Times(0);
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
     setOutputs({mDisplay1, mDisplay2, mVirtualDisplay});
 
     mEngine.present(mRefreshArgs);
@@ -409,7 +428,6 @@ TEST_F(CompositionEngineOffloadTest, virtualDisplay2) {
     EXPECT_CALL(*mDisplay1, offloadPresentNextFrame).Times(0);
     EXPECT_CALL(*mVirtualDisplay, offloadPresentNextFrame).Times(0);
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
     setOutputs({mDisplay1, mVirtualDisplay});
 
     mEngine.present(mRefreshArgs);
@@ -422,7 +440,6 @@ TEST_F(CompositionEngineOffloadTest, halVirtual) {
     EXPECT_CALL(*mDisplay1, offloadPresentNextFrame).Times(1);
     EXPECT_CALL(*mHalVirtualDisplay, offloadPresentNextFrame).Times(0);
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
     setOutputs({mDisplay1, mHalVirtualDisplay});
 
     mEngine.present(mRefreshArgs);
@@ -439,7 +456,6 @@ TEST_F(CompositionEngineOffloadTest, ordering) {
     EXPECT_CALL(*mDisplay1, offloadPresentNextFrame).Times(1);
     EXPECT_CALL(*mDisplay2, offloadPresentNextFrame).Times(0);
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
     setOutputs({mVirtualDisplay, mHalVirtualDisplay, mDisplay1, mDisplay2});
 
     mEngine.present(mRefreshArgs);
@@ -457,7 +473,6 @@ TEST_F(CompositionEngineOffloadTest, dependsOnEnabled) {
     EXPECT_CALL(*mDisplay1, offloadPresentNextFrame).Times(0);
     EXPECT_CALL(*mDisplay2, offloadPresentNextFrame).Times(0);
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
     setOutputs({mDisplay1, mDisplay2});
 
     mEngine.present(mRefreshArgs);
@@ -477,10 +492,66 @@ TEST_F(CompositionEngineOffloadTest, disabledDisplaysDoNotPreventOthersFromOfflo
     EXPECT_CALL(*mDisplay2, offloadPresentNextFrame).Times(0);
     EXPECT_CALL(*mHalVirtualDisplay, offloadPresentNextFrame).Times(0);
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
     setOutputs({mDisplay1, mDisplay2, mHalVirtualDisplay});
 
     mEngine.present(mRefreshArgs);
+}
+
+struct CompositionEnginePostCompositionTest : public CompositionEngineTest {
+    sp<StrictMock<mock::LayerFE>> mLayer1FE = sp<StrictMock<mock::LayerFE>>::make();
+    sp<StrictMock<mock::LayerFE>> mLayer2FE = sp<StrictMock<mock::LayerFE>>::make();
+    sp<StrictMock<mock::LayerFE>> mLayer3FE = sp<StrictMock<mock::LayerFE>>::make();
+};
+
+TEST_F(CompositionEnginePostCompositionTest, postCompositionReleasesAllFences) {
+    if (FlagManager::getInstance().force_slower_follower_gpu_composition()) {
+        // No point in sending a real fence since Fence::merge() will clobber it to a NO_FENCE
+        // anyways.
+        EXPECT_CALL(*mLayer3FE, getAndClearLastClientTargetAcquireFence())
+                .WillOnce(Return(Fence::NO_FENCE));
+    }
+    EXPECT_CALL(*mLayer1FE, getReleaseFencePromiseStatus)
+            .WillOnce(Return(LayerFE::ReleaseFencePromiseStatus::FULFILLED));
+    EXPECT_CALL(*mLayer2FE, getReleaseFencePromiseStatus)
+            .WillOnce(Return(LayerFE::ReleaseFencePromiseStatus::FULFILLED));
+    EXPECT_CALL(*mLayer3FE, getReleaseFencePromiseStatus)
+            .WillOnce(Return(LayerFE::ReleaseFencePromiseStatus::INITIALIZED));
+    mRefreshArgs.layers = {mLayer1FE, mLayer2FE, mLayer3FE};
+
+    EXPECT_CALL(*mLayer1FE, setReleaseFence(_)).Times(0);
+    EXPECT_CALL(*mLayer2FE, setReleaseFence(_)).Times(0);
+    EXPECT_CALL(*mLayer3FE, setReleaseFence(_)).Times(1);
+
+    mEngine.postComposition(mRefreshArgs);
+}
+
+TEST_F(CompositionEnginePostCompositionTest, postCompositionReleaseFenceFromLastClientAcquire) {
+    SET_FLAG_FOR_TEST(flags::force_slower_follower_gpu_composition, true);
+
+    EXPECT_CALL(*mLayer1FE, getReleaseFencePromiseStatus)
+            .WillOnce(Return(LayerFE::ReleaseFencePromiseStatus::FULFILLED));
+    EXPECT_CALL(*mLayer2FE, getReleaseFencePromiseStatus)
+            .WillOnce(Return(LayerFE::ReleaseFencePromiseStatus::INITIALIZED));
+    EXPECT_CALL(*mLayer3FE, getReleaseFencePromiseStatus)
+            .WillOnce(Return(LayerFE::ReleaseFencePromiseStatus::INITIALIZED));
+    mRefreshArgs.layers = {mLayer1FE, mLayer2FE};
+    mRefreshArgs.layersWithQueuedFrames = {mLayer3FE};
+
+    sp<Fence> layer2Fence = sp<Fence>::make();
+    sp<Fence> layer3Fence = sp<Fence>::make();
+    EXPECT_CALL(*mLayer1FE, getAndClearLastClientTargetAcquireFence()).Times(0);
+    EXPECT_CALL(*mLayer2FE, getAndClearLastClientTargetAcquireFence())
+            .WillOnce(Return(layer2Fence));
+    EXPECT_CALL(*mLayer3FE, getAndClearLastClientTargetAcquireFence())
+            .WillOnce(Return(layer3Fence));
+
+    FenceResult layer2FenceResult(layer2Fence);
+    FenceResult layer3FenceResult(layer3Fence);
+    EXPECT_CALL(*mLayer1FE, setReleaseFence(_)).Times(0);
+    EXPECT_CALL(*mLayer2FE, setReleaseFence(layer2FenceResult)).Times(1);
+    EXPECT_CALL(*mLayer3FE, setReleaseFence(layer3FenceResult)).Times(1);
+
+    mEngine.postComposition(mRefreshArgs);
 }
 
 } // namespace

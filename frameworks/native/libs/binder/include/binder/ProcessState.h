@@ -31,8 +31,14 @@
 // ---------------------------------------------------------------------------
 namespace android {
 
-class IPCThreadState;
+#if defined(LIBBINDER_BINDER_OBSERVER) && defined(BINDER_WITH_KERNEL_IPC)
+#define BINDER_WITH_OBSERVERS
+#endif
 
+class IPCThreadState;
+#ifdef BINDER_WITH_OBSERVERS
+class BinderObserver;
+#endif
 /**
  * Kernel binder process state. All operations here refer to kernel binder. This
  * object is allocated per process.
@@ -40,6 +46,10 @@ class IPCThreadState;
 class ProcessState : public virtual RefBase {
 public:
     LIBBINDER_EXPORTED static sp<ProcessState> self();
+    // The behavior is the same as self() if kernel binder is enabled for this
+    // process (can it reach the binder device node). If not, this returns null
+    // and does not create a ProcessState object.
+    LIBBINDER_EXPORTED static sp<ProcessState> selfIfKernelBinderEnabled();
     LIBBINDER_EXPORTED static sp<ProcessState> selfOrNull();
 
     LIBBINDER_EXPORTED static bool isVndservicemanagerEnabled();
@@ -133,12 +143,15 @@ public:
     enum class DriverFeature {
         ONEWAY_SPAM_DETECTION,
         EXTENDED_ERROR,
+        FREEZE_NOTIFICATION,
     };
     // Determine whether a feature is supported by the binder driver.
     LIBBINDER_EXPORTED static bool isDriverFeatureEnabled(const DriverFeature feature);
 
 private:
     static sp<ProcessState> init(const char* defaultDriver, bool requireDefault);
+
+    void checkExpectingThreadPoolStart() const;
 
     static void onFork();
     static void parentPostFork();
@@ -188,10 +201,13 @@ private:
     Vector<handle_entry> mHandleToObject;
 
     bool mForked;
-    bool mThreadPoolStarted;
-    volatile int32_t mThreadPoolSeq;
+    std::atomic_bool mThreadPoolStarted;
+    std::atomic_int32_t mThreadPoolSeq;
 
     CallRestriction mCallRestriction;
+#ifdef BINDER_WITH_OBSERVERS
+    std::unique_ptr<BinderObserver> mBinderObserver;
+#endif
 };
 
 } // namespace android

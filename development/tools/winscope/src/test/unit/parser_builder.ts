@@ -14,22 +14,31 @@
  * limitations under the License.
  */
 
-import {Timestamp} from 'common/time';
-import {NO_TIMEZONE_OFFSET_FACTORY} from 'common/timestamp_factory';
+import {Timestamp} from 'common/time/time';
+import {makeRealTimestamp} from 'test/unit/time_test_helpers';
 import {
+  CustomQueryParamTypeMap,
   CustomQueryParserResultTypeMap,
   CustomQueryType,
-} from 'trace/custom_query';
-import {Parser} from 'trace/parser';
-import {ParserMock} from 'trace/parser_mock';
-import {TraceType} from 'trace/trace_type';
+} from 'trace_api/custom_query';
+import {Parser} from 'trace_api/parser';
+import {ParserMock} from 'trace_api/parser_mock';
+import {TraceType} from 'trace_api/trace_type';
 
 export class ParserBuilder<T> {
   private type = TraceType.SURFACE_FLINGER;
   private entries?: T[];
   private timestamps?: Timestamp[];
-  private customQueryResult = new Map<CustomQueryType, {}>();
+  private customQueryResult = new Map<
+    CustomQueryType,
+    Map<
+      CustomQueryParamTypeMap[CustomQueryType],
+      CustomQueryParserResultTypeMap[CustomQueryType]
+    >
+  >();
   private descriptors = ['file descriptor'];
+  private noOffsets = false;
+  private isCorrupted = false;
 
   setType(type: TraceType): this {
     this.type = type;
@@ -46,11 +55,26 @@ export class ParserBuilder<T> {
     return this;
   }
 
-  setCustomQueryResult<Q extends CustomQueryType>(
-    type: Q,
-    result: CustomQueryParserResultTypeMap[Q],
+  setNoOffsets(value: boolean): this {
+    this.noOffsets = value;
+    return this;
+  }
+
+  setIsCorrupted(value: boolean): this {
+    this.isCorrupted = value;
+    return this;
+  }
+
+  setCustomQueryResult(
+    queryResult: Map<
+      CustomQueryType,
+      Map<
+        CustomQueryParamTypeMap[CustomQueryType],
+        CustomQueryParserResultTypeMap[CustomQueryType]
+      >
+    >,
   ): this {
-    this.customQueryResult.set(type, result);
+    this.customQueryResult = queryResult;
     return this;
   }
 
@@ -86,13 +110,15 @@ export class ParserBuilder<T> {
       this.entries,
       this.customQueryResult,
       this.descriptors,
+      this.noOffsets,
+      this.isCorrupted,
     );
   }
 
   private createTimestamps(entries: T[]): Timestamp[] {
     const timestamps = new Array<Timestamp>();
     for (let i = 0; i < entries.length; ++i) {
-      timestamps[i] = NO_TIMEZONE_OFFSET_FACTORY.makeRealTimestamp(BigInt(i));
+      timestamps[i] = makeRealTimestamp(BigInt(i));
     }
     return timestamps;
   }

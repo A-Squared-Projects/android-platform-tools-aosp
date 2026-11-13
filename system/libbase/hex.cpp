@@ -38,5 +38,36 @@ std::string HexString(const void* bytes, size_t len) {
   return result;
 }
 
+static uint8_t HexNybbleToValue(char c) {
+  if (c >= '0' && c <= '9') {
+    return c - '0';
+  }
+  if (c >= 'a' && c <= 'f') {
+    return c - 'a' + 10;
+  }
+  if (c >= 'A' && c <= 'Z') {
+    return c - 'A' + 10;
+  }
+  return 0xff;
+}
+
+bool HexToBytes(const std::string& hex, std::vector<uint8_t>* bytes) {
+  if (hex.size() % 2 != 0) {
+    LOG(ERROR) << "HexToBytes: Invalid size: " << hex.size();
+    return false;
+  }
+  bytes->resize(hex.size() / 2);
+  for (unsigned i = 0; i < bytes->size(); i++) {
+    uint8_t hi = HexNybbleToValue(hex[i * 2]);
+    uint8_t lo = HexNybbleToValue(hex[i * 2 + 1]);
+    if (lo > 0xf || hi > 0xf) {
+      LOG(ERROR) << "HexToBytes: Invalid characters: " << hex[i * 2] << ", " << hex[i * 2 + 1];
+      return false;
+    }
+    (*bytes)[i] = (hi << 4) | lo;
+  }
+  return true;
+}
+
 }  // namespace base
 }  // namespace android

@@ -47,32 +47,36 @@ void CursorButtonAccumulator::clearButtons() {
     mBtnTask = 0;
 }
 
-void CursorButtonAccumulator::process(const RawEvent* rawEvent) {
-    if (rawEvent->type == EV_KEY) {
-        switch (rawEvent->code) {
+void CursorButtonAccumulator::setSwapLeftRightButtons(bool shouldSwap) {
+    mSwapLeftRightButtons = shouldSwap;
+}
+
+void CursorButtonAccumulator::process(const RawEvent& rawEvent) {
+    if (rawEvent.type == EV_KEY) {
+        switch (rawEvent.code) {
             case BTN_LEFT:
-                mBtnLeft = rawEvent->value;
+                mBtnLeft = rawEvent.value;
                 break;
             case BTN_RIGHT:
-                mBtnRight = rawEvent->value;
+                mBtnRight = rawEvent.value;
                 break;
             case BTN_MIDDLE:
-                mBtnMiddle = rawEvent->value;
+                mBtnMiddle = rawEvent.value;
                 break;
             case BTN_BACK:
-                mBtnBack = rawEvent->value;
+                mBtnBack = rawEvent.value;
                 break;
             case BTN_SIDE:
-                mBtnSide = rawEvent->value;
+                mBtnSide = rawEvent.value;
                 break;
             case BTN_FORWARD:
-                mBtnForward = rawEvent->value;
+                mBtnForward = rawEvent.value;
                 break;
             case BTN_EXTRA:
-                mBtnExtra = rawEvent->value;
+                mBtnExtra = rawEvent.value;
                 break;
             case BTN_TASK:
-                mBtnTask = rawEvent->value;
+                mBtnTask = rawEvent.value;
                 break;
         }
     }
@@ -81,10 +85,12 @@ void CursorButtonAccumulator::process(const RawEvent* rawEvent) {
 uint32_t CursorButtonAccumulator::getButtonState() const {
     uint32_t result = 0;
     if (mBtnLeft) {
-        result |= AMOTION_EVENT_BUTTON_PRIMARY;
+        result |= mSwapLeftRightButtons ? AMOTION_EVENT_BUTTON_SECONDARY
+                                        : AMOTION_EVENT_BUTTON_PRIMARY;
     }
     if (mBtnRight) {
-        result |= AMOTION_EVENT_BUTTON_SECONDARY;
+        result |= mSwapLeftRightButtons ? AMOTION_EVENT_BUTTON_PRIMARY
+                                        : AMOTION_EVENT_BUTTON_SECONDARY;
     }
     if (mBtnMiddle) {
         result |= AMOTION_EVENT_BUTTON_TERTIARY;

@@ -24,7 +24,10 @@
 #include <binder/IResultReceiver.h>
 #include <binder/Parcel.h>
 #include <binder/PermissionCache.h>
+#include <com_android_graphics_graphicsenv_flags.h>
 #include <cutils/properties.h>
+#include <cutils/multiuser.h>
+#include <feature_override/FeatureOverrideParser.h>
 #include <gpumem/GpuMem.h>
 #include <gpuwork/GpuWork.h>
 #include <gpustats/GpuStats.h>
@@ -37,6 +40,8 @@
 
 #include <thread>
 #include <memory>
+
+namespace graphicsenv_flags = com::android::graphics::graphicsenv::flags;
 
 namespace android {
 
@@ -55,11 +60,14 @@ const std::string sAngleGlesDriverSuffix = "angle";
 
 const char* const GpuService::SERVICE_NAME = "gpu";
 
+const std::string kConfigFilePath = "/system/etc/angle/feature_config_vk.binarypb";
+
 GpuService::GpuService()
       : mGpuMem(std::make_shared<GpuMem>()),
         mGpuWork(std::make_shared<gpuwork::GpuWork>()),
         mGpuStats(std::make_unique<GpuStats>()),
-        mGpuMemTracer(std::make_unique<GpuMemTracer>()) {
+        mGpuMemTracer(std::make_unique<GpuMemTracer>()),
+        mFeatureOverrideParser(kConfigFilePath) {
 
     mGpuMemAsyncInitThread = std::make_unique<std::thread>([this] (){
         mGpuMem->initialize();
@@ -100,6 +108,12 @@ void GpuService::setTargetStatsArray(const std::string& appPackageName,
     mGpuStats->insertTargetStatsArray(appPackageName, driverVersionCode, stats, values, valueCount);
 }
 
+void GpuService::addVulkanEngineName(const std::string& appPackageName,
+                                     const uint64_t driverVersionCode,
+                                     const char* engineName) {
+    mGpuStats->addVulkanEngineName(appPackageName, driverVersionCode, engineName);
+}
+
 void GpuService::toggleAngleAsSystemDriver(bool enabled) {
     IPCThreadState* ipc = IPCThreadState::self();
     const int pid = ipc->getCallingPid();
@@ -107,10 +121,12 @@ void GpuService::toggleAngleAsSystemDriver(bool enabled) {
 
     // only system_server with the ACCESS_GPU_SERVICE permission is allowed to set
     // persist.graphics.egl
-    if (uid != AID_SYSTEM ||
+    // retrieve the appid of Settings app on multiuser builds
+    const int multiuserappid = multiuser_get_app_id(uid);
+    if (multiuserappid != AID_SYSTEM ||
         !PermissionCache::checkPermission(sAccessGpuServicePermission, pid, uid)) {
         ALOGE("Permission Denial: can't set persist.graphics.egl from setAngleAsSystemDriver() "
-                "pid=%d, uid=%d\n", pid, uid);
+                "pid=%d, uid=%d\n, multiuserappid=%d", pid, uid, multiuserappid);
         return;
     }
 
@@ -122,6 +138,18 @@ void GpuService::toggleAngleAsSystemDriver(bool enabled) {
     }
 }
 
+std::string GpuService::getPersistGraphicsEgl() {
+    std::lock_guard<std::mutex> lock(mLock);
+    return android::base::GetProperty("persist.graphics.egl", "");
+}
+
+void GpuService::getFeatureOverrides(FeatureOverrides& featureOverrides) {
+    featureOverrides = mFeatureOverrideParser.getCachedFeatureOverrides();
+}
+
+const FeatureOverrides &GpuService::getCachedFeatureOverrides() {
+    return mFeatureOverrideParser.getCachedFeatureOverrides();
+}
 
 void GpuService::setUpdatableDriverPath(const std::string& driverPath) {
     IPCThreadState* ipc = IPCThreadState::self();
@@ -150,7 +178,11 @@ status_t GpuService::shellCommand(int /*in*/, int out, int err, std::vector<Stri
     for (size_t i = 0, n = args.size(); i < n; i++)
         ALOGV("  arg[%zu]: '%s'", i, String8(args[i]).c_str());
 
-    if (args.size() >= 1) {
+    if (!args.empty()) {
+        if (graphicsenv_flags::angle_feature_overrides()) {
+            if (args[0] == String16("featureOverrides"))
+                return cmdFeatureOverrides(out, err);
+        }
         if (args[0] == String16("vkjson")) return cmdVkjson(out, err);
         if (args[0] == String16("vkprofiles")) return cmdVkprofiles(out, err);
         if (args[0] == String16("help")) return cmdHelp(out);
@@ -214,6 +246,12 @@ status_t GpuService::doDump(int fd, const Vector<String16>& args, bool /*asProto
     return NO_ERROR;
 }
 
+status_t GpuService::cmdFeatureOverrides(int out, int /*err*/) {
+    const FeatureOverrides &featureOverrides = mFeatureOverrideParser.getCachedFeatureOverrides();
+    dprintf(out, "%s\n", featureOverrides.toString().c_str());
+    return NO_ERROR;
+}
+
 namespace {
 
 status_t cmdHelp(int out) {
@@ -226,6 +264,10 @@ status_t cmdHelp(int out) {
             "GPU Service commands:\n"
             "  vkjson      dump Vulkan properties as JSON\n"
             "  vkprofiles  print support for select Vulkan profiles\n");
+    if (graphicsenv_flags::angle_feature_overrides()) {
+        fprintf(outs,
+                "  featureOverrides  update and output gpuservice's feature overrides\n");
+    }
     fclose(outs);
     return NO_ERROR;
 }

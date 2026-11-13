@@ -13,11 +13,68 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {PresenterInputMethod} from 'viewers/common/presenter_input_method';
+import {createPersistentStoreProxy} from 'common/store/persistent_store_proxy';
+import {Store} from 'common/store/store';
+import {Trace} from 'trace_api/trace';
+import {TraceType} from 'trace_api/trace_type';
+import {Traces} from 'trace_api/traces';
+import {HierarchyTreeNode} from 'tree_node/hierarchy_tree_node';
+import {NotifyHierarchyViewCallbackType} from 'viewers/common/abstract_hierarchy_viewer_presenter';
+import {AbstractPresenterInputMethod} from 'viewers/common/abstract_presenter_input_method';
+import {VISIBLE_CHIP} from 'viewers/common/chip';
+import {HierarchyPresenter} from 'viewers/common/hierarchy_presenter';
+import {ImeUiData} from 'viewers/common/ime_ui_data';
+import {UpdateSfSubtreeDisplayNames} from 'viewers/common/operations/update_sf_subtree_display_names';
+import {TableProperties} from 'viewers/common/table_properties';
+import {TextFilter} from 'viewers/common/text_filter';
+import {UserOptions} from 'viewers/common/user_options';
+import {UpdateDisplayNames} from './operations/update_display_names';
 
-export class PresenterInputMethodClients extends PresenterInputMethod {
-  protected updateHierarchyTableProperties() {
-    const client = this.entry?.getChildByName('client');
+export class PresenterInputMethodClients extends AbstractPresenterInputMethod {
+  protected override hierarchyPresenter = new HierarchyPresenter(
+    createPersistentStoreProxy<UserOptions>(
+      'ImeHierarchyOptions',
+      {
+        simplifyNames: {
+          name: 'Simplify names',
+          enabled: true,
+        },
+        showOnlyVisible: {
+          name: 'Show only',
+          chip: VISIBLE_CHIP,
+          enabled: false,
+        },
+        flat: {
+          name: 'Flat',
+          enabled: false,
+        },
+      },
+      this.storage,
+    ),
+    new TextFilter(),
+    [],
+    true,
+    false,
+    this.getHierarchyTreeNameStrategy,
+    [
+      [TraceType.SURFACE_FLINGER, [new UpdateSfSubtreeDisplayNames()]],
+      [TraceType.INPUT_METHOD_CLIENTS, [new UpdateDisplayNames()]],
+    ],
+  );
+  constructor(
+    trace: Trace<HierarchyTreeNode>,
+    traces: Traces,
+    storage: Store,
+    notifyViewCallback: NotifyHierarchyViewCallbackType<ImeUiData>,
+  ) {
+    super(trace, traces, storage, notifyViewCallback);
+  }
+
+  protected override getHierarchyTableProperties(): TableProperties {
+    const client = this.hierarchyPresenter
+      .getCurrentHierarchyTreesForTrace(this.imeTrace)
+      ?.at(0)
+      ?.getChildByName('client');
     const curId = client
       ?.getEagerPropertyByName('inputMethodManager')
       ?.getChildByName('curId')

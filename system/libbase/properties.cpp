@@ -17,53 +17,103 @@
 #include "android-base/properties.h"
 
 #if defined(__BIONIC__)
-#define _REALLY_INCLUDE_SYS__SYSTEM_PROPERTIES_H_
 #include <sys/system_properties.h>
-#include <sys/_system_properties.h>
 #endif
 
 #include <algorithm>
 #include <chrono>
 #include <limits>
-#include <map>
+#include <set>
 #include <string>
 
 #include <android-base/parsebool.h>
 #include <android-base/parseint.h>
 #include <android-base/strings.h>
+#include <android-base/thread_annotations.h>
 
 #if !defined(__BIONIC__)
 
+// Here lies a rudimentary implementation of system properties for non-Bionic
+// platforms. We are using weak symbols here because we want to allow
+// downstream users of libbase to override with their own implementation.
+// For example, on Ravenwood (host-side testing for platform development)
+// we'd love to be able to fully control system properties exposed to tests,
+// so we reimplement the entire system properties API there.
+
+#if defined(__linux__)
+// Weak symbols are not supported on Windows, and to prevent unnecessary
+// complications, we strictly limit the use of weak symbols to Linux.
+#define SYSPROP_WEAK __attribute__((weak))
+#else
+#define SYSPROP_WEAK
+#endif
+
 #define PROP_VALUE_MAX 92
 
-static std::map<std::string, std::string>& g_properties = *new std::map<std::string, std::string>;
+struct prop_info {
+  std::string key;
+  mutable std::string value;
+  mutable uint32_t serial;
 
-int __system_property_set(const char* key, const char* value) {
+  prop_info(const char* key, const char* value) : key(key), value(value), serial(0) {}
+};
+
+struct prop_info_cmp {
+  using is_transparent = void;
+  bool operator()(const prop_info& lhs, const prop_info& rhs) const { return lhs.key < rhs.key; }
+  bool operator()(std::string_view lhs, const prop_info& rhs) const { return lhs < rhs.key; }
+  bool operator()(const prop_info& lhs, std::string_view rhs) const { return lhs.key < rhs; }
+};
+
+static auto& g_properties_lock = *new std::mutex;
+static auto& g_properties GUARDED_BY(g_properties_lock) = *new std::set<prop_info, prop_info_cmp>;
+
+SYSPROP_WEAK int __system_property_set(const char* key, const char* value) {
   if (key == nullptr || *key == '\0') return -1;
   if (value == nullptr) value = "";
-
   bool read_only = !strncmp(key, "ro.", 3);
-  if (read_only) {
-    const auto [it, success] = g_properties.insert({key, value});
-    return success ? 0 : -1;
-  }
+  if (!read_only && strlen(value) >= PROP_VALUE_MAX) return -1;
 
-  if (strlen(value) >= 92) return -1;
-  g_properties[key] = value;
+  std::lock_guard lock(g_properties_lock);
+  auto [it, success] = g_properties.emplace(key, value);
+  if (read_only) return success ? 0 : -1;
+  if (!success) {
+    it->value = value;
+    ++it->serial;
+  }
   return 0;
 }
 
-int __system_property_get(const char* key, char* value) {
+SYSPROP_WEAK int __system_property_get(const char* key, char* value) {
+  std::lock_guard lock(g_properties_lock);
   auto it = g_properties.find(key);
   if (it == g_properties.end()) {
     *value = '\0';
     return 0;
   }
-  snprintf(value, PROP_VALUE_MAX, "%s", it->second.c_str());
+  snprintf(value, PROP_VALUE_MAX, "%s", it->value.c_str());
   return strlen(value);
 }
 
-#endif
+SYSPROP_WEAK const prop_info* __system_property_find(const char* key) {
+  std::lock_guard lock(g_properties_lock);
+  auto it = g_properties.find(key);
+  if (it == g_properties.end()) {
+    return nullptr;
+  } else {
+    return &*it;
+  }
+}
+
+SYSPROP_WEAK void __system_property_read_callback(const prop_info* pi,
+                                                  void (*callback)(void*, const char*, const char*,
+                                                                   uint32_t),
+                                                  void* cookie) {
+  std::lock_guard lock(g_properties_lock);
+  callback(cookie, pi->key.c_str(), pi->value.c_str(), pi->serial);
+}
+
+#endif  // __BIONIC__
 
 namespace android {
 namespace base {
@@ -108,22 +158,16 @@ template uint64_t GetUintProperty(const std::string&, uint64_t, uint64_t);
 
 std::string GetProperty(const std::string& key, const std::string& default_value) {
   std::string property_value;
-#if defined(__BIONIC__)
   const prop_info* pi = __system_property_find(key.c_str());
   if (pi == nullptr) return default_value;
 
-  __system_property_read_callback(pi,
-                                  [](void* cookie, const char*, const char* value, unsigned) {
-                                    auto property_value = reinterpret_cast<std::string*>(cookie);
-                                    *property_value = value;
-                                  },
-                                  &property_value);
-#else
-  // TODO: implement host __system_property_find()/__system_property_read_callback()?
-  auto it = g_properties.find(key);
-  if (it == g_properties.end()) return default_value;
-  property_value = it->second;
-#endif
+  __system_property_read_callback(
+      pi,
+      [](void* cookie, const char*, const char* value, unsigned) {
+        auto property_value = reinterpret_cast<std::string*>(cookie);
+        *property_value = value;
+      },
+      &property_value);
   // If the property exists but is empty, also return the default value.
   // Since we can't remove system properties, "empty" is traditionally
   // the same as "missing" (this was true for cutils' property_get).

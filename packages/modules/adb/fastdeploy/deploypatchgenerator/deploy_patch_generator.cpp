@@ -219,7 +219,7 @@ uint64_t DeployPatchGenerator::BuildIdenticalEntries(std::vector<SimpleEntry>& o
     std::unordered_map<md5Digest, std::vector<const APKEntry*>, md5Hash> deviceEntries;
     for (const auto& deviceEntry : deviceApkMetadata.entries()) {
         md5Digest md5;
-        memcpy(&md5, deviceEntry.md5().data(), deviceEntry.md5().size());
+        memcpy(static_cast<void*>(&md5), deviceEntry.md5().data(), deviceEntry.md5().size());
 
         deviceEntries[md5].push_back(&deviceEntry);
     }
@@ -229,7 +229,7 @@ uint64_t DeployPatchGenerator::BuildIdenticalEntries(std::vector<SimpleEntry>& o
         totalSize += localEntry.datasize();
 
         md5Digest md5;
-        memcpy(&md5, localEntry.md5().data(), localEntry.md5().size());
+        memcpy(static_cast<void*>(&md5), localEntry.md5().data(), localEntry.md5().size());
 
         auto deviceEntriesIt = deviceEntries.find(md5);
         if (deviceEntriesIt == deviceEntries.end()) {

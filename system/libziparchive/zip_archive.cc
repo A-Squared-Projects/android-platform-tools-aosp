@@ -37,6 +37,7 @@
 #include <sys/mman.h>
 #endif
 
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -1257,7 +1258,8 @@ class FileWriter final : public zip_archive::Writer {
       return {};
     }
 
-    if (declared_length > SIZE_MAX || declared_length > INT64_MAX) {
+    // fallocate() takes a signed size, so restrict the length to avoid errors.
+    if (declared_length > INT64_MAX) {
       ALOGE("Zip: file size %" PRIu64 " is too large to extract.", declared_length);
       return {};
     }
@@ -1276,7 +1278,7 @@ class FileWriter final : public zip_archive::Writer {
       long result = TEMP_FAILURE_RETRY(fallocate(fd, 0, current_offset, declared_length));
       if (result == -1 && errno == ENOSPC) {
         ALOGE("Zip: unable to allocate %" PRIu64 " bytes at offset %" PRId64 ": %s",
-              declared_length, static_cast<int64_t>(current_offset), strerror(errno));
+              declared_length, current_offset, strerror(errno));
         return {};
       }
     }
@@ -1290,10 +1292,15 @@ class FileWriter final : public zip_archive::Writer {
 
     // Block device doesn't support ftruncate(2).
     if (!S_ISBLK(sb.st_mode)) {
-      long result = TEMP_FAILURE_RETRY(ftruncate(fd, declared_length + current_offset));
+      uint64_t truncate_length;
+      if (__builtin_add_overflow(declared_length, current_offset, &truncate_length)) {
+        ALOGE("Zip: overflow truncating file (length %" PRId64 ", offset %" PRId64 ")",
+              declared_length, current_offset);
+        return {};
+      }
+      long result = TEMP_FAILURE_RETRY(ftruncate(fd, truncate_length));
       if (result == -1) {
-        ALOGE("Zip: unable to truncate file to %" PRId64 ": %s",
-              static_cast<int64_t>(declared_length + current_offset), strerror(errno));
+        ALOGE("Zip: unable to truncate file to %" PRId64 ": %s", truncate_length, strerror(errno));
         return {};
       }
     }
@@ -1303,8 +1310,8 @@ class FileWriter final : public zip_archive::Writer {
 
   virtual bool Append(uint8_t* buf, size_t buf_size) override {
     if (declared_length_ < buf_size || total_bytes_written_ > declared_length_ - buf_size) {
-      ALOGE("Zip: Unexpected size %zu  (declared) vs %zu (actual)", declared_length_,
-            total_bytes_written_ + buf_size);
+      ALOGE("Zip: Unexpected size %" PRIu64 "  (declared) vs %" PRIu64 " (actual)",
+            declared_length_, total_bytes_written_ + buf_size);
       return false;
     }
 
@@ -1319,17 +1326,12 @@ class FileWriter final : public zip_archive::Writer {
   }
 
   explicit FileWriter(const int fd = -1, const uint64_t declared_length = 0)
-      : Writer(),
-        fd_(fd),
-        declared_length_(static_cast<size_t>(declared_length)),
-        total_bytes_written_(0) {
-    CHECK_LE(declared_length, SIZE_MAX);
-  }
+      : Writer(), fd_(fd), declared_length_(declared_length), total_bytes_written_(0) {}
 
  private:
   int fd_;
-  const size_t declared_length_;
-  size_t total_bytes_written_;
+  const uint64_t declared_length_;
+  uint64_t total_bytes_written_;
 };
 
 class EntryReader final : public zip_archive::Reader {
@@ -1714,7 +1716,7 @@ MappedZipFile::MappedZipFile(int fd, off64_t length, off64_t offset)
     if (fd >= 0 && !incfs::util::isIncfsFd(fd) && GetFileLength() > 0 &&
         GetFileLength() < std::numeric_limits<size_t>::max()) {
       mapped_file_ =
-          android::base::MappedFile::FromFd(fd, fd_offset_, size_t(data_length_), PROT_READ);
+          android::base::MappedFile::Create(fd, fd_offset_, size_t(data_length_), PROT_READ);
       if (mapped_file_) {
         maybePrepareSequentialReading(mapped_file_->data(), size_t(data_length_));
         base_ptr_ = mapped_file_->data();
@@ -1794,8 +1796,13 @@ const uint8_t* MappedZipFile::ReadAtOffset(uint8_t* buf, size_t len, off64_t off
 
   if (data_length_ != -1) {
     off64_t read_end;
-    if (len > std::numeric_limits<off64_t>::max() ||
-        __builtin_add_overflow(off, static_cast<off64_t>(len), &read_end)) {
+#if defined(__LP64__)
+    const bool overflow = len > std::numeric_limits<off64_t>::max();
+#else
+    // len is size_t and the max<size_t> is always smaller than max of off64_t for 32 bit.
+    const bool overflow = false;
+#endif
+    if (overflow || __builtin_add_overflow(off, static_cast<off64_t>(len), &read_end)) {
       ALOGE("Zip: invalid read length %" PRId64 " overflows, offset %" PRId64,
             static_cast<off64_t>(len), off);
       return nullptr;
@@ -1824,7 +1831,7 @@ void CentralDirectory::Initialize(const void* map_base_ptr, off64_t cd_start_off
 
 bool ZipArchive::InitializeCentralDirectory(off64_t cd_start_offset, size_t cd_size) {
   if (!mapped_zip.GetBasePtr()) {
-    directory_map = android::base::MappedFile::FromFd(mapped_zip.GetFileDescriptor(),
+    directory_map = android::base::MappedFile::Create(mapped_zip.GetFileDescriptor(),
                                                       mapped_zip.GetFileOffset() + cd_start_offset,
                                                       cd_size, PROT_READ);
     if (!directory_map) {
@@ -1836,12 +1843,6 @@ bool ZipArchive::InitializeCentralDirectory(off64_t cd_start_offset, size_t cd_s
     CHECK_EQ(directory_map->size(), cd_size);
     central_directory.Initialize(directory_map->data(), 0 /*offset*/, cd_size);
   } else {
-    if (mapped_zip.GetBasePtr() == nullptr) {
-      ALOGE(
-          "Zip: Failed to map central directory, bad mapped_zip base "
-          "pointer");
-      return false;
-    }
     if (static_cast<off64_t>(cd_start_offset) + static_cast<off64_t>(cd_size) >
         mapped_zip.GetFileLength()) {
       ALOGE(

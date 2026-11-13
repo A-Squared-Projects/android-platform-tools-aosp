@@ -1,0 +1,44 @@
+{
+  "package": {
+    "bp_util": {
+      "device_supported": false
+    },
+    "checksum": {
+      "device_supported": false
+    },
+    "crate_config": {
+      "device_supported": false
+    },
+    "crate_tool": {
+      "device_supported": false
+    },
+    "crates_io_util": {
+      "device_supported": false
+    },
+    "rooted_path": {
+      "device_supported": false
+    },
+    "google_metadata": {
+      "device_supported": false,
+      "add_toplevel_block": "google_metadata/cargo_embargo_protobuf.bp",
+      "patch": "google_metadata/patches/Android.bp.patch"
+    },
+    "license_checker": {
+      "device_supported": false
+    },
+    "name_and_version": {
+      "device_supported": false
+    },
+    "repo_config": {
+      "device_supported": false
+    },
+    "success_or_error": {
+      "device_supported": false
+    },
+    "test_mapping": {
+      "device_supported": false
+    }
+  },
+  "tests": true,
+  "workspace": true
+}

@@ -19,6 +19,7 @@
 #include <semaphore.h>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <thread>
 #include "../Clock.h"
 
@@ -43,7 +44,8 @@ public:
                  std::unique_ptr<android::Clock> clock = std::make_unique<SteadyClock>());
     ~OneShotTimer();
 
-    Duration interval() const { return mInterval; }
+    Duration interval() const { return mInterval.load(); }
+    void setInterval(Interval value) { mInterval = value; }
 
     // Initializes and turns on the idle timer.
     void start();
@@ -51,6 +53,10 @@ public:
     void stop();
     // Resets the wakeup time and fires the reset callback.
     void reset();
+    // Pauses the timer. reset calls will get ignored.
+    void pause();
+    // Resumes the timer.
+    void resume();
 
 private:
     // Enum to track in what state is the timer.
@@ -91,7 +97,7 @@ private:
     std::string mName;
 
     // Interval after which timer expires.
-    const Interval mInterval;
+    std::atomic<Interval> mInterval;
 
     // Callback that happens when timer resets.
     const ResetCallback mResetCallback;
@@ -105,6 +111,7 @@ private:
     std::atomic<bool> mResetTriggered = false;
     std::atomic<bool> mStopTriggered = false;
     std::atomic<bool> mWaiting = false;
+    std::atomic<bool> mPaused = false;
     std::atomic<std::chrono::steady_clock::time_point> mLastResetTime;
 };
 

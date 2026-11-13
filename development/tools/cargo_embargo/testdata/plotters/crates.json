@@ -29,12 +29,13 @@
         }
       ],
       "codegens": [],
-      "cap_lints": "",
       "static_libs": [],
       "shared_libs": [],
       "edition": "2018",
       "package_dir": ".../external/rust/crates/plotters",
       "main_src": "src/lib.rs",
+      "license": "MIT",
+      "license_file": null,
       "empty_test": false
     }
   ]

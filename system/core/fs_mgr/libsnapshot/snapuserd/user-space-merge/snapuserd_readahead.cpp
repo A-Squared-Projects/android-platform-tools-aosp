@@ -17,6 +17,7 @@
 #include "snapuserd_readahead.h"
 
 #include <pthread.h>
+#include <sys/prctl.h>
 
 #include "android-base/properties.h"
 #include "snapuserd_core.h"
@@ -148,6 +149,7 @@ class [[nodiscard]] AutoNotifyReadAheadFailed {
 };
 
 bool ReadAhead::ReconstructDataFromCow() {
+    std::unique_lock<std::mutex> lock(snapuserd_->GetBufferLock());
     std::unordered_map<uint64_t, void*>& read_ahead_buffer_map = snapuserd_->GetReadAheadMap();
     loff_t metadata_offset = 0;
     loff_t start_data_offset = snapuserd_->GetBufferDataOffset();
@@ -202,6 +204,8 @@ bool ReadAhead::ReconstructDataFromCow() {
 
         break;
     }
+
+    lock.unlock();
 
     snapuserd_->SetMergedBlockCountForNextCommit(total_blocks_merged);
 
@@ -327,7 +331,6 @@ bool ReadAhead::ReadAheadAsyncIO() {
 
             pending_sqe -= 1;
             pending_ios_to_submit += 1;
-            sqe->flags |= IOSQE_ASYNC;
         }
 
         // pending_sqe == 0 : Ring is full
@@ -341,8 +344,8 @@ bool ReadAhead::ReadAheadAsyncIO() {
             // Submit the IO for all the COW ops in a single syscall
             int ret = io_uring_submit(ring_.get());
             if (ret != pending_ios_to_submit) {
-                SNAP_PLOG(ERROR) << "io_uring_submit failed for read-ahead: "
-                                 << " io submit: " << ret << " expected: " << pending_ios_to_submit;
+                SNAP_PLOG(ERROR) << "io_uring_submit failed for read-ahead: " << " io submit: "
+                                 << ret << " expected: " << pending_ios_to_submit;
                 return false;
             }
 
@@ -458,6 +461,7 @@ bool ReadAhead::ReapIoCompletions(int pending_ios_to_complete) {
 void ReadAhead::ProcessXorData(size_t& block_xor_index, size_t& xor_index,
                                std::vector<const CowOperation*>& xor_op_vec, void* buffer,
                                loff_t& buffer_offset) {
+    using WordType = std::conditional_t<sizeof(void*) == sizeof(uint64_t), uint64_t, uint32_t>;
     loff_t xor_buf_offset = 0;
 
     while (block_xor_index < blocks_.size()) {
@@ -470,13 +474,14 @@ void ReadAhead::ProcessXorData(size_t& block_xor_index, size_t& xor_index,
             // Check if this block is an XOR op
             if (xor_op->new_block == new_block) {
                 // Pointer to the data read from base device
-                uint8_t* buffer = reinterpret_cast<uint8_t*>(bufptr);
+                auto buffer_words = reinterpret_cast<WordType*>(bufptr);
                 // Get the xor'ed data read from COW device
-                uint8_t* xor_data = reinterpret_cast<uint8_t*>((char*)bufsink_.GetPayloadBufPtr() +
-                                                               xor_buf_offset);
+                auto xor_data_words = reinterpret_cast<WordType*>(
+                        (char*)bufsink_.GetPayloadBufPtr() + xor_buf_offset);
+                auto num_words = BLOCK_SZ / sizeof(WordType);
 
-                for (size_t byte_offset = 0; byte_offset < BLOCK_SZ; byte_offset++) {
-                    buffer[byte_offset] ^= xor_data[byte_offset];
+                for (auto i = 0; i < num_words; i++) {
+                    buffer_words[i] ^= xor_data_words[i];
                 }
 
                 // Move to next XOR op
@@ -695,33 +700,43 @@ bool ReadAhead::ReadAheadIOStart() {
 
     SNAP_LOG(DEBUG) << "Read-ahead: total_ra_blocks_merged: " << total_ra_blocks_completed_;
 
+    // Invalidate page-cache pages.
+    posix_fadvise(backing_store_fd_.get(), 0, 0, POSIX_FADV_DONTNEED);
+
     // Wait for the merge to finish for the previous RA window. We shouldn't
     // be touching the scratch space until merge is complete of previous RA
     // window. If there is a crash during this time frame, merge should resume
     // based on the contents of the scratch space.
     if (!snapuserd_->WaitForMergeReady()) {
-        SNAP_LOG(ERROR) << "ReadAhead failed to wait for merge ready";
+        SNAP_LOG(VERBOSE) << "ReadAhead failed to wait for merge ready";
         return false;
     }
 
-    // Copy the data to scratch space
-    memcpy(metadata_buffer_, ra_temp_meta_buffer_.get(), snapuserd_->GetBufferMetadataSize());
-    memcpy(read_ahead_buffer_, ra_temp_buffer_.get(), total_blocks_merged_ * BLOCK_SZ);
+    // Acquire buffer lock before doing memcpy to the scratch buffer. Although,
+    // by now snapshot-merge thread shouldn't be working on this scratch space
+    // but we take additional measure to ensure that the buffer is not being
+    // used by the merge thread at this point. see b/377819507
+    {
+        std::lock_guard<std::mutex> buffer_lock(snapuserd_->GetBufferLock());
+        // Copy the data to scratch space
+        memcpy(metadata_buffer_, ra_temp_meta_buffer_.get(), snapuserd_->GetBufferMetadataSize());
+        memcpy(read_ahead_buffer_, ra_temp_buffer_.get(), total_blocks_merged_ * BLOCK_SZ);
 
-    loff_t offset = 0;
-    std::unordered_map<uint64_t, void*>& read_ahead_buffer_map = snapuserd_->GetReadAheadMap();
-    read_ahead_buffer_map.clear();
+        loff_t offset = 0;
+        std::unordered_map<uint64_t, void*>& read_ahead_buffer_map = snapuserd_->GetReadAheadMap();
+        read_ahead_buffer_map.clear();
 
-    for (size_t block_index = 0; block_index < blocks_.size(); block_index++) {
-        void* bufptr = static_cast<void*>((char*)read_ahead_buffer_ + offset);
-        uint64_t new_block = blocks_[block_index];
+        for (size_t block_index = 0; block_index < blocks_.size(); block_index++) {
+            void* bufptr = static_cast<void*>((char*)read_ahead_buffer_ + offset);
+            uint64_t new_block = blocks_[block_index];
 
-        read_ahead_buffer_map[new_block] = bufptr;
-        offset += BLOCK_SZ;
+            read_ahead_buffer_map[new_block] = bufptr;
+            offset += BLOCK_SZ;
+        }
+
+        total_ra_blocks_completed_ += total_blocks_merged_;
+        snapuserd_->SetMergedBlockCountForNextCommit(total_blocks_merged_);
     }
-
-    total_ra_blocks_completed_ += total_blocks_merged_;
-    snapuserd_->SetMergedBlockCountForNextCommit(total_blocks_merged_);
 
     // Flush the scratch data - Technically, we should flush only for overlapping
     // blocks; However, since this region is mmap'ed, the dirty pages can still
@@ -745,9 +760,7 @@ bool ReadAhead::InitializeIouring() {
 
     ring_ = std::make_unique<struct io_uring>();
 
-    int ret = io_uring_queue_init(queue_depth_, ring_.get(), 0);
-    if (ret) {
-        SNAP_LOG(ERROR) << "io_uring_queue_init failed with ret: " << ret;
+    if (!InitializeUringForMerge(ring_.get(), queue_depth_)) {
         return false;
     }
 
@@ -768,7 +781,8 @@ void ReadAhead::FinalizeIouring() {
 bool ReadAhead::RunThread() {
     SNAP_LOG(INFO) << "ReadAhead thread started.";
 
-    pthread_setname_np(pthread_self(), "ReadAhead");
+    std::string thread_name = "RA_" + misc_name_;
+    prctl(PR_SET_NAME, thread_name.c_str());
 
     if (!InitializeFds()) {
         return false;
@@ -784,18 +798,34 @@ bool ReadAhead::RunThread() {
 
     InitializeIouring();
 
-    if (!SetThreadPriority(ANDROID_PRIORITY_BACKGROUND)) {
+    if (!SetThreadPriority(ANDROID_PRIORITY_NORMAL)) {
         SNAP_PLOG(ERROR) << "Failed to set thread priority";
     }
 
-    if (!SetProfiles({"CPUSET_SP_BACKGROUND"})) {
-        SNAP_PLOG(ERROR) << "Failed to assign task profile to readahead thread";
-    }
+    SNAP_LOG(INFO) << "ReadAhead processing: " << thread_name;
 
-    SNAP_LOG(INFO) << "ReadAhead processing.";
+    bool set_profiles = false;
+    // having bools store these values will help up avoid unnecessary GetProperty() calls which is
+    // important as this loop is very busy
+    bool should_set_profiles =
+            android::base::GetBoolProperty("ro.virtual_ab.set_task_profiles", false);
+    bool finished_boot = false;
     while (!RAIterDone()) {
         if (!ReadAheadIOStart()) {
             break;
+        }
+
+        if (!finished_boot &&
+            !(finished_boot = android::base::GetBoolProperty("sys.boot_completed", false))) {
+            continue;
+        }
+
+        if (should_set_profiles && !set_profiles) {
+            if (!SetProfiles({"CPUSET_SP_BACKGROUND"})) {
+                SNAP_LOG(ERROR) << "Failed to assign task profile to readahead thread: "
+                                << thread_name;
+            }
+            set_profiles = true;
         }
     }
 

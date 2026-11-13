@@ -20,7 +20,10 @@
 
 #include <gui/BufferItemConsumer.h>
 #include <ui/Transform.h>
+#include <common/FlagManager.h>
+
 #include <thread>
+
 #include "TransactionTestHarnesses.h"
 namespace android {
 
@@ -154,8 +157,6 @@ void LayerRenderTypeTransactionTest::setRelativeZBasicHelper(uint32_t layerType)
 
     switch (layerType) {
         case ISurfaceComposerClient::eFXSurfaceBufferQueue:
-            Transaction().setPosition(layerG, 16, 16).setRelativeLayer(layerG, layerR, 1).apply();
-            break;
         case ISurfaceComposerClient::eFXSurfaceBufferState:
             Transaction().setPosition(layerG, 16, 16).setRelativeLayer(layerG, layerR, 1).apply();
             break;
@@ -200,13 +201,6 @@ void LayerRenderTypeTransactionTest::setRelativeZGroupHelper(uint32_t layerType)
     // layerR = 0, layerG = layerR + 3, layerB = 2
     switch (layerType) {
         case ISurfaceComposerClient::eFXSurfaceBufferQueue:
-            Transaction()
-                    .setPosition(layerG, 8, 8)
-                    .setRelativeLayer(layerG, layerR, 3)
-                    .setPosition(layerB, 16, 16)
-                    .setLayer(layerB, mLayerZBase + 2)
-                    .apply();
-            break;
         case ISurfaceComposerClient::eFXSurfaceBufferState:
             Transaction()
                     .setPosition(layerG, 8, 8)
@@ -277,6 +271,9 @@ TEST_P(LayerRenderTypeTransactionTest, SetRelativeZGroup_BufferState) {
 }
 
 TEST_P(LayerRenderTypeTransactionTest, SetTransparentRegionHintBasic_BufferQueue) {
+    if (FlagManager::getInstance().disable_transparent_region_hint()) {
+        GTEST_SKIP() << "Skipping test because disable_transparent_region_hint is enabled";
+    }
     const Rect top(0, 0, 32, 16);
     const Rect bottom(0, 16, 32, 32);
     sp<SurfaceControl> layer;
@@ -321,6 +318,9 @@ TEST_P(LayerRenderTypeTransactionTest, SetTransparentRegionHintBasic_BufferQueue
 }
 
 TEST_P(LayerRenderTypeTransactionTest, SetTransparentRegionHintBasic_BufferState) {
+    if (FlagManager::getInstance().disable_transparent_region_hint()) {
+        GTEST_SKIP() << "Skipping test because disable_transparent_region_hint is enabled";
+    }
     const Rect top(0, 0, 32, 16);
     const Rect bottom(0, 16, 32, 32);
     sp<SurfaceControl> layer;
@@ -413,13 +413,6 @@ void LayerRenderTypeTransactionTest::setAlphaBasicHelper(uint32_t layerType) {
 
     switch (layerType) {
         case ISurfaceComposerClient::eFXSurfaceBufferQueue:
-            Transaction()
-                    .setAlpha(layer1, 0.25f)
-                    .setAlpha(layer2, 0.75f)
-                    .setPosition(layer2, 16, 0)
-                    .setLayer(layer2, mLayerZBase + 1)
-                    .apply();
-            break;
         case ISurfaceComposerClient::eFXSurfaceBufferState:
             Transaction()
                     .setAlpha(layer1, 0.25f)
@@ -1349,8 +1342,8 @@ TEST_P(LayerRenderTypeTransactionTest, DISABLED_SetFenceBasic_BufferState) {
     TransactionUtils::fillGraphicBufferColor(buffer, Rect(0, 0, 32, 32), Color::RED);
 
     sp<Fence> fence;
-    if (getBuffer(nullptr, &fence) != NO_ERROR) {
-        GTEST_SUCCEED() << "test not supported";
+    if (status_t err = getBuffer(nullptr, &fence) != NO_ERROR) {
+        GTEST_FAIL() << "Error:" << err;
         return;
     }
 

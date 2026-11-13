@@ -13,60 +13,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {CUSTOM_ELEMENTS_SCHEMA, NO_ERRORS_SCHEMA} from '@angular/core';
-import {
-  ComponentFixture,
-  ComponentFixtureAutoDetect,
-  TestBed,
-} from '@angular/core/testing';
-import {MatDividerModule} from '@angular/material/divider';
-import {MatIconModule} from '@angular/material/icon';
-import {HierarchyComponent} from 'viewers/components/hierarchy_component';
-import {PropertiesComponent} from 'viewers/components/properties_component';
-import {RectsComponent} from 'viewers/components/rects/rects_component';
+
+import {DOMTestHelper} from 'test/unit/dom_test_helpers';
+import {AbstractHierarchyViewerComponentTest} from 'viewers/common/abstract_hierarchy_viewer_component_test';
 import {ViewerWindowManagerComponent} from './viewer_window_manager_component';
 
+class ViewerWindowManagerComponentTest extends AbstractHierarchyViewerComponentTest<ViewerWindowManagerComponent> {
+  protected override readonly testRects = true;
+  protected override readonly hierarchyTitle = 'HIERARCHY';
+  protected override readonly propertiesTitle = 'PROPERTIES';
+  protected override readonly rectsTitle = 'WINDOWS';
+
+  protected async setUpTestEnvironment(): Promise<
+    [DOMTestHelper<ViewerWindowManagerComponent>, ViewerWindowManagerComponent]
+  > {
+    return this.initializeTestEnvironment(ViewerWindowManagerComponent);
+  }
+}
+
 describe('ViewerWindowManagerComponent', () => {
-  let fixture: ComponentFixture<ViewerWindowManagerComponent>;
-  let component: ViewerWindowManagerComponent;
-  let htmlElement: HTMLElement;
-
-  beforeAll(async () => {
-    await TestBed.configureTestingModule({
-      providers: [{provide: ComponentFixtureAutoDetect, useValue: true}],
-      imports: [MatIconModule, MatDividerModule],
-      declarations: [
-        ViewerWindowManagerComponent,
-        HierarchyComponent,
-        PropertiesComponent,
-        RectsComponent,
-      ],
-      schemas: [CUSTOM_ELEMENTS_SCHEMA, NO_ERRORS_SCHEMA],
-    }).compileComponents();
-  });
-
-  beforeEach(() => {
-    fixture = TestBed.createComponent(ViewerWindowManagerComponent);
-    component = fixture.componentInstance;
-    htmlElement = fixture.nativeElement;
-  });
-
-  it('can be created', () => {
-    expect(component).toBeTruthy();
-  });
-
-  it('creates rects view', () => {
-    const rectsView = htmlElement.querySelector('.rects-view');
-    expect(rectsView).toBeTruthy();
-  });
-
-  it('creates hierarchy view', () => {
-    const hierarchyView = htmlElement.querySelector('.hierarchy-view');
-    expect(hierarchyView).toBeTruthy();
-  });
-
-  it('creates properties view', () => {
-    const propertiesView = htmlElement.querySelector('.properties-view');
-    expect(propertiesView).toBeTruthy();
-  });
+  new ViewerWindowManagerComponentTest().execute();
 });

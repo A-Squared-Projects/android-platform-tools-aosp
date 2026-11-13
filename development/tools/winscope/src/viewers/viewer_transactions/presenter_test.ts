@@ -14,394 +14,274 @@
  * limitations under the License.
  */
 
-import {assertDefined} from 'common/assert_utils';
-import {TimestampType} from 'common/time';
-import {NO_TIMEZONE_OFFSET_FACTORY} from 'common/timestamp_factory';
+import {assertDefined} from 'common/assert';
+import {InMemoryStorage} from 'common/store/in_memory_storage';
+import {Timer} from 'common/time/timer';
 import {TracePositionUpdate} from 'messaging/winscope_event';
-import {MockStorage} from 'test/unit/mock_storage';
-import {TracesBuilder} from 'test/unit/traces_builder';
+import {LegacyParserProvider} from 'test/unit/fixture_utils';
 import {TraceBuilder} from 'test/unit/trace_builder';
-import {TreeNodeUtils} from 'test/unit/tree_node_utils';
-import {UnitTestUtils} from 'test/unit/utils';
-import {Parser} from 'trace/parser';
-import {Trace} from 'trace/trace';
-import {Traces} from 'trace/traces';
-import {TraceType} from 'trace/trace_type';
-import {PropertyTreeNode} from 'trace/tree_node/property_tree_node';
-import {UiPropertyTreeNode} from 'viewers/common/ui_property_tree_node';
+import {makeEmptyTrace} from 'test/unit/trace_utils';
+import {TransactionColumnType} from 'trace/transactions/transaction_column_type';
+import {CustomQueryType} from 'trace_api/custom_query';
+import {Trace} from 'trace_api/trace';
+import {TraceType} from 'trace_api/trace_type';
+import {HierarchyTreeNode} from 'tree_node/hierarchy_tree_node';
+import {NotifyLogViewCallbackType} from 'viewers/common/abstract_log_viewer_presenter';
+import {AbstractLogViewerPresenterTest} from 'viewers/common/abstract_log_viewer_presenter_test';
+import {LogSelectFilter} from 'viewers/common/log_filters';
+import {LogHeader} from 'viewers/common/ui_data_log';
 import {Presenter} from './presenter';
-import {UiData, UiDataEntryType} from './ui_data';
+import {UiData} from './ui_data';
+
+class PresenterTransactionsTest extends AbstractLogViewerPresenterTest<UiData> {
+  override readonly expectedHeaders = [
+    {
+      header: new LogHeader(
+        {
+          name: 'TX ID',
+          cssClass: 'transaction-id right-align',
+          columnType: TransactionColumnType.TRANSACTION_ID,
+        },
+        new LogSelectFilter(Array.from({length: 1295}, () => '')),
+      ),
+    },
+    {
+      header: new LogHeader(
+        {
+          name: 'VSYNC ID',
+          cssClass: 'vsyncid right-align',
+          columnType: TransactionColumnType.VSYNC_ID,
+        },
+        new LogSelectFilter(Array.from({length: 712}, () => '')),
+      ),
+    },
+    {
+      header: new LogHeader(
+        {
+          name: 'PID',
+          cssClass: 'pid right-align',
+          columnType: TransactionColumnType.PID,
+        },
+        new LogSelectFilter(Array.from({length: 8}, () => '')),
+      ),
+      options: ['N/A', '0', '515', '1593', '2022', '2322', '2463', '3300'],
+    },
+    {
+      header: new LogHeader(
+        {
+          name: 'UID',
+          cssClass: 'uid right-align',
+          columnType: TransactionColumnType.UID,
+        },
+        new LogSelectFilter(Array.from({length: 6}, () => '')),
+      ),
+      options: ['N/A', '1000', '1003', '10169', '10235', '10239'],
+    },
+    {
+      header: new LogHeader(
+        {
+          name: 'PROCESS',
+          cssClass: 'process',
+          columnType: TransactionColumnType.PROCESS,
+        },
+        new LogSelectFilter(['']),
+      ),
+      options: ['N/A'],
+    },
+    {
+      header: new LogHeader(
+        {
+          name: 'TYPE',
+          cssClass: 'transaction-type',
+          columnType: TransactionColumnType.TRANSACTION_TYPE,
+        },
+        new LogSelectFilter(Array.from({length: 6}, () => '')),
+      ),
+      options: [
+        'DISPLAY_CHANGED',
+        'LAYER_ADDED',
+        'LAYER_CHANGED',
+        'LAYER_DESTROYED',
+        'LAYER_HANDLE_DESTROYED',
+        'NOOP',
+      ],
+    },
+    {
+      header: new LogHeader(
+        {
+          name: 'LAYER/DISP ID',
+          cssClass: 'layer-or-display-id right-align',
+          columnType: TransactionColumnType.LAYER_OR_DISPLAY_ID,
+        },
+        new LogSelectFilter(Array.from({length: 116}, () => '')),
+      ),
+      options: [
+        'N/A',
+        ...Array.from({length: 114}, (_, i) => `${i + 1}`),
+        '4294967295',
+      ],
+    },
+    {
+      header: new LogHeader(
+        {
+          name: 'Flags',
+          cssClass: 'flags',
+          columnType: TransactionColumnType.FLAGS,
+        },
+        new LogSelectFilter(
+          Array.from({length: 29}, () => ''),
+          true,
+          '250',
+          '100%',
+        ),
+      ),
+      options: [
+        'eAcquireFenceChanged',
+        'eAlphaChanged',
+        'eAutoRefreshChanged',
+        'eBackgroundBlurRadiusChanged',
+        'eBufferChanged',
+        'eBufferCropChanged',
+        'eBufferTransformChanged',
+        'eColorChanged',
+        'eColorSpaceAgnosticChanged',
+        'eCornerRadiusChanged',
+        'eCropChanged',
+        'eDataspaceChanged',
+        'eDestinationFrameChanged',
+        'eDisplayProjectionChanged',
+        'eFlagsChanged',
+        'eFrameRateSelectionPriority',
+        'eHasListenerCallbacksChanged',
+        'eHdrMetadataChanged',
+        'eInputInfoChanged',
+        'eLayerChanged',
+        'eLayerStackChanged',
+        'eMatrixChanged',
+        'eMetadataChanged',
+        'ePositionChanged',
+        'eProducerDisconnect',
+        'eRelativeLayerChanged',
+        'eReparent',
+        'eSurfaceDamageRegionChanged',
+        'eTransformToDisplayInverseChanged',
+      ],
+    },
+  ];
+  private trace: Trace<HierarchyTreeNode> | undefined;
+  private positionUpdate: TracePositionUpdate | undefined;
+
+  override executeSpecializedTests() {
+    describe('Specialized tests', () => {
+      let presenter: Presenter;
+      let uiData: UiData;
+
+      beforeAll(async () => {
+        await this.setUpTestEnvironment();
+      });
+
+      beforeEach(async () => {
+        presenter = await this.createPresenter((newData: UiData) => {
+          uiData = newData;
+        });
+      });
+
+      it('keeps properties related to what has changed regardless of hide defaults', async () => {
+        await presenter.onAppEvent(this.getPositionUpdate());
+        await new Timer().wait(() => !uiData.isFetchingData);
+        await presenter.onLogEntryClick(10);
+        expect(
+          assertDefined(uiData.propertiesTree).getAllChildren().length,
+        ).toBe(10);
+        expect(
+          uiData.propertiesTree?.getChildByName('transformToDisplayInverse'),
+        ).toBeDefined();
+        expect(
+          uiData.propertiesTree?.getChildByName('destinationFrame'),
+        ).toBeDefined();
+        expect(
+          uiData.propertiesTree?.getChildByName('autoRefresh'),
+        ).toBeDefined();
+
+        await presenter.onLogEntryClick(279);
+        expect(uiData.propertiesTree?.getChildByName('flags')).toBeDefined();
+        expect(uiData.propertiesTree?.getChildByName('parentId')).toBeDefined();
+        expect(
+          uiData.propertiesTree?.getChildByName('relativeParentId'),
+        ).toBeDefined();
+        expect(
+          uiData.propertiesTree?.getChildByName('transformToDisplayInverse'),
+        ).toBeUndefined();
+        expect(
+          uiData.propertiesTree?.getChildByName('destinationFrame'),
+        ).toBeUndefined();
+        expect(
+          uiData.propertiesTree?.getChildByName('autoRefresh'),
+        ).toBeUndefined();
+
+        await presenter.onLogEntryClick(584);
+        expect(uiData.propertiesTree?.getChildByName('flags')).toBeDefined();
+        expect(uiData.propertiesTree?.getChildByName('layerId')).toBeDefined();
+        expect(uiData.propertiesTree?.getChildByName('x')).toBeDefined();
+        expect(uiData.propertiesTree?.getChildByName('y')).toBeDefined();
+        expect(uiData.propertiesTree?.getChildByName('z')).toBeDefined();
+        expect(
+          uiData.propertiesTree?.getChildByName('parentId'),
+        ).toBeUndefined();
+        expect(
+          uiData.propertiesTree?.getChildByName('relativeParentId'),
+        ).toBeUndefined();
+      });
+    });
+  }
+
+  override async setUpTestEnvironment(): Promise<void> {
+    const parser = await new LegacyParserProvider()
+      .addFile('traces/elapsed_and_real_timestamp/Transactions.pb')
+      .setConvertToPerfetto(true)
+      .getParser<HierarchyTreeNode>();
+    this.trace = new TraceBuilder<HierarchyTreeNode>()
+      .setType(TraceType.TRANSACTIONS)
+      .setParser(parser)
+      .build();
+    this.positionUpdate = TracePositionUpdate.fromTraceEntry(
+      this.trace.getEntry(0),
+    );
+  }
+
+  override async createPresenterWithEmptyTrace(
+    callback: NotifyLogViewCallbackType<UiData>,
+  ): Promise<Presenter> {
+    const trace = makeEmptyTrace(
+      TraceType.TRANSACTIONS,
+      [],
+      [
+        {
+          queryType: CustomQueryType.LOG_TABLE_FILTER_VALUES,
+          result: [],
+        },
+      ],
+    );
+    return new Presenter(trace, new InMemoryStorage(), callback);
+  }
+
+  override async createPresenter(
+    callback: NotifyLogViewCallbackType<UiData>,
+  ): Promise<Presenter> {
+    const presenter = new Presenter(
+      assertDefined(this.trace),
+      new InMemoryStorage(),
+      callback,
+    );
+    await presenter.onAppEvent(this.getPositionUpdate()); // trigger initialization
+    return presenter;
+  }
+
+  override getPositionUpdate(): TracePositionUpdate {
+    return assertDefined(this.positionUpdate);
+  }
+}
 
 describe('PresenterTransactions', () => {
-  let parser: Parser<PropertyTreeNode>;
-  let trace: Trace<PropertyTreeNode>;
-  let traces: Traces;
-  let presenter: Presenter;
-  let outputUiData: undefined | UiData;
-  const TOTAL_OUTPUT_ENTRIES = 1647;
-
-  beforeAll(async () => {
-    jasmine.addCustomEqualityTester(TreeNodeUtils.treeNodeEqualityTester);
-    parser = (await UnitTestUtils.getParser(
-      'traces/elapsed_and_real_timestamp/Transactions.pb',
-    )) as Parser<PropertyTreeNode>;
-  });
-
-  beforeEach(async () => {
-    outputUiData = undefined;
-    await setUpTestEnvironment(TimestampType.ELAPSED);
-  });
-
-  it('is robust to empty trace', async () => {
-    const traces = new TracesBuilder()
-      .setEntries(TraceType.TRANSACTIONS, [])
-      .build();
-    presenter = new Presenter(traces, new MockStorage(), (data: UiData) => {
-      outputUiData = data;
-    });
-
-    expect(outputUiData).toEqual(UiData.EMPTY);
-
-    const expectedUiData = UiData.EMPTY;
-    expectedUiData.propertiesUserOptions = {
-      showDefaults: {
-        name: 'Show defaults',
-        enabled: false,
-        tooltip: `
-                If checked, shows the value of all properties.
-                Otherwise, hides all properties whose value is
-                the default for its data type.
-              `,
-      },
-    };
-    await presenter.onAppEvent(
-      TracePositionUpdate.fromTimestamp(
-        NO_TIMEZONE_OFFSET_FACTORY.makeRealTimestamp(10n),
-      ),
-    );
-    expect(outputUiData).toEqual(UiData.EMPTY);
-  });
-
-  it('processes trace position update and computes output UI data', async () => {
-    await presenter.onAppEvent(createTracePositionUpdate(0));
-
-    expect(assertDefined(outputUiData).allPids).toEqual([
-      'N/A',
-      '0',
-      '515',
-      '1593',
-      '2022',
-      '2322',
-      '2463',
-      '3300',
-    ]);
-    expect(assertDefined(outputUiData).allUids).toEqual([
-      'N/A',
-      '1000',
-      '1003',
-      '10169',
-      '10235',
-      '10239',
-    ]);
-    expect(assertDefined(outputUiData).allTypes).toEqual([
-      'DISPLAY_CHANGED',
-      'LAYER_ADDED',
-      'LAYER_CHANGED',
-      'LAYER_DESTROYED',
-      'LAYER_HANDLE_DESTROYED',
-      'NO_OP',
-    ]);
-
-    expect(assertDefined(outputUiData).allTransactionIds.length).toEqual(1295);
-    expect(assertDefined(outputUiData).allLayerAndDisplayIds.length).toEqual(
-      117,
-    );
-
-    expect(assertDefined(outputUiData).entries.length).toEqual(
-      TOTAL_OUTPUT_ENTRIES,
-    );
-
-    expect(assertDefined(outputUiData).currentEntryIndex).toEqual(0);
-    expect(assertDefined(outputUiData).selectedEntryIndex).toBeUndefined();
-    expect(assertDefined(outputUiData).scrollToIndex).toEqual(0);
-    expect(assertDefined(outputUiData).currentPropertiesTree).toBeDefined();
-  });
-
-  it('processes trace position update and updates current entry and scroll position', async () => {
-    await presenter.onAppEvent(createTracePositionUpdate(0));
-    expect(assertDefined(outputUiData).currentEntryIndex).toEqual(0);
-    expect(assertDefined(outputUiData).scrollToIndex).toEqual(0);
-
-    await presenter.onAppEvent(createTracePositionUpdate(10));
-    expect(assertDefined(outputUiData).currentEntryIndex).toEqual(13);
-    expect(assertDefined(outputUiData).scrollToIndex).toEqual(13);
-  });
-
-  it('filters entries according to transaction ID filter', () => {
-    presenter.onTransactionIdFilterChanged([]);
-    expect(assertDefined(outputUiData).entries.length).toEqual(
-      TOTAL_OUTPUT_ENTRIES,
-    );
-
-    presenter.onTransactionIdFilterChanged(['2211908157465']);
-    expect(
-      new Set(
-        assertDefined(outputUiData).entries.map((entry) => entry.transactionId),
-      ),
-    ).toEqual(new Set(['2211908157465']));
-  });
-
-  it('filters entries according to VSYNC ID filter', () => {
-    presenter.onVSyncIdFilterChanged([]);
-    expect(assertDefined(outputUiData).entries.length).toEqual(
-      TOTAL_OUTPUT_ENTRIES,
-    );
-
-    presenter.onVSyncIdFilterChanged(['1']);
-    expect(
-      new Set(
-        assertDefined(outputUiData).entries.map((entry) => entry.vsyncId),
-      ),
-    ).toEqual(new Set([1]));
-
-    presenter.onVSyncIdFilterChanged(['1', '3', '10']);
-    expect(
-      new Set(
-        assertDefined(outputUiData).entries.map((entry) => entry.vsyncId),
-      ),
-    ).toEqual(new Set([1, 3, 10]));
-  });
-
-  it('filters entries according to PID filter', () => {
-    presenter.onPidFilterChanged([]);
-    expect(
-      new Set(assertDefined(outputUiData).entries.map((entry) => entry.pid)),
-    ).toEqual(
-      new Set(['N/A', '0', '515', '1593', '2022', '2322', '2463', '3300']),
-    );
-
-    presenter.onPidFilterChanged(['0']);
-    expect(
-      new Set(assertDefined(outputUiData).entries.map((entry) => entry.pid)),
-    ).toEqual(new Set(['0']));
-
-    presenter.onPidFilterChanged(['0', '515']);
-    expect(
-      new Set(assertDefined(outputUiData).entries.map((entry) => entry.pid)),
-    ).toEqual(new Set(['0', '515']));
-  });
-
-  it('filters entries according to UID filter', () => {
-    presenter.onUidFilterChanged([]);
-    expect(
-      new Set(assertDefined(outputUiData).entries.map((entry) => entry.uid)),
-    ).toEqual(new Set(['N/A', '1000', '1003', '10169', '10235', '10239']));
-
-    presenter.onUidFilterChanged(['1000']);
-    expect(
-      new Set(assertDefined(outputUiData).entries.map((entry) => entry.uid)),
-    ).toEqual(new Set(['1000']));
-
-    presenter.onUidFilterChanged(['1000', '1003']);
-    expect(
-      new Set(assertDefined(outputUiData).entries.map((entry) => entry.uid)),
-    ).toEqual(new Set(['1000', '1003']));
-  });
-
-  it('filters entries according to type filter', () => {
-    presenter.onTypeFilterChanged([]);
-    expect(
-      new Set(assertDefined(outputUiData).entries.map((entry) => entry.type)),
-    ).toEqual(
-      new Set([
-        UiDataEntryType.DISPLAY_CHANGED,
-        UiDataEntryType.LAYER_ADDED,
-        UiDataEntryType.LAYER_CHANGED,
-        UiDataEntryType.LAYER_DESTROYED,
-        UiDataEntryType.LAYER_HANDLE_DESTROYED,
-        UiDataEntryType.NO_OP,
-      ]),
-    );
-
-    presenter.onTypeFilterChanged([UiDataEntryType.LAYER_ADDED]);
-    expect(
-      new Set(assertDefined(outputUiData).entries.map((entry) => entry.type)),
-    ).toEqual(new Set([UiDataEntryType.LAYER_ADDED]));
-
-    presenter.onTypeFilterChanged([
-      UiDataEntryType.LAYER_ADDED,
-      UiDataEntryType.LAYER_DESTROYED,
-    ]);
-    expect(
-      new Set(assertDefined(outputUiData).entries.map((entry) => entry.type)),
-    ).toEqual(
-      new Set([UiDataEntryType.LAYER_ADDED, UiDataEntryType.LAYER_DESTROYED]),
-    );
-  });
-
-  it('filters entries according to layer or display ID filter', () => {
-    presenter.onLayerIdFilterChanged([]);
-    expect(
-      new Set(
-        assertDefined(outputUiData).entries.map(
-          (entry) => entry.layerOrDisplayId,
-        ),
-      ).size,
-    ).toBeGreaterThan(20);
-
-    presenter.onLayerIdFilterChanged(['1']);
-    expect(
-      new Set(
-        assertDefined(outputUiData).entries.map(
-          (entry) => entry.layerOrDisplayId,
-        ),
-      ),
-    ).toEqual(new Set(['1']));
-
-    presenter.onLayerIdFilterChanged(['1', '3']);
-    expect(
-      new Set(
-        assertDefined(outputUiData).entries.map(
-          (entry) => entry.layerOrDisplayId,
-        ),
-      ),
-    ).toEqual(new Set(['1', '3']));
-  });
-
-  it('includes no op transitions', () => {
-    presenter.onTypeFilterChanged([UiDataEntryType.NO_OP]);
-    expect(
-      new Set(assertDefined(outputUiData).entries.map((entry) => entry.type)),
-    ).toEqual(new Set([UiDataEntryType.NO_OP]));
-
-    for (const entry of assertDefined(outputUiData).entries) {
-      expect(entry.layerOrDisplayId).toEqual('');
-      expect(entry.what).toEqual('');
-      expect(entry.propertiesTree).toEqual(undefined);
-    }
-  });
-
-  it('filters entries according to "what" search string', () => {
-    expect(assertDefined(outputUiData).entries.length).toEqual(
-      TOTAL_OUTPUT_ENTRIES,
-    );
-
-    presenter.onWhatFilterChanged([]);
-    expect(assertDefined(outputUiData).entries.length).toEqual(
-      TOTAL_OUTPUT_ENTRIES,
-    );
-
-    presenter.onWhatFilterChanged(['Crop']);
-    expect(assertDefined(outputUiData).entries.length).toBeLessThan(
-      TOTAL_OUTPUT_ENTRIES,
-    );
-
-    presenter.onWhatFilterChanged(['STRING_WITH_NO_MATCHES']);
-    expect(assertDefined(outputUiData).entries.length).toEqual(0);
-  });
-
-  it('updates selected entry and properties tree when entry is clicked', async () => {
-    await presenter.onAppEvent(createTracePositionUpdate(0));
-    presenter.onPropertiesUserOptionsChange({
-      showDefaults: {
-        name: 'Show defaults',
-        enabled: true,
-        tooltip: `
-                If checked, shows the value of all properties.
-                Otherwise, hides all properties whose value is
-                the default for its data type.
-              `,
-      },
-    });
-
-    expect(assertDefined(outputUiData).currentEntryIndex).toEqual(0);
-    expect(assertDefined(outputUiData).selectedEntryIndex).toBeUndefined();
-    expect(assertDefined(outputUiData).scrollToIndex).toEqual(0);
-    expect(assertDefined(outputUiData).currentPropertiesTree).toEqual(
-      UiPropertyTreeNode.from(
-        assertDefined(outputUiData?.entries[0].propertiesTree),
-      ),
-    );
-
-    presenter.onEntryClicked(10);
-    const expectedTree = UiPropertyTreeNode.from(
-      assertDefined(outputUiData?.entries[10].propertiesTree),
-    );
-    expect(assertDefined(outputUiData).currentEntryIndex).toEqual(0);
-    expect(assertDefined(outputUiData).selectedEntryIndex).toEqual(10);
-    expect(assertDefined(outputUiData).scrollToIndex).toBeUndefined(); // no scrolling
-    expect(assertDefined(outputUiData).currentPropertiesTree).toEqual(
-      expectedTree,
-    );
-
-    // does not remove selection when entry clicked again
-    presenter.onEntryClicked(10);
-    expect(assertDefined(outputUiData).currentEntryIndex).toEqual(0);
-    expect(assertDefined(outputUiData).selectedEntryIndex).toEqual(10);
-    expect(assertDefined(outputUiData).scrollToIndex).toBeUndefined();
-    expect(assertDefined(outputUiData).currentPropertiesTree).toEqual(
-      expectedTree,
-    );
-  });
-
-  it('computes current entry index', async () => {
-    await presenter.onAppEvent(createTracePositionUpdate(0));
-    expect(assertDefined(outputUiData).currentEntryIndex).toEqual(0);
-
-    await presenter.onAppEvent(createTracePositionUpdate(10));
-    expect(assertDefined(outputUiData).currentEntryIndex).toEqual(13);
-  });
-
-  it('updates current entry index when filters change', async () => {
-    await presenter.onAppEvent(createTracePositionUpdate(10));
-
-    presenter.onPidFilterChanged([]);
-    expect(assertDefined(outputUiData).currentEntryIndex).toEqual(13);
-
-    presenter.onPidFilterChanged(['0']);
-    expect(assertDefined(outputUiData).currentEntryIndex).toEqual(10);
-
-    presenter.onPidFilterChanged(['0', '515']);
-    expect(assertDefined(outputUiData).currentEntryIndex).toEqual(11);
-
-    presenter.onPidFilterChanged(['0', '515', 'N/A']);
-    expect(assertDefined(outputUiData).currentEntryIndex).toEqual(13);
-  });
-
-  it('formats real time', async () => {
-    await setUpTestEnvironment(TimestampType.REAL);
-    expect(
-      assertDefined(outputUiData).entries[0].time.formattedValue(),
-    ).toEqual('2022-08-03T06:19:01.051480997');
-  });
-
-  it('formats elapsed time', async () => {
-    await setUpTestEnvironment(TimestampType.ELAPSED);
-    expect(
-      assertDefined(outputUiData).entries[0].time.formattedValue(),
-    ).toEqual('2s450ms981445ns');
-  });
-
-  const setUpTestEnvironment = async (timestampType: TimestampType) => {
-    trace = new TraceBuilder<PropertyTreeNode>()
-      .setParser(parser)
-      .setTimestampType(timestampType)
-      .build();
-
-    traces = new Traces();
-    traces.setTrace(TraceType.TRANSACTIONS, trace);
-
-    presenter = new Presenter(traces, new MockStorage(), (data: UiData) => {
-      outputUiData = data;
-    });
-
-    await presenter.onAppEvent(createTracePositionUpdate(0)); // trigger initialization
-  };
-
-  const createTracePositionUpdate = (
-    entryIndex: number,
-  ): TracePositionUpdate => {
-    const entry = trace.getEntry(entryIndex);
-    return TracePositionUpdate.fromTraceEntry(entry);
-  };
+  new PresenterTransactionsTest().execute();
 });

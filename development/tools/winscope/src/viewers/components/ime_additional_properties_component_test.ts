@@ -14,41 +14,55 @@
  * limitations under the License.
  */
 import {Component} from '@angular/core';
-import {ComponentFixture, TestBed} from '@angular/core/testing';
+import {TestBed} from '@angular/core/testing';
+import {MatButtonModule} from '@angular/material/button';
 import {MatDividerModule} from '@angular/material/divider';
-import {assertDefined} from 'common/assert_utils';
-import {TreeNodeUtils} from 'test/unit/tree_node_utils';
+import {MatIconModule} from '@angular/material/icon';
+import {MatTooltipModule} from '@angular/material/tooltip';
+import {DOMTestHelper} from 'test/unit/dom_test_helpers';
+import {
+  makeHierarchyNode,
+  makePropertyNode,
+} from 'test/unit/tree_node_test_helpers';
 import {ImeAdditionalProperties} from 'viewers/common/ime_additional_properties';
 import {ViewerEvents} from 'viewers/common/viewer_events';
+import {CollapsibleSectionTitleComponent} from './collapsible_section_title_component';
 import {CoordinatesTableComponent} from './coordinates_table_component';
 import {ImeAdditionalPropertiesComponent} from './ime_additional_properties_component';
 
 describe('ImeAdditionalPropertiesComponent', () => {
-  let fixture: ComponentFixture<TestHostComponent>;
   let component: TestHostComponent;
-  let htmlElement: HTMLElement;
+  let dom: DOMTestHelper<TestHostComponent>;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [MatDividerModule],
-      declarations: [
+      imports: [
+        MatDividerModule,
+        MatIconModule,
+        MatButtonModule,
+        MatTooltipModule,
         ImeAdditionalPropertiesComponent,
         TestHostComponent,
+        CollapsibleSectionTitleComponent,
         CoordinatesTableComponent,
       ],
     }).compileComponents();
-    fixture = TestBed.createComponent(TestHostComponent);
+    const fixture = TestBed.createComponent(TestHostComponent);
     component = fixture.componentInstance;
-    htmlElement = fixture.nativeElement;
-    htmlElement.addEventListener(
-      ViewerEvents.HighlightedChange,
-      component.onHighlightedChange,
+    dom = new DOMTestHelper(fixture, fixture.nativeElement);
+    dom.addEventListener(
+      ViewerEvents.HighlightedNodeChange,
+      component.onHighlightedNodeChange,
     );
-    htmlElement.addEventListener(
+    dom.addEventListener(
+      ViewerEvents.HighlightedIdChange,
+      component.onHighlightedIdChange,
+    );
+    dom.addEventListener(
       ViewerEvents.AdditionalPropertySelected,
       component.onAdditionalPropertySelectedChange,
     );
-    fixture.detectChanges();
+    dom.detectChanges();
   });
 
   it('can be created', () => {
@@ -56,122 +70,134 @@ describe('ImeAdditionalPropertiesComponent', () => {
   });
 
   it('shows client or service sf properties', () => {
-    expect(htmlElement.querySelector('.ime-container')).toBeDefined();
-    expect(htmlElement.querySelector('.input-method-surface')).toBeDefined();
+    expect(dom.find('.ime-container')).toBeDefined();
+    expect(dom.find('.input-method-surface')).toBeDefined();
+  });
+
+  it('renders placeholder text', () => {
+    component.additionalProperties = undefined;
+    dom.detectChanges();
+    dom.get('.placeholder-text').checkTextExact('No IME entry found.');
   });
 
   it('emits update additional property tree event on wm state button click', () => {
-    const button = assertDefined(
-      htmlElement.querySelector('.wm-state-button'),
-    ) as HTMLButtonElement;
-    expect(button.className).not.toContain('selected');
+    const button = dom.get('.wm-state-button');
+    button.checkClassName('selected', false);
     button.click();
-    fixture.detectChanges();
     expect(component.additionalPropertieTreeName).toEqual(
       'Window Manager State',
     );
-    expect(button.className).toContain('selected');
+    button.checkClassName('selected', true);
   });
 
   it('propagates new ime container layer on button click', () => {
-    const button = assertDefined(
-      htmlElement.querySelector('.ime-container-button'),
-    ) as HTMLButtonElement;
-    expect(button.className).not.toContain('selected');
+    const button = dom.get('.ime-container-button');
+    button.checkClassName('selected', false);
     button.click();
-    fixture.detectChanges();
-    expect(component.highlightedItem).toEqual('123');
-    expect(button.className).toContain('selected');
+    expect(component.highlightedItem).toBe('123');
+    button.checkClassName('selected', true);
   });
 
   it('propagates new input method surface layer on button click', () => {
-    const button = assertDefined(
-      htmlElement.querySelector('.input-method-surface-button'),
-    ) as HTMLButtonElement;
-    expect(button.className).not.toContain('selected');
+    const button = dom.get('.input-method-surface-button');
+    button.checkClassName('selected', false);
     button.click();
-    fixture.detectChanges();
-    expect(component.highlightedItem).toEqual('456');
-    expect(button.className).toContain('selected');
+    expect(component.highlightedItem).toBe('456');
+    button.checkClassName('selected', true);
   });
 
   it('shows ime manager service wm properties', () => {
     component.isImeManagerService = true;
-    fixture.detectChanges();
-    const imeManagerService = assertDefined(
-      htmlElement.querySelector('.ime-manager-service'),
-    );
-    expect(
-      assertDefined(imeManagerService.querySelector('.wm-state')).textContent,
-    ).toContain('1970-01-01T00:00:00.000000000');
-    expect(
-      imeManagerService.querySelector('.ime-control-target-button'),
-    ).toBeDefined();
+    dom.detectChanges();
+    const imeManagerService = dom.get('.ime-manager-service');
+    imeManagerService
+      .get('.wm-state')
+      .checkTextExact('1970-01-01, 00:00:00.000000000');
+    expect(dom.find('.ime-control-target-button')).toBeDefined();
   });
 
   it('propagates new property tree node window on button click', () => {
     component.isImeManagerService = true;
-    fixture.detectChanges();
-    const button = assertDefined(
-      htmlElement.querySelector('.ime-control-target-button'),
-    ) as HTMLButtonElement;
-    expect(button.className).not.toContain('selected');
+    dom.detectChanges();
+    const button = dom.get('.ime-control-target-button');
+    button.checkClassName('selected', false);
     button.click();
-    fixture.detectChanges();
-    expect(component.additionalPropertieTreeName).toEqual('Ime Control Target');
-    expect(button.className).toContain('selected');
+    expect(component.additionalPropertieTreeName).toBe('Ime Control Target');
+    button.checkClassName('selected', true);
+  });
+
+  it('handles collapse button click', () => {
+    expect(component.collapseButtonClicked).toBeFalse();
+    dom.findAndClick('collapsible-section-title button');
+    expect(component.collapseButtonClicked).toBeTrue();
   });
 
   @Component({
+    imports: [ImeAdditionalPropertiesComponent],
     selector: 'host-component',
     template: `
       <ime-additional-properties
         [highlightedItem]="highlightedItem"
         [isImeManagerService]="isImeManagerService"
-        [additionalProperties]="additionalProperties"></ime-additional-properties>
+        [additionalProperties]="additionalProperties"
+        (collapseButtonClicked)="onCollapseButtonClick()"></ime-additional-properties>
     `,
   })
   class TestHostComponent {
     isImeManagerService = false;
 
-    additionalProperties = new ImeAdditionalProperties(
-      {
-        id: 'wmStateId',
-        name: 'wmState',
-        wmStateProperties: {
-          timestamp: '1970-01-01T00:00:00.000000000',
-          focusedApp: 'exampleFocusedApp',
-          focusedWindow: undefined,
-          focusedActivity: undefined,
-          isInputMethodWindowVisible: false,
-          imeControlTarget: TreeNodeUtils.makePropertyNode(
-            'DisplayContent.inputMethodControlTarget',
-            'inputMethodControlTarget',
-            null,
-          ),
-          imeInputTarget: undefined,
-          imeLayeringTarget: undefined,
-          imeInsetsSourceProvider: undefined,
+    additionalProperties: ImeAdditionalProperties | undefined =
+      new ImeAdditionalProperties(
+        {
+          id: 'wmStateId',
+          name: 'wmState',
+          wmStateProperties: {
+            timestamp: '1970-01-01, 00:00:00.000000000',
+            focusedApp: 'exampleFocusedApp',
+            focusedWindow: undefined,
+            focusedActivity: undefined,
+            isInputMethodWindowVisible: false,
+            imeControlTarget: makePropertyNode(
+              'DisplayContent.inputMethodControlTarget',
+              'inputMethodControlTarget',
+              undefined,
+            ),
+            imeInputTarget: undefined,
+            imeLayeringTarget: undefined,
+            imeInsetsSourceProvider: undefined,
+          },
+          hierarchyTree: makeHierarchyNode({
+            name: 'wmStateProto',
+          }),
         },
-        hierarchyTree: TreeNodeUtils.makeHierarchyNode({name: 'wmStateProto'}),
-      },
-      {
-        id: 'ime',
-        name: 'imeLayers',
-        properties: {
-          imeContainer: {id: '123', zOrderRelativeOfId: -1, z: 0},
-          inputMethodSurface: {id: '456', isVisible: false},
-          focusedWindowColor: undefined,
-          root: undefined,
+        {
+          id: 'ime',
+          name: 'imeLayers',
+          properties: {
+            imeContainer: {
+              id: '123',
+              zOrderRelativeOfId: -1,
+              z: 0,
+            },
+            inputMethodSurface: {
+              id: '456',
+              isVisible: false,
+            },
+            focusedWindowColor: undefined,
+            root: undefined,
+          },
+          taskLayerOfImeContainer: undefined,
+          taskLayerOfImeSnapshot: undefined,
         },
-        taskLayerOfImeContainer: undefined,
-        taskLayerOfImeSnapshot: undefined,
-      },
-    );
+      );
     highlightedItem = '';
     additionalPropertieTreeName: string | undefined;
+    collapseButtonClicked = false;
 
-    onHighlightedChange = (event: Event) => {
+    onHighlightedNodeChange = (event: Event) => {
+      this.highlightedItem = (event as CustomEvent).detail.node.id;
+    };
+    onHighlightedIdChange = (event: Event) => {
       this.highlightedItem = (event as CustomEvent).detail.id;
     };
     onAdditionalPropertySelectedChange = (event: Event) => {
@@ -182,5 +208,9 @@ describe('ImeAdditionalPropertiesComponent', () => {
         event as CustomEvent
       ).detail.selectedItem.name;
     };
+
+    onCollapseButtonClick() {
+      this.collapseButtonClicked = true;
+    }
   }
 });

@@ -16,7 +16,6 @@
 
 """Tests certify_bootimg."""
 
-import logging
 import glob
 import os
 import random
@@ -196,7 +195,7 @@ def extract_boot_archive_with_signatures(boot_img_archive, output_dir):
       - |output_dir|/boot-lz4/boot_signature1
       - |output_dir|/boot-lz4/boot_signature2
     """
-    shutil.unpack_archive(boot_img_archive, output_dir)
+    shutil.unpack_archive(boot_img_archive, output_dir, filter='data')
     for boot_img in glob.glob(os.path.join(output_dir, 'boot*.img')):
         img_name = os.path.splitext(os.path.basename(boot_img))[0]
         signature_output_dir = os.path.join(output_dir, img_name)
@@ -1124,11 +1123,6 @@ class CertifyBootimgTest(unittest.TestCase):
                  'boot-gz/boot_signature2':
                     self._EXPECTED_BOOT_GZ_SIGNATURE2_RSA4096})
 
-
-# I don't know how, but we need both the logger configuration and verbosity
-# level > 2 to make atest work. And yes this line needs to be at the very top
-# level, not even in the "__main__" indentation block.
-logging.basicConfig(stream=sys.stdout)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

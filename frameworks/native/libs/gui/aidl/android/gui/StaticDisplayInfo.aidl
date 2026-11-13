@@ -23,8 +23,11 @@ import android.gui.Rotation;
 /** @hide */
 parcelable StaticDisplayInfo {
     DisplayConnectionType connectionType = DisplayConnectionType.Internal;
+    int port = -1;
     float density;
     boolean secure;
     @nullable DeviceProductInfo deviceProductInfo;
     Rotation installOrientation = Rotation.Rotation0;
+    /* this comes from composer HAL's screenPartStatus.aidl file */
+    int screenPartStatus;
 }

@@ -10,12 +10,13 @@
       "cfgs": [],
       "externs": [],
       "codegens": [],
-      "cap_lints": "",
       "static_libs": [],
       "shared_libs": [],
       "edition": "2018",
       "package_dir": ".../external/rust/crates/either",
       "main_src": "src/lib.rs",
+      "license": "MIT OR Apache-2.0",
+      "license_file": null,
       "empty_test": false
     },
     {
@@ -35,12 +36,13 @@
         }
       ],
       "codegens": [],
-      "cap_lints": "",
       "static_libs": [],
       "shared_libs": [],
       "edition": "2018",
       "package_dir": ".../external/rust/crates/either",
       "main_src": "src/lib.rs",
+      "license": "MIT OR Apache-2.0",
+      "license_file": null,
       "empty_test": false
     }
   ]

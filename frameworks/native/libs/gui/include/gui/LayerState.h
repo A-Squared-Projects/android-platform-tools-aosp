@@ -17,24 +17,32 @@
 #ifndef ANDROID_SF_LAYER_STATE_H
 #define ANDROID_SF_LAYER_STATE_H
 
-
 #include <stdint.h>
 #include <sys/types.h>
+#include <span>
 
+#include <android/gui/BorderSettings.h>
+#include <android/gui/BoxShadowSettings.h>
+#include <android/gui/DisplayCaptureArgs.h>
+#include <android/gui/ISystemContentPriorityConstants.h>
 #include <android/gui/IWindowInfosReportedListener.h>
+#include <android/gui/LayerCaptureArgs.h>
 #include <android/gui/TrustedPresentationThresholds.h>
 #include <android/native_window.h>
+#include <gui/CornerRadii.h>
+#include <gui/DisplayLuts.h>
 #include <gui/IGraphicBufferProducer.h>
 #include <gui/ITransactionCompletedListener.h>
 #include <math/mat4.h>
 
 #include <android/gui/DropInputMode.h>
+#include <android/gui/EdgeExtensionParameters.h>
 #include <android/gui/FocusRequest.h>
+#include <android/gui/TrustedOverlay.h>
 
 #include <ftl/flags.h>
-#include <gui/DisplayCaptureArgs.h>
+#include <gui/BufferReleaseChannel.h>
 #include <gui/ISurfaceComposer.h>
-#include <gui/LayerCaptureArgs.h>
 #include <gui/LayerMetadata.h>
 #include <gui/SpHash.h>
 #include <gui/SurfaceControl.h>
@@ -43,6 +51,7 @@
 #include <ui/BlurRegion.h>
 #include <ui/GraphicTypes.h>
 #include <ui/LayerStack.h>
+#include <ui/PictureProfileHandle.h>
 #include <ui/Rect.h>
 #include <ui/Region.h>
 #include <ui/Rotation.h>
@@ -64,21 +73,39 @@ struct client_cache_t {
     uint64_t id;
 
     bool operator==(const client_cache_t& other) const { return id == other.id; }
+    bool operator!=(const client_cache_t&) const = default;
 
     bool isValid() const { return token != nullptr; }
 };
 
 class TrustedPresentationListener : public Parcelable {
 public:
-    sp<ITransactionCompletedListener> callbackInterface;
-    int callbackId = -1;
+    struct State {
+        sp<ITransactionCompletedListener> callbackInterface;
+        int callbackId = -1;
+        bool operator==(const State&) const = default;
+        bool operator!=(const State&) const = default;
+    };
 
     void invoke(bool presentedWithinThresholds) {
-        callbackInterface->onTrustedPresentationChanged(callbackId, presentedWithinThresholds);
+        mState.callbackInterface->onTrustedPresentationChanged(mState.callbackId,
+                                                               presentedWithinThresholds);
+    }
+    void configure(State&& state) { mState = std::move(state); }
+    const sp<ITransactionCompletedListener>& getCallback() { return mState.callbackInterface; }
+    void clear() {
+        mState.callbackInterface = nullptr;
+        mState.callbackId = -1;
     }
 
     status_t writeToParcel(Parcel* parcel) const;
     status_t readFromParcel(const Parcel* parcel);
+
+    bool operator==(const TrustedPresentationListener& rhs) const { return mState == rhs.mState; }
+    bool operator!=(const TrustedPresentationListener&) const = default;
+
+private:
+    State mState;
 };
 
 class BufferData : public Parcelable {
@@ -127,6 +154,8 @@ public:
 
     client_cache_t cachedBuffer;
 
+    nsecs_t dequeueTime;
+
     // Generates the release callback id based on the buffer id and frame number.
     // This is used as an identifier when release callbacks are invoked.
     ReleaseCallbackId generateReleaseCallbackId() const;
@@ -164,6 +193,10 @@ struct layer_state_t {
         // Sets a property on this layer indicating that its visible region should be considered
         // when computing TrustedPresentation Thresholds.
         eCanOccludePresentation = 0x1000,
+        // Indicates that the SurfaceControl should recover from buffer stuffing when
+        // possible. This is the case when the SurfaceControl is the root SurfaceControl
+        // owned by ViewRootImpl.
+        eRecoverableFromBufferStuffing = 0x2000,
     };
 
     enum {
@@ -179,7 +212,7 @@ struct layer_state_t {
         eCachingHintChanged = 0x00000200,
         eDimmingEnabledChanged = 0x00000400,
         eShadowRadiusChanged = 0x00000800,
-        eRenderBorderChanged = 0x00001000,
+        eLutsChanged = 0x00001000,
         eBufferCropChanged = 0x00002000,
         eRelativeLayerChanged = 0x00004000,
         eReparent = 0x00008000,
@@ -216,6 +249,16 @@ struct layer_state_t {
         eTrustedOverlayChanged = 0x4000'00000000,
         eDropInputModeChanged = 0x8000'00000000,
         eExtendedRangeBrightnessChanged = 0x10000'00000000,
+        eEdgeExtensionChanged = 0x20000'00000000,
+        eBufferReleaseChannelChanged = 0x40000'00000000,
+        ePictureProfileHandleChanged = 0x80000'00000000,
+        eAppContentPriorityChanged = 0x100000'00000000,
+        eClientDrawnCornerRadiusChanged = 0x200000'00000000,
+        eBorderSettingsChanged = 0x400000'00000000,
+        eBoxShadowSettingsChanged = 0x800000'00000000,
+        eStopLayerChanged = 0x1000000'00000000,
+        eBackgroundBlurScaleChanged = 0x2000000'00000000,
+        eSystemContentPriorityChanged = 0x4000000'00000000,
     };
 
     layer_state_t();
@@ -236,10 +279,10 @@ struct layer_state_t {
     // Geometry updates.
     static constexpr uint64_t GEOMETRY_CHANGES = layer_state_t::eBufferCropChanged |
             layer_state_t::eBufferTransformChanged | layer_state_t::eCornerRadiusChanged |
-            layer_state_t::eCropChanged | layer_state_t::eDestinationFrameChanged |
-            layer_state_t::eMatrixChanged | layer_state_t::ePositionChanged |
-            layer_state_t::eTransformToDisplayInverseChanged |
-            layer_state_t::eTransparentRegionChanged;
+            layer_state_t::eClientDrawnCornerRadiusChanged | layer_state_t::eCropChanged |
+            layer_state_t::eDestinationFrameChanged | layer_state_t::eMatrixChanged |
+            layer_state_t::ePositionChanged | layer_state_t::eTransformToDisplayInverseChanged |
+            layer_state_t::eTransparentRegionChanged | layer_state_t::eEdgeExtensionChanged;
 
     // Buffer and related updates.
     static constexpr uint64_t BUFFER_CHANGES = layer_state_t::eApiChanged |
@@ -249,17 +292,20 @@ struct layer_state_t {
             layer_state_t::eTransformToDisplayInverseChanged |
             layer_state_t::eTransparentRegionChanged |
             layer_state_t::eExtendedRangeBrightnessChanged |
-            layer_state_t::eDesiredHdrHeadroomChanged;
+            layer_state_t::eDesiredHdrHeadroomChanged | layer_state_t::eLutsChanged;
 
     // Content updates.
     static constexpr uint64_t CONTENT_CHANGES = layer_state_t::BUFFER_CHANGES |
             layer_state_t::eAlphaChanged | layer_state_t::eAutoRefreshChanged |
-            layer_state_t::eBackgroundBlurRadiusChanged | layer_state_t::eBackgroundColorChanged |
+            layer_state_t::eBackgroundBlurRadiusChanged |
+            layer_state_t::eBackgroundBlurScaleChanged | layer_state_t::eBackgroundColorChanged |
             layer_state_t::eBlurRegionsChanged | layer_state_t::eColorChanged |
             layer_state_t::eColorSpaceAgnosticChanged | layer_state_t::eColorTransformChanged |
             layer_state_t::eCornerRadiusChanged | layer_state_t::eDimmingEnabledChanged |
-            layer_state_t::eHdrMetadataChanged | layer_state_t::eRenderBorderChanged |
-            layer_state_t::eShadowRadiusChanged | layer_state_t::eStretchChanged;
+            layer_state_t::eHdrMetadataChanged | layer_state_t::eShadowRadiusChanged |
+            layer_state_t::eStretchChanged | layer_state_t::ePictureProfileHandleChanged |
+            layer_state_t::eAppContentPriorityChanged | layer_state_t::eBorderSettingsChanged |
+            layer_state_t::eBoxShadowSettingsChanged;
 
     // Changes which invalidates the layer's visible region in CE.
     static constexpr uint64_t CONTENT_DIRTY = layer_state_t::CONTENT_CHANGES |
@@ -268,24 +314,62 @@ struct layer_state_t {
     // Changes affecting child states.
     static constexpr uint64_t AFFECTS_CHILDREN = layer_state_t::GEOMETRY_CHANGES |
             layer_state_t::HIERARCHY_CHANGES | layer_state_t::eAlphaChanged |
-            layer_state_t::eBackgroundBlurRadiusChanged | layer_state_t::eBlurRegionsChanged |
+            layer_state_t::eBackgroundBlurRadiusChanged |
+            layer_state_t::eBackgroundBlurScaleChanged | layer_state_t::eBlurRegionsChanged |
             layer_state_t::eColorTransformChanged | layer_state_t::eCornerRadiusChanged |
             layer_state_t::eFlagsChanged | layer_state_t::eTrustedOverlayChanged |
             layer_state_t::eFrameRateChanged | layer_state_t::eFrameRateCategoryChanged |
             layer_state_t::eFrameRateSelectionStrategyChanged |
-            layer_state_t::eFrameRateSelectionPriority | layer_state_t::eFixedTransformHintChanged;
+            layer_state_t::eFrameRateSelectionPriority | layer_state_t::eFixedTransformHintChanged |
+            layer_state_t::eSystemContentPriorityChanged;
 
     // Changes affecting data sent to input.
-    static constexpr uint64_t INPUT_CHANGES = layer_state_t::eInputInfoChanged |
-            layer_state_t::eDropInputModeChanged | layer_state_t::eTrustedOverlayChanged |
-            layer_state_t::eLayerStackChanged;
+    static constexpr uint64_t INPUT_CHANGES = layer_state_t::eAlphaChanged |
+            layer_state_t::eInputInfoChanged | layer_state_t::eDropInputModeChanged |
+            layer_state_t::eTrustedOverlayChanged | layer_state_t::eLayerStackChanged;
 
     // Changes that affect the visible region on a display.
     static constexpr uint64_t VISIBLE_REGION_CHANGES = layer_state_t::GEOMETRY_CHANGES |
             layer_state_t::HIERARCHY_CHANGES | layer_state_t::eAlphaChanged;
 
+    // Changes that force GPU composition.
+    static constexpr uint64_t COMPOSITION_EFFECTS = layer_state_t::eBackgroundBlurRadiusChanged |
+            layer_state_t::eBackgroundBlurScaleChanged | layer_state_t::eBlurRegionsChanged |
+            layer_state_t::eCornerRadiusChanged | layer_state_t::eShadowRadiusChanged |
+            layer_state_t::eStretchChanged | layer_state_t::eBorderSettingsChanged |
+            layer_state_t::eBoxShadowSettingsChanged;
+
+    // Changes that affect the frame rate
+    static constexpr uint64_t FRAME_RATE_CHANGES = layer_state_t::eFrameRateCategoryChanged |
+            layer_state_t::eFrameRateSelectionStrategyChanged |
+            layer_state_t::eFrameRateSelectionPriority | layer_state_t::eFrameRateChanged;
+
     bool hasValidBuffer() const;
     void sanitize(int32_t permissions);
+
+    void updateTransparentRegion(const Region& transparentRegion);
+    const Region& getTransparentRegion() const { return mNotDefCmpState.transparentRegion; }
+    void updateSurfaceDamageRegion(const Region& surfaceDamageRegion);
+    const Region& getSurfaceDamageRegion() const { return mNotDefCmpState.surfaceDamageRegion; }
+    // Do not update state flags.  Used to set up test state.
+    void setSurfaceDamageRegion(Region&& surfaceDamageRegion) {
+        mNotDefCmpState.surfaceDamageRegion = std::move(surfaceDamageRegion);
+    }
+    void updateRelativeLayer(const sp<SurfaceControl>& relativeTo, int32_t z);
+    void updateParentLayer(const sp<SurfaceControl>& newParent);
+    void updateInputWindowInfo(const gui::WindowInfo& info);
+    const gui::WindowInfo& getWindowInfo() const { return mNotDefCmpState.windowInfo; }
+    gui::WindowInfo* editWindowInfo() { return &mNotDefCmpState.windowInfo; }
+
+    const sp<SurfaceControl>& getParentSurfaceControlForChild() const {
+        return mNotDefCmpState.parentSurfaceControlForChild;
+    }
+    const sp<SurfaceControl>& getRelativeLayerSurfaceControl() const {
+        return mNotDefCmpState.relativeLayerSurfaceControl;
+    }
+
+    bool operator==(const layer_state_t&) const = default;
+    bool operator!=(const layer_state_t&) const = default;
 
     struct matrix22_t {
         float dsdx{0};
@@ -311,30 +395,25 @@ struct layer_state_t {
     uint32_t mask;
     uint8_t reserved;
     matrix22_t matrix;
-    float cornerRadius;
+    gui::CornerRadii cornerRadii;
+    gui::CornerRadii clientDrawnCornerRadii;
+    FloatRect clientDrawnCornerRadiusCrop;
     uint32_t backgroundBlurRadius;
-
-    sp<SurfaceControl> relativeLayerSurfaceControl;
-
-    sp<SurfaceControl> parentSurfaceControlForChild;
+    float backgroundBlurScale;
 
     half4 color;
 
     // non POD must be last. see write/read
-    Region transparentRegion;
     uint32_t bufferTransform;
     bool transformToDisplayInverse;
-    Rect crop;
+    FloatRect crop;
     std::shared_ptr<BufferData> bufferData = nullptr;
     ui::Dataspace dataspace;
     HdrMetadata hdrMetadata;
-    Region surfaceDamageRegion;
     int32_t api;
     sp<NativeHandle> sidebandStream;
     mat4 colorTransform;
     std::vector<BlurRegion> blurRegions;
-
-    sp<gui::WindowInfoHandle> windowInfoHandle = sp<gui::WindowInfoHandle>::make();
 
     LayerMetadata metadata;
 
@@ -351,6 +430,12 @@ struct layer_state_t {
 
     // Draws a shadow around the surface.
     float shadowRadius;
+
+    // Draws an outline around the layer.
+    gui::BorderSettings borderSettings;
+
+    // Draws a sequence of box shadows under the layer.
+    gui::BoxShadowSettings boxShadowSettings;
 
     // Priority of the layer assigned by Window Manager.
     int32_t frameRateSelectionPriority;
@@ -386,15 +471,13 @@ struct layer_state_t {
 
     // An inherited state that indicates that this surface control and its children
     // should be trusted for input occlusion detection purposes
-    bool isTrustedOverlay;
-
-    // Flag to indicate if border needs to be enabled on the layer
-    bool borderEnabled;
-    float borderWidth;
-    half4 borderColor;
+    gui::TrustedOverlay trustedOverlay;
 
     // Stretch effect to be applied to this layer
     StretchEffect stretchEffect;
+
+    // Edge extension effect to be applied to this layer
+    gui::EdgeExtensionParameters edgeExtensionParameters;
 
     Rect bufferCrop;
     Rect destinationFrame;
@@ -406,10 +489,39 @@ struct layer_state_t {
     float currentHdrSdrRatio = 1.f;
     float desiredHdrSdrRatio = 1.f;
 
+    // Enhance the quality of the buffer contents by configurating a picture processing pipeline
+    // with values as specified by this picture profile.
+    PictureProfileHandle pictureProfileHandle{PictureProfileHandle::NONE};
+
+    // A value indicating the significance of the layer's content to the app's desired user
+    // experience. A higher value will result in more likelihood of getting access to limited
+    // resources, such as picture processing hardware.
+    int32_t appContentPriority = 0;
+
+    // A value indicating the importance of the layer's content from the perspective of system
+    // server.
+    int32_t systemContentPriority = gui::ISystemContentPriorityConstants::Unset;
+
     gui::CachingHint cachingHint = gui::CachingHint::Enabled;
 
     TrustedPresentationThresholds trustedPresentationThresholds;
     TrustedPresentationListener trustedPresentationListener;
+
+    std::shared_ptr<gui::BufferReleaseChannel::ProducerEndpoint> bufferReleaseChannel;
+
+    std::shared_ptr<gui::DisplayLuts> luts;
+
+protected:
+    struct NotDefaultComparableState {
+        Region transparentRegion;
+        Region surfaceDamageRegion;
+        gui::WindowInfo windowInfo;
+        sp<SurfaceControl> relativeLayerSurfaceControl;
+        sp<SurfaceControl> parentSurfaceControlForChild;
+
+        bool operator==(const NotDefaultComparableState& rhs) const;
+        bool operator!=(const NotDefaultComparableState& rhs) const = default;
+    } mNotDefCmpState;
 };
 
 class ComposerState {
@@ -417,6 +529,9 @@ public:
     layer_state_t state;
     status_t write(Parcel& output) const;
     status_t read(const Parcel& input);
+
+    bool operator==(const ComposerState&) const = default;
+    bool operator!=(const ComposerState&) const = default;
 };
 
 struct DisplayState {
@@ -468,28 +583,49 @@ struct DisplayState {
     Rect layerStackSpaceRect = Rect::EMPTY_RECT;
     Rect orientedDisplaySpaceRect = Rect::EMPTY_RECT;
 
-    // Exclusive to virtual displays: The sink surface into which the virtual display is rendered,
-    // and an optional resolution that overrides its default dimensions.
-    sp<IGraphicBufferProducer> surface;
+    // For physical displays, this is the resolution, which must match the active display mode. To
+    // change the resolution, the client must first call SurfaceControl.setDesiredDisplayModeSpecs
+    // with the new DesiredDisplayModeSpecs#defaultMode, then commit the matching width and height.
+    //
+    // For virtual displays, this is an optional resolution that overrides its default dimensions.
+    //
     uint32_t width = 0;
     uint32_t height = 0;
 
+    // For virtual displays, this is the sink surface into which the virtual display is rendered.
+    sp<IGraphicBufferProducer> surface;
+
     status_t write(Parcel& output) const;
     status_t read(const Parcel& input);
+
+    bool operator==(const DisplayState&) const = default;
+    bool operator!=(const DisplayState&) const = default;
 };
 
 struct InputWindowCommands {
-    std::vector<gui::FocusRequest> focusRequests;
-    std::unordered_set<sp<gui::IWindowInfosReportedListener>,
-                       SpHash<gui::IWindowInfosReportedListener>>
-            windowInfosReportedListeners;
-
+    using Listener = gui::IWindowInfosReportedListener;
+    using ListenerSet = std::unordered_set<sp<Listener>, SpHash<Listener>>;
     // Merges the passed in commands and returns true if there were any changes.
     bool merge(const InputWindowCommands& other);
     bool empty() const;
     void clear();
+    void addFocusRequest(const gui::FocusRequest& request) { focusRequests.push_back(request); }
+    void addWindowInfosReportedListener(const sp<Listener>& listener) {
+        windowInfosReportedListeners.insert(listener);
+    }
+    ListenerSet&& releaseListeners() { return std::move(windowInfosReportedListeners); }
+
     status_t write(Parcel& output) const;
     status_t read(const Parcel& input);
+
+    std::span<const gui::FocusRequest> getFocusRequests() const { return focusRequests; }
+    const ListenerSet& getListeners() const { return windowInfosReportedListeners; }
+    bool operator==(const InputWindowCommands&) const = default;
+    bool operator!=(const InputWindowCommands&) const = default;
+
+private:
+    std::vector<gui::FocusRequest> focusRequests;
+    ListenerSet windowInfosReportedListeners;
 };
 
 static inline int compare_type(const ComposerState& lhs, const ComposerState& rhs) {
@@ -500,6 +636,11 @@ static inline int compare_type(const ComposerState& lhs, const ComposerState& rh
 
 static inline int compare_type(const DisplayState& lhs, const DisplayState& rhs) {
     return compare_type(lhs.token, rhs.token);
+}
+
+static inline bool isFrameBarrierNewer(uint32_t producerIdA, uint64_t frameNumberA,
+                                       uint32_t producerIdB, uint64_t frameNumberB) {
+    return producerIdA > producerIdB || (producerIdA == producerIdB && frameNumberA > frameNumberB);
 }
 
 }; // namespace android

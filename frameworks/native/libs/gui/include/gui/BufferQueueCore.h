@@ -17,6 +17,9 @@
 #ifndef ANDROID_GUI_BUFFERQUEUECORE_H
 #define ANDROID_GUI_BUFFERQUEUECORE_H
 
+#include <com_android_graphics_libgui_flags.h>
+
+#include <gui/AdditionalOptions.h>
 #include <gui/BufferItem.h>
 #include <gui/BufferQueueDefs.h>
 #include <gui/BufferSlot.h>
@@ -29,10 +32,11 @@
 #include <utils/Trace.h>
 #include <utils/Vector.h>
 
-#include <list>
-#include <set>
-#include <mutex>
 #include <condition_variable>
+#include <list>
+#include <mutex>
+#include <set>
+#include <vector>
 
 #define ATRACE_BUFFER_INDEX(index)                                                        \
     do {                                                                                  \
@@ -47,11 +51,17 @@ namespace android {
 
 class IConsumerListener;
 class IProducerListener;
+#ifdef ENABLE_BQC_TESTING
+class MockBufferQueueCore;
+#endif
 
 class BufferQueueCore : public virtual RefBase {
 
     friend class BufferQueueProducer;
     friend class BufferQueueConsumer;
+#ifdef ENABLE_BQC_TESTING
+    friend class TestableBufferQueueCore;
+#endif
 
 public:
     // Used as a placeholder slot number when the value isn't pointing to an
@@ -77,9 +87,18 @@ public:
     BufferQueueCore();
     virtual ~BufferQueueCore();
 
+protected:
+    // Wake up any threads waiting for a buffer release. The BufferQueue mutex should always held
+    // when this method is called.
+    virtual void notifyBufferReleased() const;
+
 private:
     // Dump our state in a string
     void dumpState(const String8& prefix, String8* outResult) const;
+
+    // getTotalSlotCountLocked returns the total number of slots in use by the
+    // buffer queue at this time.
+    int getTotalSlotCountLocked() const;
 
     // getMinUndequeuedBufferCountLocked returns the minimum number of buffers
     // that must remain in a state other than DEQUEUED. The async parameter
@@ -110,6 +129,10 @@ private:
     int getMaxBufferCountLocked(bool asyncMode,
             bool dequeueBufferCannotBlock, int maxBufferCount) const;
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+    // This resizes mSlots to the given size, but only if it's increasing.
+    status_t extendSlotCountLocked(int size);
+#endif
     // clearBufferSlotLocked frees the GraphicBuffer and sync resources for the
     // given slot.
     void clearBufferSlotLocked(int slot);
@@ -117,11 +140,6 @@ private:
     // freeAllBuffersLocked frees the GraphicBuffer and sync resources for
     // all slots, even if they're currently dequeued, queued, or acquired.
     void freeAllBuffersLocked();
-
-    // discardFreeBuffersLocked releases all currently-free buffers held by the
-    // queue, in order to reduce the memory consumption of the queue to the
-    // minimum possible without discarding data.
-    void discardFreeBuffersLocked();
 
     // If delta is positive, makes more slots available. If negative, takes
     // away slots. Returns false if the request can't be met.
@@ -189,8 +207,12 @@ private:
     // callback is registered by the listener. When set to false,
     // mConnectedProducerListener will not trigger onBufferReleased() callback.
     bool mBufferReleasedCbEnabled;
+    // mBufferAttachedCbEnabled is used to indicate whether onBufferAttached()
+    // callback is registered by the listener. When set to false,
+    // mConnectedProducerListener will not trigger onBufferAttached() callback.
+    bool mBufferAttachedCbEnabled;
 
-    // mSlots is an array of buffer slots that must be mirrored on the producer
+    // mSlots is a collection of buffer slots that must be mirrored on the producer
     // side. This allows buffer ownership to be transferred between the producer
     // and consumer without sending a GraphicBuffer over Binder. The entire
     // array is initialized to NULL at construction time, and buffers are
@@ -252,8 +274,14 @@ private:
     // is specified.
     android_dataspace mDefaultBufferDataSpace;
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+    // mAllowExtendedSlotCount is set by the consumer to permit the producer to
+    // request an unlimited number of slots.
+    bool mAllowExtendedSlotCount;
+#endif
+
     // mMaxBufferCount is the limit on the number of buffers that will be
-    // allocated at one time. This limit can be set by the consumer.
+    // allocated at one time.
     int mMaxBufferCount;
 
     // mMaxAcquiredBufferCount is the number of buffers that the consumer may
@@ -357,6 +385,14 @@ private:
     // This allows the consumer to acquire an additional buffer if that buffer is not droppable and
     // will eventually be released or acquired by the consumer.
     bool mAllowExtraAcquire = false;
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
+    // Additional options to pass when allocating GraphicBuffers.
+    // GenerationID changes when the options change, indicating reallocation is required
+    uint32_t mAdditionalOptionsGenerationId = 0;
+    std::vector<gui::AdditionalOptions> mAdditionalOptions;
+#endif
+
 }; // class BufferQueueCore
 
 } // namespace android

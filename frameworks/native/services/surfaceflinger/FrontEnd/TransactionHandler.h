@@ -19,10 +19,11 @@
 #include <semaphore.h>
 #include <cstdint>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 #include <LocklessQueue.h>
-#include <TransactionState.h>
+#include <QueuedTransactionState.h>
 #include <android-base/thread_annotations.h>
 #include <ftl/small_map.h>
 #include <ftl/small_vector.h>
@@ -35,7 +36,7 @@ namespace surfaceflinger::frontend {
 class TransactionHandler {
 public:
     struct TransactionFlushState {
-        TransactionState* transaction;
+        QueuedTransactionState* transaction;
         bool firstTransaction = true;
         nsecs_t queueProcessTime = 0;
         // Layer handles that have transactions with buffers that are ready to be applied.
@@ -58,12 +59,14 @@ public:
     };
     using TransactionFilter = std::function<TransactionReadiness(const TransactionFlushState&)>;
 
+    TransactionReadiness isBarrierSignalledOrExpired(const TransactionFlushState&);
+
     bool hasPendingTransactions();
     // Moves transactions from the lockless queue.
     void collectTransactions();
-    std::vector<TransactionState> flushTransactions();
+    std::vector<QueuedTransactionState> flushTransactions();
     void addTransactionReadyFilter(TransactionFilter&&);
-    void queueTransaction(TransactionState&&);
+    void queueTransaction(QueuedTransactionState&&);
 
     struct StalledTransactionInfo {
         pid_t pid;
@@ -76,25 +79,39 @@ public:
     void removeFromStalledTransactions(uint64_t transactionId);
     std::optional<StalledTransactionInfo> getStalledTransactionInfo(pid_t pid);
     void onLayerDestroyed(uint32_t layerId);
+    void setTransactionBarrierTtl(std::chrono::nanoseconds ttl) { mTransactionBarrierTtl = ttl; }
 
 private:
     // For unit tests
     friend class ::android::TestableSurfaceFlinger;
+    using TransactionBarrierToken = String16;
 
-    int flushPendingTransactionQueues(std::vector<TransactionState>&, TransactionFlushState&);
-    void applyUnsignaledBufferTransaction(std::vector<TransactionState>&, TransactionFlushState&);
-    void popTransactionFromPending(std::vector<TransactionState>&, TransactionFlushState&,
-                                   std::queue<TransactionState>&);
+    int flushPendingTransactionQueues(std::vector<QueuedTransactionState>&, TransactionFlushState&);
+    void applyUnsignaledBufferTransaction(std::vector<QueuedTransactionState>&,
+                                          TransactionFlushState&);
+    void popTransactionFromPending(std::vector<QueuedTransactionState>&, TransactionFlushState&,
+                                   std::queue<QueuedTransactionState>&);
     TransactionReadiness applyFilters(TransactionFlushState&);
-    std::unordered_map<sp<IBinder>, std::queue<TransactionState>, IListenerHash>
+    std::unordered_map<sp<IBinder>, std::queue<QueuedTransactionState>, IListenerHash>
             mPendingTransactionQueues;
-    LocklessQueue<TransactionState> mLocklessTransactionQueue;
+    LocklessQueue<QueuedTransactionState> mLocklessTransactionQueue;
     std::atomic<size_t> mPendingTransactionCount = 0;
-    ftl::SmallVector<TransactionFilter, 2> mTransactionReadyFilters;
+    ftl::SmallVector<TransactionFilter, 3> mTransactionReadyFilters;
 
     std::mutex mStalledMutex;
     std::unordered_map<uint64_t /* transactionId */, StalledTransactionInfo> mStalledTransactions
             GUARDED_BY(mStalledMutex);
+    struct TransactionBarrierTokenHash {
+        std::size_t operator()(const TransactionBarrierToken& t) const {
+            return std::hash<std::u16string_view>{}(std::u16string_view(t.c_str(), t.size()));
+        }
+    };
+    std::chrono::nanoseconds mTransactionBarrierTtl = std::chrono::seconds(5);
+    // Store transaction barrier tokens that have been signalled.  Updated when
+    // a transaction with a signal token is applied.  Cleaned up when age of
+    // entries reaches a threshold (default 5s).
+    std::unordered_map<TransactionBarrierToken, nsecs_t, TransactionBarrierTokenHash>
+            mSignalledTransactionBarriers;
 };
 } // namespace surfaceflinger::frontend
 } // namespace android

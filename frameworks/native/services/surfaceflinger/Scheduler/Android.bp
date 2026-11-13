@@ -12,7 +12,6 @@ cc_defaults {
     name: "libscheduler_defaults",
     defaults: ["surfaceflinger_defaults"],
     cflags: [
-        "-DLOG_TAG=\"Scheduler\"",
         "-DATRACE_TAG=ATRACE_TAG_GRAPHICS",
     ],
     shared_libs: [
@@ -53,7 +52,10 @@ cc_library_static {
 cc_test {
     name: "libscheduler_test",
     test_suites: ["device-tests"],
-    defaults: ["libscheduler_defaults"],
+    defaults: [
+        "libscheduler_defaults",
+        "libsurfaceflinger_common_test_deps",
+    ],
     srcs: [
         "tests/FrameTargeterTest.cpp",
         "tests/PresentLatencyTrackerTest.cpp",
@@ -63,9 +65,5 @@ cc_test {
         "libgmock",
         "libgtest",
         "libscheduler",
-        "libsurfaceflingerflags_test",
-    ],
-    shared_libs: [
-        "server_configurable_flags",
     ],
 }

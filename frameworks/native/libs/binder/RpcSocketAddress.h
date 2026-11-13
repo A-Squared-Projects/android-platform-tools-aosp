@@ -39,6 +39,7 @@ public:
 class UnixSocketAddress : public RpcSocketAddress {
 public:
     explicit UnixSocketAddress(const char* path) : mAddr({.sun_family = AF_UNIX}) {
+        LOG_ALWAYS_FATAL_IF(path == nullptr, "path must not be nullptr");
         unsigned int pathLen = strlen(path) + 1;
         LOG_ALWAYS_FATAL_IF(pathLen > sizeof(mAddr.sun_path), "Socket path is too long: %u %s",
                             pathLen, path);
@@ -112,5 +113,12 @@ private:
     const char* mAddr;
     unsigned int mPort;
 };
+
+/**
+ * Connects to a single socket and produces a RpcTransportFd.
+ */
+status_t singleSocketConnection(const RpcSocketAddress& address,
+                                const std::unique_ptr<FdTrigger>& shutdownTrigger,
+                                RpcTransportFd* outFd);
 
 } // namespace android

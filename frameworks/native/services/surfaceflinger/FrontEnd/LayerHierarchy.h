@@ -35,6 +35,7 @@ class LayerHierarchyBuilder;
 // Detached - child of the parent but currently relative parented to another layer
 // Relative - relative child of the parent
 // Mirror - mirrored from another layer
+// Detached_Mirror - mirrored from another layer, ignoring local transform
 //
 // By representing the hierarchy as a graph, we can represent mirrored layer hierarchies without
 // cloning the layer requested state. The mirrored hierarchy and its corresponding
@@ -43,13 +44,18 @@ class LayerHierarchyBuilder;
 class LayerHierarchy {
 public:
     enum Variant : uint32_t {
-        Attached, // child of the parent
-        Detached, // child of the parent but currently relative parented to another layer
-        Relative, // relative child of the parent
-        Mirror,   // mirrored from another layer
+        Attached,        // child of the parent
+        Detached,        // child of the parent but currently relative parented to another layer
+        Relative,        // relative child of the parent
+        Mirror,          // mirrored from another layer
+        Detached_Mirror, // mirrored from another layer, ignoring local transform
         ftl_first = Attached,
-        ftl_last = Mirror,
+        ftl_last = Detached_Mirror,
     };
+    static inline bool isMirror(Variant variant) {
+        return ((variant == Mirror) || (variant == Detached_Mirror));
+    }
+
     // Represents a unique path to a node.
     // The layer hierarchy is represented as a graph. Each node can be visited by multiple parents.
     // This allows us to represent mirroring in an efficient way. See the example below:
@@ -96,6 +102,10 @@ public:
         // Returns true if the node is a clone.
         bool isClone() const { return !mirrorRootIds.empty(); }
 
+        TraversalPath getClonedFrom() const { return {.id = id, .variant = variant}; }
+
+        TraversalPath makeChild(uint32_t layerId, LayerHierarchy::Variant variant) const;
+
         bool operator==(const TraversalPath& other) const {
             return id == other.id && mirrorRootIds == other.mirrorRootIds;
         }
@@ -114,18 +124,6 @@ public:
         }
     };
 
-    // Helper class to add nodes to an existing traversal id and removes the
-    // node when it goes out of scope.
-    class ScopedAddToTraversalPath {
-    public:
-        ScopedAddToTraversalPath(TraversalPath& traversalPath, uint32_t layerId,
-                                 LayerHierarchy::Variant variantArg);
-        ~ScopedAddToTraversalPath();
-
-    private:
-        TraversalPath& mTraversalPath;
-        TraversalPath mParentPath;
-    };
     LayerHierarchy(RequestedLayerState* layer);
 
     // Visitor function that provides the hierarchy node and a traversal id which uniquely
@@ -141,7 +139,7 @@ public:
         if (mLayer) {
             root.id = mLayer->id;
         }
-        traverse(visitor, root);
+        traverse(visitor, root, /*depth=*/0);
     }
 
     // Traverse the hierarchy in z-order, skipping children that have relative parents.
@@ -174,6 +172,10 @@ public:
     // Traverse the hierarchy and return true if loops are found. The outInvalidRelativeRoot
     // will contain the first relative root that was visited twice in a traversal.
     bool hasRelZLoop(uint32_t& outInvalidRelativeRoot) const;
+
+    // Checks if a cycle exists at any point from the current layer. This cycle detection
+    // works for offscreen layers as well, which do not get updated in the relZLoop.
+    bool hasLayerCycle() const;
     std::vector<std::pair<LayerHierarchy*, Variant>> mChildren;
 
 private:
@@ -183,8 +185,11 @@ private:
     void removeChild(LayerHierarchy*);
     void sortChildrenByZOrder();
     void updateChild(LayerHierarchy*, LayerHierarchy::Variant);
-    void traverseInZOrder(const Visitor& visitor, LayerHierarchy::TraversalPath& parent) const;
-    void traverse(const Visitor& visitor, LayerHierarchy::TraversalPath& parent) const;
+    void traverseInZOrder(const Visitor& visitor,
+                          const LayerHierarchy::TraversalPath& parent) const;
+    void traverse(const Visitor& visitor, const LayerHierarchy::TraversalPath& parent,
+                  uint32_t depth = 0) const;
+    bool hasLayerCycle(std::unordered_set<uint32_t>& unvisited) const;
     void dump(std::ostream& out, const std::string& prefix, LayerHierarchy::Variant variant,
               bool isLastChild, bool includeMirroredHierarchy) const;
 
@@ -204,13 +209,17 @@ public:
     const LayerHierarchy& getHierarchy() const;
     const LayerHierarchy& getOffscreenHierarchy() const;
     std::string getDebugString(uint32_t layerId, uint32_t depth = 0) const;
+    void dumpLayerSample(const LayerHierarchy& layerHierarchy) const;
 
 private:
+    void logSampledChildren(const LayerHierarchy& hierarchy) const;
+
     void onLayerAdded(RequestedLayerState* layer);
     void attachToParent(LayerHierarchy*);
     void detachFromParent(LayerHierarchy*);
     void attachToRelativeParent(LayerHierarchy*);
     void detachFromRelativeParent(LayerHierarchy*);
+    std::vector<LayerHierarchy*> getDescendants(LayerHierarchy*);
     void attachHierarchyToRelativeParent(LayerHierarchy*);
     void detachHierarchyFromRelativeParent(LayerHierarchy*);
     void init(const std::vector<std::unique_ptr<RequestedLayerState>>&);

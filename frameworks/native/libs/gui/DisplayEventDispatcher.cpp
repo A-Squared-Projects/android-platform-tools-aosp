@@ -15,6 +15,7 @@
  */
 
 #define LOG_TAG "DisplayEventDispatcher"
+#define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include <cinttypes>
 #include <cstdint>
@@ -23,10 +24,13 @@
 #include <gui/DisplayEventReceiver.h>
 #include <utils/Log.h>
 #include <utils/Looper.h>
-
 #include <utils/Timers.h>
+#include <utils/Trace.h>
+
+#include <com_android_graphics_surfaceflinger_flags.h>
 
 namespace android {
+using namespace com::android::graphics::surfaceflinger;
 
 // Number of events to read at a time from the DisplayEventDispatcher pipe.
 // The value should be large enough that we can quickly drain the pipe
@@ -55,7 +59,8 @@ status_t DisplayEventDispatcher::initialize() {
     }
 
     if (mLooper != nullptr) {
-        int rc = mLooper->addFd(mReceiver.getFd(), 0, Looper::EVENT_INPUT, this, NULL);
+        int rc = mLooper->addFd(mReceiver.getFd(), 0, Looper::EVENT_INPUT,
+                                sp<DisplayEventDispatcher>::fromExisting(this), NULL);
         if (rc < 0) {
             return UNKNOWN_ERROR;
         }
@@ -160,10 +165,11 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
     while ((n = mReceiver.getEvents(buf, EVENT_BUFFER_SIZE)) > 0) {
         ALOGV("dispatcher %p ~ Read %d events.", this, int(n));
         mFrameRateOverrides.reserve(n);
+        mSupportedRefreshRates.reserve(n);
         for (ssize_t i = 0; i < n; i++) {
             const DisplayEventReceiver::Event& ev = buf[i];
             switch (ev.header.type) {
-                case DisplayEventReceiver::DISPLAY_EVENT_VSYNC:
+                case DisplayEventType::DISPLAY_EVENT_VSYNC:
                     // Later vsync events will just overwrite the info from earlier
                     // ones. That's fine, we only care about the most recent.
                     gotVsync = true;
@@ -171,8 +177,15 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
                     *outDisplayId = ev.header.displayId;
                     *outCount = ev.vsync.count;
                     *outVsyncEventData = ev.vsync.vsyncData;
+
+                    // Trace the RenderRate for this app
+                    if (ATRACE_ENABLED()) {
+                        const auto frameInterval = ev.vsync.vsyncData.frameInterval;
+                        int fps = frameInterval > 0 ? 1e9f / frameInterval : 0;
+                        ATRACE_INT("RenderRate", fps);
+                    }
                     break;
-                case DisplayEventReceiver::DISPLAY_EVENT_HOTPLUG:
+                case DisplayEventType::DISPLAY_EVENT_HOTPLUG:
                     if (ev.hotplug.connectionError == 0) {
                         dispatchHotplug(ev.header.timestamp, ev.header.displayId,
                                         ev.hotplug.connected);
@@ -181,27 +194,32 @@ bool DisplayEventDispatcher::processPendingEvents(nsecs_t* outTimestamp,
                                                        ev.hotplug.connectionError);
                     }
                     break;
-                case DisplayEventReceiver::DISPLAY_EVENT_MODE_CHANGE:
-                    dispatchModeChanged(ev.header.timestamp, ev.header.displayId,
-                                        ev.modeChange.modeId, ev.modeChange.vsyncPeriod);
+                case DisplayEventType::DISPLAY_EVENT_MODE_AND_FRAME_RATE_CHANGE:
+                    dispatchModeChangedWithFrameRateOverrides(ev.header.timestamp,
+                                                              ev.header.displayId,
+                                                              ev.modeChange.modeId,
+                                                              ev.modeChange.vsyncPeriod,
+                                                              ev.modeChange.appVsyncOffset,
+                                                              ev.modeChange.presentationDeadline,
+                                                              std::move(mFrameRateOverrides),
+                                                              std::move(mSupportedRefreshRates));
                     break;
-                case DisplayEventReceiver::DISPLAY_EVENT_NULL:
+                case DisplayEventType::DISPLAY_EVENT_NULL:
                     dispatchNullEvent(ev.header.timestamp, ev.header.displayId);
                     break;
-                case DisplayEventReceiver::DISPLAY_EVENT_FRAME_RATE_OVERRIDE:
+                case DisplayEventType::DISPLAY_EVENT_FRAME_RATE_OVERRIDE:
                     mFrameRateOverrides.emplace_back(ev.frameRateOverride);
                     break;
-                case DisplayEventReceiver::DISPLAY_EVENT_FRAME_RATE_OVERRIDE_FLUSH:
-                    dispatchFrameRateOverrides(ev.header.timestamp, ev.header.displayId,
-                                               std::move(mFrameRateOverrides));
+                case DisplayEventType::DISPLAY_EVENT_SUPPORTED_REFRESH_RATE:
+                    mSupportedRefreshRates.emplace_back(ev.supportedRefreshRate);
                     break;
-                case DisplayEventReceiver::DISPLAY_EVENT_HDCP_LEVELS_CHANGE:
+                case DisplayEventType::DISPLAY_EVENT_HDCP_LEVELS_CHANGE:
                     dispatchHdcpLevelsChanged(ev.header.displayId,
                                               ev.hdcpLevelsChange.connectedLevel,
                                               ev.hdcpLevelsChange.maxLevel);
                     break;
-                default:
-                    ALOGW("dispatcher %p ~ ignoring unknown event type %#x", this, ev.header.type);
+                case DisplayEventType::DISPLAY_EVENT_MODE_REJECTION:
+                    dispatchModeRejected(ev.header.displayId, ev.modeRejection.modeId);
                     break;
             }
         }

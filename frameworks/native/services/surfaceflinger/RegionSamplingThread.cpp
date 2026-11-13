@@ -21,11 +21,10 @@
 
 //#define LOG_NDEBUG 0
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
-#undef LOG_TAG
-#define LOG_TAG "RegionSamplingThread"
 
 #include "RegionSamplingThread.h"
 
+#include <common/trace.h>
 #include <compositionengine/Display.h>
 #include <compositionengine/impl/OutputCompositionState.h>
 #include <cutils/properties.h>
@@ -34,15 +33,12 @@
 #include <gui/SyncScreenCaptureListener.h>
 #include <renderengine/impl/ExternalTexture.h>
 #include <ui/DisplayStatInfo.h>
-#include <utils/Trace.h>
 
 #include <string>
 
 #include "DisplayDevice.h"
-#include "DisplayRenderArea.h"
 #include "FrontEnd/LayerCreationArgs.h"
 #include "Layer.h"
-#include "Scheduler/VsyncController.h"
 #include "SurfaceFlinger.h"
 
 namespace android {
@@ -143,11 +139,30 @@ void RegionSamplingThread::removeListener(const sp<IRegionSamplingListener>& lis
     mDescriptors.erase(wp<IBinder>(IInterface::asBinder(listener)));
 }
 
+const std::vector<gui::RegionSamplingDescriptor> RegionSamplingThread::getListeners() {
+    std::lock_guard lock(mSamplingMutex);
+    std::vector<gui::RegionSamplingDescriptor> listeners;
+    for (const auto& [listener, descriptor] : mDescriptors) {
+        gui::ARect guiRect;
+        guiRect.left = descriptor.area.left;
+        guiRect.top = descriptor.area.top;
+        guiRect.right = descriptor.area.right;
+        guiRect.bottom = descriptor.area.bottom;
+
+        gui::RegionSamplingDescriptor guiDescriptor;
+        guiDescriptor.area = guiRect;
+        guiDescriptor.stopLayerId = descriptor.stopLayerId;
+        guiDescriptor.listener = descriptor.listener;
+        listeners.emplace_back(guiDescriptor);
+    }
+    return listeners;
+}
+
 void RegionSamplingThread::checkForStaleLuma() {
     std::lock_guard lock(mThreadControlMutex);
 
     if (mSampleRequestTime.has_value()) {
-        ATRACE_INT(lumaSamplingStepTag, static_cast<int>(samplingStep::waitForSamplePhase));
+        SFTRACE_INT(lumaSamplingStepTag, static_cast<int>(samplingStep::waitForSamplePhase));
         mSampleRequestTime.reset();
         mFlinger.scheduleSample();
     }
@@ -165,7 +180,7 @@ void RegionSamplingThread::doSample(
     if (mLastSampleTime + mTunables.mSamplingPeriod > now) {
         // content changed, but we sampled not too long ago, so we need to sample some time in the
         // future.
-        ATRACE_INT(lumaSamplingStepTag, static_cast<int>(samplingStep::idleTimerWaiting));
+        SFTRACE_INT(lumaSamplingStepTag, static_cast<int>(samplingStep::idleTimerWaiting));
         mSampleRequestTime = now;
         return;
     }
@@ -174,13 +189,13 @@ void RegionSamplingThread::doSample(
         // until the next vsync deadline, defer this sampling work
         // to a later frame, when hopefully there will be more time.
         if (samplingDeadline.has_value() && now + mTunables.mSamplingDuration > *samplingDeadline) {
-            ATRACE_INT(lumaSamplingStepTag, static_cast<int>(samplingStep::waitForQuietFrame));
+            SFTRACE_INT(lumaSamplingStepTag, static_cast<int>(samplingStep::waitForQuietFrame));
             mSampleRequestTime = mSampleRequestTime.value_or(now);
             return;
         }
     }
 
-    ATRACE_INT(lumaSamplingStepTag, static_cast<int>(samplingStep::sample));
+    SFTRACE_INT(lumaSamplingStepTag, static_cast<int>(samplingStep::sample));
 
     mSampleRequestTime.reset();
     mLastSampleTime = now;
@@ -197,7 +212,7 @@ void RegionSamplingThread::binderDied(const wp<IBinder>& who) {
 }
 
 float sampleArea(const uint32_t* data, int32_t width, int32_t height, int32_t stride,
-                 uint32_t orientation, const Rect& sample_area) {
+                 const Rect& sample_area) {
     if (!sample_area.isValid() || (sample_area.getWidth() > width) ||
         (sample_area.getHeight() > height)) {
         ALOGE("invalid sampling region requested");
@@ -226,7 +241,7 @@ float sampleArea(const uint32_t* data, int32_t width, int32_t height, int32_t st
 
 std::vector<float> RegionSamplingThread::sampleBuffer(
         const sp<GraphicBuffer>& buffer, const Point& leftTop,
-        const std::vector<RegionSamplingThread::Descriptor>& descriptors, uint32_t orientation) {
+        const std::vector<RegionSamplingThread::Descriptor>& descriptors) {
     void* data_raw = nullptr;
     buffer->lock(GRALLOC_USAGE_SW_READ_OFTEN, &data_raw);
     std::shared_ptr<uint32_t> data(reinterpret_cast<uint32_t*>(data_raw),
@@ -239,33 +254,18 @@ std::vector<float> RegionSamplingThread::sampleBuffer(
     std::vector<float> lumas(descriptors.size());
     std::transform(descriptors.begin(), descriptors.end(), lumas.begin(),
                    [&](auto const& descriptor) {
-                       return sampleArea(data.get(), width, height, stride, orientation,
+                       return sampleArea(data.get(), width, height, stride,
                                          descriptor.area - leftTop);
                    });
     return lumas;
 }
 
 void RegionSamplingThread::captureSample() {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     std::lock_guard lock(mSamplingMutex);
 
     if (mDescriptors.empty()) {
         return;
-    }
-
-    wp<const DisplayDevice> displayWeak;
-
-    ui::LayerStack layerStack;
-    ui::Transform::RotationFlags orientation;
-    ui::Size displaySize;
-
-    {
-        // TODO(b/159112860): Don't keep sp<DisplayDevice> outside of SF main thread
-        const sp<const DisplayDevice> display = mFlinger.getDefaultDisplayDevice();
-        displayWeak = display;
-        layerStack = display->getLayerStack();
-        orientation = ui::Transform::toRotationFlags(display->getOrientation());
-        displaySize = display->getSize();
     }
 
     std::vector<RegionSamplingThread::Descriptor> descriptors;
@@ -276,12 +276,6 @@ void RegionSamplingThread::captureSample() {
     }
 
     const Rect sampledBounds = sampleRegion.bounds();
-    constexpr bool kHintForSeamlessTransition = false;
-
-    SurfaceFlinger::RenderAreaFuture renderAreaFuture = ftl::defer([=] {
-        return DisplayRenderArea::create(displayWeak, sampledBounds, sampledBounds.getSize(),
-                                         ui::Dataspace::V0_SRGB, kHintForSeamlessTransition);
-    });
 
     std::unordered_set<sp<IRegionSamplingListener>, SpHash<IRegionSamplingListener>> listeners;
 
@@ -319,39 +313,13 @@ void RegionSamplingThread::captureSample() {
         return true;
     };
 
-    std::function<std::vector<std::pair<Layer*, sp<LayerFE>>>()> getLayerSnapshots;
-    if (mFlinger.mLayerLifecycleManagerEnabled) {
-        auto filterFn = [&](const frontend::LayerSnapshot& snapshot,
-                            bool& outStopTraversal) -> bool {
-            const Rect bounds =
-                    frontend::RequestedLayerState::reduce(Rect(snapshot.geomLayerBounds),
-                                                          snapshot.transparentRegionHint);
-            const ui::Transform transform = snapshot.geomLayerTransform;
-            return layerFilterFn(snapshot.name.c_str(), snapshot.path.id, bounds, transform,
-                                 outStopTraversal);
-        };
-        getLayerSnapshots =
-                mFlinger.getLayerSnapshotsForScreenshots(layerStack, CaptureArgs::UNSET_UID,
-                                                         filterFn);
-    } else {
-        auto traverseLayers = [&](const LayerVector::Visitor& visitor) {
-            bool stopLayerFound = false;
-            auto filterVisitor = [&](Layer* layer) {
-                // We don't want to capture any layers beyond the stop layer
-                if (stopLayerFound) return;
-
-                if (!layerFilterFn(layer->getDebugName(), layer->getSequence(),
-                                   Rect(layer->getBounds()), layer->getTransform(),
-                                   stopLayerFound)) {
-                    return;
-                }
-                visitor(layer);
-            };
-            mFlinger.traverseLayersInLayerStack(layerStack, CaptureArgs::UNSET_UID, {},
-                                                filterVisitor);
-        };
-        getLayerSnapshots = RenderArea::fromTraverseLayersLambda(traverseLayers);
-    }
+    auto filterFn = [&](const frontend::LayerSnapshot& snapshot, bool& outStopTraversal) -> bool {
+        const Rect bounds = frontend::RequestedLayerState::reduce(Rect(snapshot.geomLayerBounds),
+                                                                  snapshot.transparentRegionHint);
+        const ui::Transform transform = snapshot.geomLayerTransform;
+        return layerFilterFn(snapshot.name.c_str(), snapshot.path.id, bounds, transform,
+                             outStopTraversal);
+    };
 
     std::shared_ptr<renderengine::ExternalTexture> buffer = nullptr;
     if (mCachedBuffer && mCachedBuffer->getBuffer()->getWidth() == sampledBounds.getWidth() &&
@@ -372,15 +340,28 @@ void RegionSamplingThread::captureSample() {
                                                              WRITEABLE);
     }
 
-    constexpr bool kRegionSampling = true;
-    constexpr bool kGrayscale = false;
-    constexpr bool kIsProtected = false;
+    SurfaceFlinger::ScreenshotArgs
+            screenshotArgs{.captureTypeVariant = std::monostate{},
+                           .displayIdVariant = std::nullopt,
+                           .snapshotRequest =
+                                   SurfaceFlinger::SnapshotRequestArgs{.uid = gui::Uid::INVALID,
+                                                                       .snapshotFilterFn =
+                                                                               filterFn},
+                           .sourceCrop = sampledBounds,
+                           .size = sampledBounds.getSize(),
+                           .dataspace = ui::Dataspace::V0_SRGB,
+                           .disableBlur = true,
+                           .isGrayscale = false,
+                           .isSecure = true,
+                           .preserveDisplayColors = false,
+                           .debugName = "RegionSampling"};
 
-    if (const auto fenceResult =
-                mFlinger.captureScreenCommon(std::move(renderAreaFuture), getLayerSnapshots, buffer,
-                                             kRegionSampling, kGrayscale, kIsProtected, nullptr)
-                        .get();
-        fenceResult.ok()) {
+    std::vector<std::pair<Layer*, sp<LayerFE>>> layers;
+    mFlinger.setScreenshotSnapshotsAndDisplayState(screenshotArgs,
+                                                   static_cast<ui::PixelFormat>(
+                                                           buffer->getPixelFormat()));
+    FenceResult fenceResult = mFlinger.captureScreenshot(screenshotArgs, buffer, nullptr).get();
+    if (fenceResult.ok()) {
         fenceResult.value()->waitForever(LOG_TAG);
     }
 
@@ -392,8 +373,8 @@ void RegionSamplingThread::captureSample() {
     }
 
     ALOGV("Sampling %zu descriptors", activeDescriptors.size());
-    std::vector<float> lumas = sampleBuffer(buffer->getBuffer(), sampledBounds.leftTop(),
-                                            activeDescriptors, orientation);
+    std::vector<float> lumas =
+            sampleBuffer(buffer->getBuffer(), sampledBounds.leftTop(), activeDescriptors);
     if (lumas.size() != activeDescriptors.size()) {
         ALOGW("collected %zu median luma values for %zu descriptors", lumas.size(),
               activeDescriptors.size());
@@ -405,7 +386,7 @@ void RegionSamplingThread::captureSample() {
     }
 
     mCachedBuffer = buffer;
-    ATRACE_INT(lumaSamplingStepTag, static_cast<int>(samplingStep::noWorkNeeded));
+    SFTRACE_INT(lumaSamplingStepTag, static_cast<int>(samplingStep::noWorkNeeded));
 }
 
 // NO_THREAD_SAFETY_ANALYSIS is because std::unique_lock presently lacks thread safety annotations.

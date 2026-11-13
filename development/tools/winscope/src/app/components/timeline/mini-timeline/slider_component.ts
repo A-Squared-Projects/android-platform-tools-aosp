@@ -15,6 +15,12 @@
  */
 
 import {
+  CdkDragEnd,
+  CdkDragMove,
+  CdkDragStart,
+  DragDropModule,
+} from '@angular/cdk/drag-drop';
+import {
   ChangeDetectorRef,
   Component,
   ElementRef,
@@ -27,15 +33,20 @@ import {
   ViewChild,
 } from '@angular/core';
 import {Color} from 'app/colors';
-import {assertDefined} from 'common/assert_utils';
-import {Point} from 'common/geometry_types';
-import {TimeRange, Timestamp} from 'common/time';
-import {NO_TIMEZONE_OFFSET_FACTORY} from 'common/timestamp_factory';
-import {TracePosition} from 'trace/trace_position';
+import {assertDefined} from 'common/assert';
+import {Point} from 'common/geometry/point';
+import {TimeRange, Timestamp} from 'common/time/time';
+import {ComponentTimestampConverter} from 'common/time/timestamp_converter';
+import {TracePosition} from 'trace_api/trace_position';
 import {Transformer} from './transformer';
 
+/**
+ * A component for displaying a slider to control the zoom level of the timeline.
+ */
 @Component({
   selector: 'slider',
+  standalone: true,
+  imports: [DragDropModule],
   template: `
     <div id="timeline-slider-box" #sliderBox>
       <div class="background line"></div>
@@ -60,7 +71,7 @@ import {Transformer} from './transformer';
     `
       #timeline-slider-box {
         position: relative;
-        margin: 5px 0;
+        margin-bottom: 5px;
       }
 
       #timeline-slider-box,
@@ -79,11 +90,11 @@ import {Transformer} from './transformer';
 
       .background.line {
         width: 100%;
-        background: ${Color.GUIDE_BAR_LIGHT};
+        background: ${Color.GUIDE_BAR};
       }
 
       .selection.line {
-        background: ${Color.SELECTOR_COLOR};
+        background: var(--slider-border-color);
       }
 
       .slider {
@@ -95,13 +106,13 @@ import {Transformer} from './transformer';
 
       .handle {
         flex-grow: 1;
-        background: ${Color.SELECTION_BACKGROUND};
+        background: var(--slider-background-color);
         cursor: grab;
       }
 
       .cropper {
         width: 5px;
-        background: ${Color.SELECTOR_COLOR};
+        background: var(--slider-border-color);
       }
 
       .cropper.left,
@@ -123,6 +134,7 @@ export class SliderComponent {
   @Input() fullRange: TimeRange | undefined;
   @Input() zoomRange: TimeRange | undefined;
   @Input() currentPosition: TracePosition | undefined;
+  @Input() timestampConverter: ComponentTimestampConverter | undefined;
 
   @Output() readonly onZoomChanged = new EventEmitter<TimeRange>();
 
@@ -132,7 +144,9 @@ export class SliderComponent {
   viewInitialized = false;
   cursorOffset = 0;
 
-  @ViewChild('sliderBox', {static: false}) sliderBox!: ElementRef;
+  @ViewChild('sliderBox', {static: false}) sliderBox:
+    | ElementRef<HTMLElement>
+    | undefined;
 
   constructor(@Inject(ChangeDetectorRef) private cdr: ChangeDetectorRef) {}
 
@@ -151,8 +165,8 @@ export class SliderComponent {
 
   syncDragPositionTo(zoomRange: TimeRange) {
     this.sliderWidth = this.computeSliderWidth();
-    const middleOfZoomRange = zoomRange.from.plus(
-      zoomRange.to.minus(zoomRange.from).div(2n),
+    const middleOfZoomRange = zoomRange.from.add(
+      zoomRange.to.minus(zoomRange.from).div(2n).getValueNs(),
     );
 
     this.dragPosition = {
@@ -170,9 +184,13 @@ export class SliderComponent {
 
   getTransformer(): Transformer {
     const width = this.viewInitialized
-      ? this.sliderBox.nativeElement.offsetWidth
+      ? assertDefined(this.sliderBox).nativeElement.offsetWidth
       : 0;
-    return new Transformer(assertDefined(this.fullRange), {from: 0, to: width});
+    return new Transformer(
+      assertDefined(this.fullRange),
+      {from: 0, to: width},
+      assertDefined(this.timestampConverter),
+    );
   }
 
   ngAfterViewInit(): void {
@@ -205,14 +223,14 @@ export class SliderComponent {
   }
 
   slideStartX: number | undefined = undefined;
-  onSlideStart(e: any) {
+  onSlideStart(e: CdkDragStart) {
     this.dragging = true;
     this.slideStartX = e.source.freeDragPosition.x;
     document.body.classList.add('inheritCursors');
     document.body.style.cursor = 'grabbing';
   }
 
-  onSlideEnd(e: any) {
+  onSlideEnd(e: CdkDragEnd) {
     this.dragging = false;
     this.slideStartX = undefined;
     this.syncDragPositionTo(assertDefined(this.zoomRange));
@@ -220,9 +238,9 @@ export class SliderComponent {
     document.body.style.cursor = 'unset';
   }
 
-  onSliderMove(e: any) {
+  onSliderMove(e: CdkDragMove) {
     const zoomRange = assertDefined(this.zoomRange);
-    let newX = this.slideStartX + e.distance.x;
+    let newX = assertDefined(this.slideStartX) + e.distance.x;
     if (newX < 0) {
       newX = 0;
     }
@@ -232,18 +250,16 @@ export class SliderComponent {
       .untransform(newX + this.sliderWidth / 2)
       .minus(zoomRange.to.minus(zoomRange.from).div(2n));
 
-    const to = NO_TIMEZONE_OFFSET_FACTORY.makeTimestampFromType(
-      assertDefined(this.zoomRange).to.getType(),
+    const to = assertDefined(this.timestampConverter).makeTimestampFromNs(
       from.getValueNs() +
-        (assertDefined(this.zoomRange).to.getValueNs() -
-          assertDefined(this.zoomRange).from.getValueNs()),
-      0n,
+        (assertDefined(this.zoomRange).endNs -
+          assertDefined(this.zoomRange).startNs),
     );
 
-    this.onZoomChanged.emit({from, to});
+    this.onZoomChanged.emit(new TimeRange(from, to));
   }
 
-  startMoveLeft(e: any) {
+  startMoveLeft(e: MouseEvent) {
     e.preventDefault();
 
     const startPos = e.pageX;
@@ -251,18 +267,18 @@ export class SliderComponent {
       assertDefined(this.zoomRange).from,
     );
 
-    const listener = (event: any) => {
+    const listener = (event: MouseEvent) => {
       const movedX = event.pageX - startPos;
       let from = this.getTransformer().untransform(startOffset + movedX);
-      if (from.getValueNs() < assertDefined(this.fullRange).from.getValueNs()) {
+      if (from.getValueNs() < assertDefined(this.fullRange).startNs) {
         from = assertDefined(this.fullRange).from;
       }
-      if (from.getValueNs() > assertDefined(this.zoomRange).to.getValueNs()) {
+      if (from.getValueNs() > assertDefined(this.zoomRange).endNs) {
         from = assertDefined(this.zoomRange).to;
       }
       const to = assertDefined(this.zoomRange).to;
 
-      this.onZoomChanged.emit({from, to});
+      this.onZoomChanged.emit(new TimeRange(from, to));
     };
     addEventListener('mousemove', listener);
 
@@ -273,7 +289,7 @@ export class SliderComponent {
     addEventListener('mouseup', mouseUpListener);
   }
 
-  startMoveRight(e: any) {
+  startMoveRight(e: MouseEvent) {
     e.preventDefault();
 
     const startPos = e.pageX;
@@ -281,18 +297,18 @@ export class SliderComponent {
       assertDefined(this.zoomRange).to,
     );
 
-    const listener = (event: any) => {
+    const listener = (event: MouseEvent) => {
       const movedX = event.pageX - startPos;
       const from = assertDefined(this.zoomRange).from;
       let to = this.getTransformer().untransform(startOffset + movedX);
-      if (to.getValueNs() > assertDefined(this.fullRange).to.getValueNs()) {
+      if (to.getValueNs() > assertDefined(this.fullRange).endNs) {
         to = assertDefined(this.fullRange).to;
       }
-      if (to.getValueNs() < assertDefined(this.zoomRange).from.getValueNs()) {
+      if (to.getValueNs() < assertDefined(this.zoomRange).startNs) {
         to = assertDefined(this.zoomRange).from;
       }
 
-      this.onZoomChanged.emit({from, to});
+      this.onZoomChanged.emit(new TimeRange(from, to));
     };
     addEventListener('mousemove', listener);
 
@@ -304,4 +320,7 @@ export class SliderComponent {
   }
 }
 
-export const MIN_SLIDER_WIDTH = 50;
+/**
+ * The minimum width of the slider in pixels.
+ */
+export const MIN_SLIDER_WIDTH = 30;

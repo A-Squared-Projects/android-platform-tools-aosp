@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-import {assertDefined} from 'common/assert_utils';
+import {assertDefined} from 'common/assert';
 import {HierarchyTreeBuilder} from 'test/unit/hierarchy_tree_builder';
-import {TraceRect} from 'trace/trace_rect';
-import {TraceRectBuilder} from 'trace/trace_rect_builder';
-import {HierarchyTreeNode} from 'trace/tree_node/hierarchy_tree_node';
+import {HierarchyTreeNode} from 'tree_node/hierarchy_tree_node';
+import {TraceRect} from 'tree_node/trace_rect';
+import {TraceRectBuilder} from 'tree_node/trace_rect_builder';
 import {RectsComputation} from './rects_computation';
 
-describe('RectsComputation', () => {
+describe('ViewCapture RectsComputation', () => {
   let hierarchyRoot: HierarchyTreeNode;
   let computation: RectsComputation;
 
@@ -41,6 +41,7 @@ describe('RectsComputation', () => {
         translationX: 0,
         translationY: 0,
         isComputedVisible: true,
+        alpha: 1,
       })
       .setChildren([
         {
@@ -57,6 +58,7 @@ describe('RectsComputation', () => {
             height: 2,
             translationX: 0,
             translationY: 0,
+            alpha: 1,
           },
           children: [
             {
@@ -73,6 +75,7 @@ describe('RectsComputation', () => {
                 height: 3,
                 translationX: 0,
                 translationY: 0,
+                alpha: 1,
               },
               children: [],
             },
@@ -93,12 +96,12 @@ describe('RectsComputation', () => {
         .setHeight(1)
         .setId('ViewNode test.package.name@123456789')
         .setName('test.package.name@123456789')
-        .setCornerRadius(0)
         .setGroupId(0)
         .setIsVisible(true)
         .setIsDisplay(false)
-        .setIsVirtual(false)
         .setDepth(0)
+        .setOpacity(1)
+        .setIsSpy(false)
         .build(),
 
       new TraceRectBuilder()
@@ -108,12 +111,12 @@ describe('RectsComputation', () => {
         .setHeight(2)
         .setId('ViewNode test.package.name@234567891')
         .setName('test.package.name@234567891')
-        .setCornerRadius(0)
         .setGroupId(0)
         .setIsVisible(false)
         .setIsDisplay(false)
-        .setIsVirtual(false)
         .setDepth(4)
+        .setOpacity(1)
+        .setIsSpy(false)
         .build(),
 
       new TraceRectBuilder()
@@ -123,12 +126,12 @@ describe('RectsComputation', () => {
         .setHeight(3)
         .setId('ViewNode test.package.name@345678912')
         .setName('test.package.name@345678912')
-        .setCornerRadius(0)
         .setGroupId(0)
         .setIsVisible(false)
         .setIsDisplay(false)
-        .setIsVirtual(false)
         .setDepth(8)
+        .setOpacity(1)
+        .setIsSpy(false)
         .build(),
     ];
 

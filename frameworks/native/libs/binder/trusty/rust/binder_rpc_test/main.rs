@@ -19,7 +19,7 @@ use binder::{BinderFeatures, IBinder, Status, StatusCode, Strong};
 use binder_rpc_test_aidl::aidl::IBinderRpcSession::{BnBinderRpcSession, IBinderRpcSession};
 use binder_rpc_test_aidl::aidl::IBinderRpcTest::{BnBinderRpcTest, IBinderRpcTest};
 use binder_rpc_test_session::MyBinderRpcSession;
-use libc::{clock_gettime, CLOCK_REALTIME};
+use libc::{clock_gettime, CLOCK_BOOTTIME};
 use rpcbinder::RpcSession;
 use trusty_std::ffi::{CString, FallibleCString};
 
@@ -56,7 +56,7 @@ fn get_time_ns() -> u64 {
     let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
 
     // Safety: Passing valid pointer to variable ts which lives past end of call
-    assert_eq!(unsafe { clock_gettime(CLOCK_REALTIME, &mut ts) }, 0);
+    assert_eq!(unsafe { clock_gettime(CLOCK_BOOTTIME, &mut ts) }, 0);
 
     ts.tv_sec as u64 * 1_000_000_000u64 + ts.tv_nsec as u64
 }
@@ -113,6 +113,16 @@ service_test! {repeat_their_binder, repeat_their_binder_rust, |srv: Strong<dyn I
     let in_binder = session.unwrap().as_binder();
     let out_binder = srv.repeatBinder(Some(&in_binder));
     assert_eq!(out_binder.unwrap().unwrap(), in_binder);
+}}
+
+service_test! {repeat_bytes, repeat_bytes_rust, |srv: Strong<dyn IBinderRpcTest>| {
+    let bytes = vec![b'a'; 512];
+    assert_eq!(srv.repeatBytes(&bytes), Ok(bytes));
+}}
+
+service_test! {repeat_strings, repeat_strings_rust, |srv: Strong<dyn IBinderRpcTest>| {
+    let strings: Vec<_> = ["some strings", "for", "srv to echo back to us"].iter().map(|s| s.to_string()).collect();
+    assert_eq!(srv.repeatStrings(&strings), Ok(strings));
 }}
 
 service_test! {hold_binder, hold_binder_rust, |srv: Strong<dyn IBinderRpcTest>| {

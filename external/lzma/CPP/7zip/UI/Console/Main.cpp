@@ -908,9 +908,12 @@ int Main2(
 
   if (options.EnableHeaders)
   {
-    ShowCopyrightAndHelp(g_StdStream, false);
-    if (!parser.Parse1Log.IsEmpty())
-      *g_StdStream << parser.Parse1Log;
+    if (g_StdStream)
+    {
+      ShowCopyrightAndHelp(g_StdStream, false);
+      if (!parser.Parse1Log.IsEmpty())
+        *g_StdStream << parser.Parse1Log;
+    }
   }
 
   parser.Parse2(options);
@@ -1280,7 +1283,9 @@ int Main2(
     {
       CExtractScanConsole scan;
       
-      scan.Init(options.EnableHeaders ? g_StdStream : NULL, g_ErrStream, percentsStream);
+      scan.Init(options.EnableHeaders ? g_StdStream : NULL,
+          g_ErrStream, percentsStream,
+          options.DisablePercents);
       scan.SetWindowWidth(consoleWidth);
 
       if (g_StdStream && options.EnableHeaders)
@@ -1330,7 +1335,7 @@ int Main2(
       ecs->Password = options.Password;
       #endif
 
-      ecs->Init(g_StdStream, g_ErrStream, percentsStream);
+      ecs->Init(g_StdStream, g_ErrStream, percentsStream, options.DisablePercents);
       ecs->MultiArcMode = (ArchivePathsSorted.Size() > 1);
 
       ecs->LogLevel = options.LogLevel;
@@ -1494,6 +1499,7 @@ int Main2(
       CListOptions lo;
       lo.ExcludeDirItems = options.Censor.ExcludeDirItems;
       lo.ExcludeFileItems = options.Censor.ExcludeFileItems;
+      lo.DisablePercents = options.DisablePercents;
 
       hresultMain = ListArchives(
           lo,
@@ -1538,7 +1544,7 @@ int Main2(
       uo.SfxModule = kDefaultSfxModule;
 
     COpenCallbackConsole openCallback;
-    openCallback.Init(g_StdStream, g_ErrStream, percentsStream);
+    openCallback.Init(g_StdStream, g_ErrStream, percentsStream, options.DisablePercents);
 
     #ifndef Z7_NO_CRYPTO
     bool passwordIsDefined =
@@ -1563,7 +1569,7 @@ int Main2(
     callback.StdOutMode = uo.StdOutMode;
     callback.Init(
       // NULL,
-      g_StdStream, g_ErrStream, percentsStream);
+      g_StdStream, g_ErrStream, percentsStream, options.DisablePercents);
 
     CUpdateErrorInfo errorInfo;
 
@@ -1598,7 +1604,7 @@ int Main2(
     if (percentsStream)
       callback.SetWindowWidth(consoleWidth);
   
-    callback.Init(g_StdStream, g_ErrStream, percentsStream);
+    callback.Init(g_StdStream, g_ErrStream, percentsStream, options.DisablePercents);
     callback.PrintHeaders = options.EnableHeaders;
     callback.PrintFields = options.ListFields;
 

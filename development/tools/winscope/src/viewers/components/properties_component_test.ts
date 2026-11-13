@@ -13,62 +13,66 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import {ClipboardModule} from '@angular/cdk/clipboard';
 import {CommonModule} from '@angular/common';
-import {
-  ComponentFixture,
-  ComponentFixtureAutoDetect,
-  TestBed,
-} from '@angular/core/testing';
+import {ComponentFixtureAutoDetect, TestBed} from '@angular/core/testing';
 import {FormsModule, ReactiveFormsModule} from '@angular/forms';
-import {MatCheckboxModule} from '@angular/material/checkbox';
+import {MatButtonModule} from '@angular/material/button';
 import {MatDividerModule} from '@angular/material/divider';
 import {MatFormFieldModule} from '@angular/material/form-field';
 import {MatIconModule} from '@angular/material/icon';
 import {MatInputModule} from '@angular/material/input';
 import {MatTooltipModule} from '@angular/material/tooltip';
 import {BrowserAnimationsModule} from '@angular/platform-browser/animations';
-import {PersistentStore} from 'common/persistent_store';
-import {TreeNodeUtils} from 'test/unit/tree_node_utils';
-import {HierarchyTreeNodeDataViewComponent} from './hierarchy_tree_node_data_view_component';
+import {FilterFlag} from 'common/filter_flag';
+import {PersistentStore} from 'common/store/persistent_store';
+import {DOMTestHelper} from 'test/unit/dom_test_helpers';
+import {PropertyTreeBuilder} from 'test/unit/property_tree_builder';
+import {TraceType} from 'trace_api/trace_type';
+import {TextFilter} from 'viewers/common/text_filter';
+import {UiPropertyTreeNode} from 'viewers/common/ui_property_tree_node';
+import {ViewerEvents} from 'viewers/common/viewer_events';
+import {CollapsibleSectionTitleComponent} from './collapsible_section_title_component';
 import {PropertiesComponent} from './properties_component';
 import {PropertyTreeNodeDataViewComponent} from './property_tree_node_data_view_component';
+import {SearchBoxComponent} from './search_box_component';
 import {SurfaceFlingerPropertyGroupsComponent} from './surface_flinger_property_groups_component';
 import {TreeComponent} from './tree_component';
 import {TreeNodeComponent} from './tree_node_component';
+import {UserOptionsComponent} from './user_options_component';
 
 describe('PropertiesComponent', () => {
-  let fixture: ComponentFixture<PropertiesComponent>;
   let component: PropertiesComponent;
-  let htmlElement: HTMLElement;
+  let dom: DOMTestHelper<PropertiesComponent>;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       providers: [{provide: ComponentFixtureAutoDetect, useValue: true}],
-      declarations: [
-        PropertiesComponent,
-        SurfaceFlingerPropertyGroupsComponent,
-        TreeComponent,
-        TreeNodeComponent,
-        HierarchyTreeNodeDataViewComponent,
-        PropertyTreeNodeDataViewComponent,
-      ],
       imports: [
         CommonModule,
+        PropertyTreeNodeDataViewComponent,
+        TreeNodeComponent,
+        TreeComponent,
         MatInputModule,
         MatFormFieldModule,
-        MatCheckboxModule,
+        MatButtonModule,
         MatDividerModule,
         BrowserAnimationsModule,
         FormsModule,
         ReactiveFormsModule,
         MatIconModule,
         MatTooltipModule,
+        ClipboardModule,
+        PropertiesComponent,
+        SurfaceFlingerPropertyGroupsComponent,
+        CollapsibleSectionTitleComponent,
+        UserOptionsComponent,
+        SearchBoxComponent,
       ],
     }).compileComponents();
-
-    fixture = TestBed.createComponent(PropertiesComponent);
+    const fixture = TestBed.createComponent(PropertiesComponent);
     component = fixture.componentInstance;
-    htmlElement = fixture.nativeElement;
+    dom = new DOMTestHelper(fixture, fixture.nativeElement);
 
     component.store = new PersistentStore();
     component.userOptions = {
@@ -78,8 +82,10 @@ describe('PropertiesComponent', () => {
         isUnavailable: false,
       },
     };
+    component.textFilter = new TextFilter();
+    component.traceType = TraceType.SURFACE_FLINGER;
 
-    fixture.detectChanges();
+    dom.detectChanges();
   });
 
   it('can be created', () => {
@@ -87,59 +93,65 @@ describe('PropertiesComponent', () => {
   });
 
   it('creates title', () => {
-    const title = htmlElement.querySelector('.properties-title');
-    expect(title).toBeTruthy();
+    expect(dom.find('.properties-title')).toBeDefined();
   });
 
   it('renders view controls', () => {
-    const viewControls = htmlElement.querySelector('.view-controls');
-    expect(viewControls).toBeTruthy();
-    const box = htmlElement.querySelector('.view-controls input');
-    expect(box).toBeTruthy(); //renders at least one view control option
-  });
-
-  it('disables checkboxes if option unavailable', () => {
-    let box = htmlElement.querySelector('.view-controls input');
-    expect(box).toBeTruthy();
-    expect((box as HTMLInputElement).disabled).toBeFalse();
-
-    component.userOptions['showDiff'].isUnavailable = true;
-    fixture.detectChanges();
-    box = htmlElement.querySelector('.view-controls input');
-    expect((box as HTMLInputElement).disabled).toBeTrue();
-  });
-
-  it('updates tree on user option checkbox change', () => {
-    const box = htmlElement.querySelector('.view-controls input');
-    expect(box).toBeTruthy();
-
-    const spy = spyOn(component, 'onUserOptionChange');
-    (box as HTMLInputElement).checked = true;
-    (box as HTMLInputElement).dispatchEvent(new Event('click'));
-    fixture.detectChanges();
-    expect(spy).toHaveBeenCalled();
+    expect(dom.find('.view-controls')).toBeDefined();
+    expect(dom.find('.view-controls .user-option')).toBeDefined(); //renders at least one view control option
   });
 
   it('renders tree in proto dump upon selected item', () => {
-    component.propertiesTree = TreeNodeUtils.makeUiPropertyNode(
-      'selectedItem',
-      'property',
-      null,
-    );
-    fixture.detectChanges();
-    const treeEl = htmlElement.querySelector('tree-view');
-    expect(treeEl).toBeTruthy();
+    const tree = new PropertyTreeBuilder()
+      .setRootId('selectedItem')
+      .setName('property')
+      .setValue(undefined)
+      .build();
+    tree.setIsRoot(true);
+    component.propertiesTree = UiPropertyTreeNode.from(tree);
+    dom.detectChanges();
+    expect(dom.find('tree-view')).toBeDefined();
+  });
+
+  it('renders placeholder text', () => {
+    component.propertiesTree = undefined;
+    component.placeholderText = 'Placeholder text';
+    dom.detectChanges();
+    dom.get('.placeholder-text').checkTextExact('Placeholder text');
+  });
+
+  it('handles node click', () => {
+    const tree = new PropertyTreeBuilder()
+      .setRootId('selectedItem')
+      .setName('property')
+      .setValue(undefined)
+      .build();
+    tree.setIsRoot(true);
+    component.propertiesTree = UiPropertyTreeNode.from(tree);
+    dom.detectChanges();
+
+    let highlightedItem: string | undefined;
+    dom.addEventListener(ViewerEvents.HighlightedPropertyChange, (event) => {
+      highlightedItem = (event as CustomEvent).detail.id;
+    });
+
+    dom.findAndClick('tree-node');
+    expect(highlightedItem).toEqual(tree.id);
   });
 
   it('handles change in filter', () => {
-    const inputEl = htmlElement.querySelector('.title-filter input');
-    expect(inputEl).toBeTruthy();
+    let textFilter: TextFilter | undefined;
+    dom.addEventListener(ViewerEvents.PropertiesFilterChange, (event) => {
+      textFilter = (event as CustomEvent).detail;
+    });
+    dom.findAndClick('.search-box button');
+    dom.findAndDispatchInput('.title-section', 'Root');
+    expect(textFilter).toEqual(new TextFilter('Root', [FilterFlag.MATCH_CASE]));
+  });
 
-    const spy = spyOn(component, 'filterTree');
-    (inputEl as HTMLInputElement).value = 'Root';
-    (inputEl as HTMLInputElement).dispatchEvent(new Event('input'));
-    fixture.detectChanges();
+  it('handles collapse button click', () => {
+    const spy = spyOn(component.collapseButtonClicked, 'emit');
+    dom.findAndClick('collapsible-section-title button');
     expect(spy).toHaveBeenCalled();
-    expect(component.filterString).toBe('Root');
   });
 });

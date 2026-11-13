@@ -74,6 +74,8 @@ FlagList kMountFlagsList[] = {
         {"private", MS_PRIVATE},
         {"slave", MS_SLAVE},
         {"shared", MS_SHARED},
+        {"lazytime", MS_LAZYTIME},
+        {"nosymfollow", MS_NOSYMFOLLOW},
         {"defaults", 0},
 };
 
@@ -168,6 +170,21 @@ void ParseUserDevices(const std::string& arg, FstabEntry* entry) {
         entry->fs_mgr_flags.is_zoned = true;
     }
     entry->user_devices.push_back(param[1]);
+
+    if (param[0] == "exp_alias") {
+        std::string_view exp_alias_prefix = "userdata_exp.";
+        std::string deviceName = android::base::Basename(param[1]);
+        if (!android::base::StartsWith(deviceName, exp_alias_prefix)) {
+            LERROR << "Device aliasing file " << deviceName << " doesn't start with "
+                   << exp_alias_prefix;
+            entry->user_devices.pop_back();
+            return;
+        }
+
+        entry->device_aliased.push_back(1);
+    } else {
+        entry->device_aliased.push_back(0);
+    }
 }
 
 bool ParseFsMgrFlags(const std::string& flags, FstabEntry* entry) {
@@ -206,6 +223,8 @@ bool ParseFsMgrFlags(const std::string& flags, FstabEntry* entry) {
         CheckFlag("metadata_csum", ext_meta_csum);
         CheckFlag("fscompress", fs_compress);
         CheckFlag("overlayfs_remove_missing_lowerdir", overlayfs_remove_missing_lowerdir);
+        CheckFlag("overlay=on", overlay_on);
+        CheckFlag("overlay=off", overlay_off);
 
 #undef CheckFlag
 
@@ -256,7 +275,7 @@ bool ParseFsMgrFlags(const std::string& flags, FstabEntry* entry) {
             if (!arg.empty() && arg.back() == '%') {
                 arg.pop_back();
                 int val;
-                if (ParseInt(arg, &val, 0, 100)) {
+                if (ParseInt(arg, &val, 0, 200)) {
                     entry->zram_size = CalculateZramSize(val);
                 } else {
                     LWARNING << "Warning: zramsize= flag malformed: " << arg;
@@ -641,6 +660,9 @@ void TransformFstabForDsu(Fstab* fstab, const std::string& dsu_slot,
                 entry->blk_device = android::gsi::kDsuUserdata;
                 entry->fs_mgr_flags.logical = true;
                 entry->fs_mgr_flags.formattable = true;
+                entry->fs_mgr_flags.is_zoned = false;
+                entry->user_devices.clear();
+                entry->device_aliased.clear();
                 if (!entry->metadata_key_dir.empty()) {
                     entry->metadata_key_dir = android::gsi::GetDsuMetadataKeyDir(dsu_slot);
                 }
@@ -942,6 +964,22 @@ std::set<std::string> GetBootDevices() {
     }
 
     return ExtraBootDevices(fstab);
+}
+
+std::string GetBootPartUuid() {
+    std::string boot_part_uuid;
+
+    if (GetBootconfig("androidboot.boot_part_uuid", &boot_part_uuid)) {
+        return boot_part_uuid;
+    }
+
+    ImportKernelCmdline([&](std::string key, std::string value) {
+        if (key == "androidboot.boot_part_uuid") {
+            boot_part_uuid = value;
+        }
+    });
+
+    return boot_part_uuid;
 }
 
 std::string GetVerityDeviceName(const FstabEntry& entry) {

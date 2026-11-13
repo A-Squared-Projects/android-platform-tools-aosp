@@ -56,6 +56,10 @@ using android::base::StringPrintf;
 #include <sys/socket.h>
 #endif
 
+#if ADB_HOST
+#include "client/transport_mdns.h"
+#endif
+
 bool gListenAll = false;
 
 struct LocalSocketType {
@@ -183,6 +187,20 @@ bool is_local_socket_spec(std::string_view spec) {
     return tcp_host_is_local(hostname);
 }
 
+bool check_adb_vsock_cid_port(int cid, int port, std::string* error) {
+#if !ADB_HOST
+    if (cid != VMADDR_CID_HOST && port != DEFAULT_ADB_LOCAL_TRANSPORT_PORT) {
+        *error = android::base::StringPrintf(
+                "Only port %d is supported for vsock connections to any CID other than %d. Got %d:%d.",
+                DEFAULT_ADB_LOCAL_TRANSPORT_PORT, VMADDR_CID_HOST, cid, port);
+        return false;
+    }
+    return true;
+#else
+    return true;
+#endif
+}
+
 bool socket_spec_connect(unique_fd* fd, std::string_view address, int* port, std::string* serial,
                          std::string* error) {
 #if !ADB_HOST
@@ -208,16 +226,15 @@ bool socket_spec_connect(unique_fd* fd, std::string_view address, int* port, std
             // Check if the address is an mdns service we can connect to.
             if (auto mdns_info = mdns_get_connect_service_info(std::string(address.substr(4)));
                 mdns_info != std::nullopt) {
-                fd->reset(network_connect(mdns_info->addr, mdns_info->port, SOCK_STREAM, 0, error));
+                fd->reset(network_connect(mdns_info->v4_address_string(), mdns_info->port,
+                                          SOCK_STREAM, 0, error));
                 if (fd->get() != -1) {
                     // TODO(joshuaduong): We still show the ip address for the serial. Change it to
                     // use the mdns instance name, so we can adjust to address changes on
                     // reconnects.
                     port_value = mdns_info->port;
                     if (serial) {
-                        *serial = android::base::StringPrintf("%s.%s",
-                                                              mdns_info->service_name.c_str(),
-                                                              mdns_info->service_type.c_str());
+                        *serial = std::format("{}.{}", mdns_info->instance, mdns_info->service);
                     }
                 }
             } else {
@@ -270,6 +287,10 @@ bool socket_spec_connect(unique_fd* fd, std::string_view address, int* port, std
         }
         if (port_value == 0) {
             *error = android::base::StringPrintf("vsock port was not provided.");
+            errno = EINVAL;
+            return false;
+        }
+        if (!check_adb_vsock_cid_port(cid, port_value, error)) {
             errno = EINVAL;
             return false;
         }

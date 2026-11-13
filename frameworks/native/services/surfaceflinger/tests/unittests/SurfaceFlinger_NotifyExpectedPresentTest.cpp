@@ -14,16 +14,18 @@
  * limitations under the License.
  */
 
+#include "gui/TransactionState.h"
 #undef LOG_TAG
 #define LOG_TAG "LibSurfaceFlingerUnittests"
 
 #include <gui/SurfaceComposerClient.h>
+#include "DisplayHardware/Hal.h"
 #include "DisplayTransactionTestHelpers.h"
 
 namespace android {
 
 using FakeHwcDisplayInjector = TestableSurfaceFlinger::FakeHwcDisplayInjector;
-using android::hardware::graphics::composer::V2_1::Error;
+using android::hardware::graphics::composer::hal::Error;
 
 class NotifyExpectedPresentTest : public DisplayTransactionTest {
 public:
@@ -43,19 +45,18 @@ public:
 protected:
     void setTransactionState() {
         ASSERT_TRUE(mFlinger.getTransactionQueue().isEmpty());
+        sp<IBinder> applyToken = IInterface::asBinder(TransactionCompletedListener::getIInstance());
         TransactionInfo transaction;
-        mFlinger.setTransactionState(FrameTimelineInfo{}, transaction.states, transaction.displays,
-                                     transaction.flags, transaction.applyToken,
-                                     transaction.inputWindowCommands,
-                                     TimePoint::now().ns() + s2ns(1), transaction.isAutoTimestamp,
-                                     transaction.unCachedBuffers,
-                                     /*HasListenerCallbacks=*/false, transaction.callbacks,
-                                     transaction.id, transaction.mergedTransactionIds);
+        TransactionState state;
+        state.mId = static_cast<uint64_t>(-1);
+        state.mIsAutoTimestamp = false;
+        state.mDesiredPresentTime = TimePoint::now().ns() + s2ns(1);
+        mFlinger.setTransactionState(std::move(state), applyToken);
     }
 
     struct TransactionInfo {
-        Vector<ComposerState> states;
-        Vector<DisplayState> displays;
+        std::vector<ComposerState> composerStates = {};
+        std::vector<DisplayState> displayStates = {};
         uint32_t flags = 0;
         sp<IBinder> applyToken = IInterface::asBinder(TransactionCompletedListener::getIInstance());
         InputWindowCommands inputWindowCommands;
@@ -65,6 +66,7 @@ protected:
         std::vector<client_cache_t> unCachedBuffers;
         uint64_t id = static_cast<uint64_t>(-1);
         std::vector<uint64_t> mergedTransactionIds;
+        std::vector<gui::EarlyWakeupInfo> earlyWakeupInfos;
         std::vector<ListenerCallbacks> callbacks;
     };
 

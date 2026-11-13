@@ -384,8 +384,8 @@ mod tests {
     use std::time::Duration;
 
     use binder::{
-        BinderFeatures, DeathRecipient, FromIBinder, IBinder, Interface, SpIBinder, StatusCode,
-        Strong,
+        Accessor, AccessorProvider, BinderFeatures, DeathRecipient, FromIBinder, IBinder,
+        Interface, SpIBinder, StatusCode, Strong,
     };
     // Import from impl API for testing only, should not be necessary as long as
     // you are using AIDL.
@@ -581,12 +581,12 @@ mod tests {
 
     #[tokio::test]
     async fn trivial_client_async() {
-        let service_name = "trivial_client_test";
+        let service_name = "trivial_client_test_async";
         let _process = ScopedServiceProcess::new(service_name);
         let test_client: Strong<dyn IATest<Tokio>> = binder_tokio::get_interface(service_name)
             .await
             .expect("Did not get manager binder service");
-        assert_eq!(test_client.test().await.unwrap(), "trivial_client_test");
+        assert_eq!(test_client.test().await.unwrap(), "trivial_client_test_async");
     }
 
     #[test]
@@ -600,12 +600,12 @@ mod tests {
 
     #[tokio::test]
     async fn wait_for_trivial_client_async() {
-        let service_name = "wait_for_trivial_client_test";
+        let service_name = "wait_for_trivial_client_test_async";
         let _process = ScopedServiceProcess::new(service_name);
         let test_client: Strong<dyn IATest<Tokio>> = binder_tokio::wait_for_interface(service_name)
             .await
             .expect("Did not get manager binder service");
-        assert_eq!(test_client.test().await.unwrap(), "wait_for_trivial_client_test");
+        assert_eq!(test_client.test().await.unwrap(), "wait_for_trivial_client_test_async");
     }
 
     fn get_expected_selinux_context() -> &'static str {
@@ -646,7 +646,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_selinux_context_sync_to_async() {
-        let service_name = "get_selinux_context";
+        let service_name = "get_selinux_context_s2a";
         let _process = ScopedServiceProcess::new(service_name);
         let test_client: Strong<dyn ITest> =
             binder::get_interface(service_name).expect("Did not get manager binder service");
@@ -659,7 +659,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_selinux_context_async_to_sync() {
-        let service_name = "get_selinux_context";
+        let service_name = "get_selinux_context_a2s";
         let _process = ScopedServiceProcess::new(service_name);
         let test_client: Strong<dyn IATest<Tokio>> = binder_tokio::get_interface(service_name)
             .await
@@ -843,7 +843,6 @@ mod tests {
     #[test]
     fn test_extensions() {
         let service_name = "rust_test_extensions";
-        let extension_name = "rust_test_extensions_ext";
 
         {
             let _process = ScopedServiceProcess::new(service_name);
@@ -855,6 +854,8 @@ mod tests {
             assert!(extension.is_none());
         }
 
+        let service_name = "rust_test_extensions2";
+        let extension_name = "rust_test_extensions_ext";
         {
             let _process = ScopedServiceProcess::new_with_extension(service_name, extension_name);
 
@@ -906,6 +907,164 @@ mod tests {
             service_ibinder.into_interface().expect("Could not reassociate the generic ibinder");
 
         assert_eq!(service.test().unwrap(), service_name);
+    }
+
+    struct ToBeDeleted {
+        deleted: Arc<AtomicBool>,
+    }
+
+    impl Drop for ToBeDeleted {
+        fn drop(&mut self) {
+            assert!(!self.deleted.load(Ordering::Relaxed));
+            self.deleted.store(true, Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn test_accessor_callback_destruction() {
+        let deleted: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+        {
+            let accessor: Accessor;
+            {
+                let helper = ToBeDeleted { deleted: deleted.clone() };
+                let get_connection_info = move |_instance: &str| {
+                    // Capture this object so we can see it get destructed
+                    // after the parent scope
+                    let _ = &helper;
+                    None
+                };
+                accessor = Accessor::new("foo.service", get_connection_info);
+            }
+
+            match accessor.as_binder() {
+                Some(_) => {
+                    assert!(!deleted.load(Ordering::Relaxed));
+                }
+                None => panic!("failed to get that accessor binder"),
+            }
+        }
+        assert!(deleted.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn test_accessor_delegator_new_each_time() {
+        let get_connection_info = move |_instance: &str| None;
+        let accessor = Accessor::new("foo.service", get_connection_info);
+        let delegator_binder =
+            binder::delegate_accessor("foo.service", accessor.as_binder().unwrap());
+        let delegator_binder2 =
+            binder::delegate_accessor("foo.service", accessor.as_binder().unwrap());
+
+        // The delegate_accessor creates new delegators each time
+        assert!(delegator_binder != delegator_binder2);
+    }
+
+    #[test]
+    fn test_accessor_delegate_the_delegator() {
+        let get_connection_info = move |_instance: &str| None;
+        let accessor = Accessor::new("foo.service", get_connection_info);
+        let delegator_binder =
+            binder::delegate_accessor("foo.service", accessor.as_binder().unwrap());
+        let delegator_binder2 =
+            binder::delegate_accessor("foo.service", delegator_binder.clone().unwrap());
+
+        assert!(delegator_binder.clone() == delegator_binder);
+        // The delegate_accessor creates new delegators each time. Even when they are delegators
+        // of delegators.
+        assert!(delegator_binder != delegator_binder2);
+    }
+
+    #[test]
+    fn test_accessor_delegator_wrong_name() {
+        let get_connection_info = move |_instance: &str| None;
+        let accessor = Accessor::new("foo.service", get_connection_info);
+        let delegator_binder =
+            binder::delegate_accessor("NOT.foo.service", accessor.as_binder().unwrap());
+        assert_eq!(delegator_binder, Err(StatusCode::NAME_NOT_FOUND));
+    }
+
+    #[test]
+    fn test_accessor_provider_simple() {
+        let instances: Vec<String> = vec!["foo.service".to_owned(), "foo.other_service".to_owned()];
+        let accessor = AccessorProvider::new(&instances, move |_inst: &str| None);
+        assert!(accessor.is_some());
+    }
+
+    #[test]
+    fn test_accessor_provider_no_instance() {
+        let instances: Vec<String> = vec![];
+        let accessor = AccessorProvider::new(&instances, move |_inst: &str| None);
+        assert!(accessor.is_none());
+    }
+
+    #[test]
+    fn test_accessor_provider_double_register() {
+        let instances: Vec<String> = vec!["foo.service".to_owned(), "foo.other_service".to_owned()];
+        let accessor = AccessorProvider::new(&instances, move |_inst: &str| None);
+        assert!(accessor.is_some());
+        let accessor2 = AccessorProvider::new(&instances, move |_inst: &str| None);
+        assert!(accessor2.is_none());
+    }
+
+    #[test]
+    fn test_accessor_provider_register_drop_register() {
+        let instances: Vec<String> = vec!["foo.service".to_owned(), "foo.other_service".to_owned()];
+        {
+            let accessor = AccessorProvider::new(&instances, move |_inst: &str| None);
+            assert!(accessor.is_some());
+            // accessor drops and unregisters the provider
+        }
+        {
+            let accessor = AccessorProvider::new(&instances, move |_inst: &str| None);
+            assert!(accessor.is_some());
+        }
+    }
+
+    #[test]
+    fn test_accessor_provider_callback_destruction() {
+        let deleted: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+        let instances: Vec<String> = vec!["foo.service".to_owned(), "foo.other_service".to_owned()];
+        {
+            let accessor: Option<AccessorProvider>;
+            {
+                let helper = ToBeDeleted { deleted: deleted.clone() };
+                accessor = AccessorProvider::new(&instances, move |_inst: &str| {
+                    let _ = &helper;
+                    None
+                });
+            }
+            assert!(accessor.is_some());
+            assert!(!deleted.load(Ordering::Relaxed));
+        }
+        assert!(deleted.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn test_accessor_from_accessor_binder() {
+        let get_connection_info = move |_instance: &str| None;
+        let accessor = Accessor::new("foo.service", get_connection_info);
+        let accessor2 =
+            Accessor::from_binder("foo.service", accessor.as_binder().unwrap()).unwrap();
+        assert_eq!(accessor.as_binder(), accessor2.as_binder());
+    }
+
+    #[test]
+    fn test_accessor_from_non_accessor_binder() {
+        let service_name = "rust_test_accessor_from_non_accessor_binder";
+        let _process = ScopedServiceProcess::new(service_name);
+        let binder = binder::get_service(service_name).unwrap();
+        assert!(binder.is_binder_alive());
+
+        let accessor = Accessor::from_binder("rust_test_accessor_from_non_accessor_binder", binder);
+        assert!(accessor.is_none());
+    }
+
+    #[test]
+    fn test_accessor_from_wrong_accessor_binder() {
+        let get_connection_info = move |_instance: &str| None;
+        let accessor = Accessor::new("foo.service", get_connection_info);
+        let accessor2 = Accessor::from_binder("NOT.foo.service", accessor.as_binder().unwrap());
+        assert!(accessor2.is_none());
     }
 
     #[tokio::test]

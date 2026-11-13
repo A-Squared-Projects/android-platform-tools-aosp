@@ -17,9 +17,12 @@
 #include "FakeInputTracingBackend.h"
 
 #include <android-base/logging.h>
+#include <android/input.h>
 #include <utils/Errors.h>
 
-namespace android::inputdispatcher {
+#include "RawEvent.h"
+
+namespace android::input_trace {
 
 namespace {
 
@@ -33,31 +36,28 @@ base::ResultError<> error(const std::ostringstream& ss) {
     return base::ResultError(ss.str(), BAD_VALUE);
 }
 
-inline auto getId(const trace::TracedEvent& v) {
+inline auto getId(const TracedEvent& v) {
     return std::visit([](const auto& event) { return event.id; }, v);
 }
 
-MotionEvent toInputEvent(
-        const trace::TracedMotionEvent& e,
-        const trace::InputTracingBackendInterface::WindowDispatchArgs& dispatchArgs,
-        const std::array<uint8_t, 32>& hmac) {
+MotionEvent toInputEvent(const TracedMotionEvent& e, const WindowDispatchArgs& dispatchArgs,
+                         const std::array<uint8_t, 32>& hmac) {
     MotionEvent traced;
     traced.initialize(e.id, e.deviceId, e.source, e.displayId, hmac, e.action, e.actionButton,
-                      dispatchArgs.resolvedFlags, e.edgeFlags, e.metaState, e.buttonState,
-                      e.classification, dispatchArgs.transform, e.xPrecision, e.yPrecision,
-                      e.xCursorPosition, e.yCursorPosition, dispatchArgs.rawTransform, e.downTime,
-                      e.eventTime, e.pointerProperties.size(), e.pointerProperties.data(),
-                      e.pointerCoords.data());
+                      dispatchArgs.resolvedMotionFlags, AMOTION_EVENT_EDGE_FLAG_NONE, e.metaState,
+                      e.buttonState, e.classification, dispatchArgs.transform, e.xPrecision,
+                      e.yPrecision, e.xCursorPosition, e.yCursorPosition, dispatchArgs.rawTransform,
+                      e.downTime, e.eventTime, e.pointerProperties.size(),
+                      e.pointerProperties.data(), e.pointerCoords.data());
     return traced;
 }
 
-KeyEvent toInputEvent(const trace::TracedKeyEvent& e,
-                      const trace::InputTracingBackendInterface::WindowDispatchArgs& dispatchArgs,
+KeyEvent toInputEvent(const TracedKeyEvent& e, const WindowDispatchArgs& dispatchArgs,
                       const std::array<uint8_t, 32>& hmac) {
     KeyEvent traced;
-    traced.initialize(e.id, e.deviceId, e.source, e.displayId, hmac, e.action,
-                      dispatchArgs.resolvedFlags, e.keyCode, e.scanCode, e.metaState, e.repeatCount,
-                      e.downTime, e.eventTime);
+    traced.initialize(e.id, e.deviceId, e.source, e.displayId, hmac, e.action, e.flags, e.keyCode,
+                      e.scanCode, e.metaState, dispatchArgs.resolvedKeyRepeatCount, e.downTime,
+                      e.eventTime);
     return traced;
 }
 
@@ -137,11 +137,11 @@ base::Result<void> VerifyingTrace::verifyEventTraced(const Event& expectedEvent,
                 Event tracedEvent;
                 using T = std::decay_t<decltype(traced)>;
                 if constexpr (std::is_same_v<Event, MotionEvent> &&
-                              std::is_same_v<T, trace::TracedMotionEvent>) {
+                              std::is_same_v<T, TracedMotionEvent>) {
                     tracedEvent =
                             toInputEvent(traced, *tracedDispatchesIt, expectedEvent.getHmac());
                 } else if constexpr (std::is_same_v<Event, KeyEvent> &&
-                                     std::is_same_v<T, trace::TracedKeyEvent>) {
+                                     std::is_same_v<T, TracedKeyEvent>) {
                     tracedEvent =
                             toInputEvent(traced, *tracedDispatchesIt, expectedEvent.getHmac());
                 } else {
@@ -163,7 +163,8 @@ base::Result<void> VerifyingTrace::verifyEventTraced(const Event& expectedEvent,
 
 // --- FakeInputTracingBackend ---
 
-void FakeInputTracingBackend::traceKeyEvent(const trace::TracedKeyEvent& event) {
+void FakeInputTracingBackend::traceKeyEvent(const TracedKeyEvent& event,
+                                            const TracedEventMetadata&) {
     {
         std::scoped_lock lock(mTrace->mLock);
         mTrace->mTracedEvents.emplace(event.id, event);
@@ -171,7 +172,8 @@ void FakeInputTracingBackend::traceKeyEvent(const trace::TracedKeyEvent& event) 
     mTrace->mEventTracedCondition.notify_all();
 }
 
-void FakeInputTracingBackend::traceMotionEvent(const trace::TracedMotionEvent& event) {
+void FakeInputTracingBackend::traceMotionEvent(const TracedMotionEvent& event,
+                                               const TracedEventMetadata&) {
     {
         std::scoped_lock lock(mTrace->mLock);
         mTrace->mTracedEvents.emplace(event.id, event);
@@ -179,7 +181,8 @@ void FakeInputTracingBackend::traceMotionEvent(const trace::TracedMotionEvent& e
     mTrace->mEventTracedCondition.notify_all();
 }
 
-void FakeInputTracingBackend::traceWindowDispatch(const WindowDispatchArgs& args) {
+void FakeInputTracingBackend::traceWindowDispatch(const WindowDispatchArgs& args,
+                                                  const TracedEventMetadata&) {
     {
         std::scoped_lock lock(mTrace->mLock);
         mTrace->mTracedWindowDispatches.push_back(args);
@@ -187,4 +190,10 @@ void FakeInputTracingBackend::traceWindowDispatch(const WindowDispatchArgs& args
     mTrace->mEventTracedCondition.notify_all();
 }
 
-} // namespace android::inputdispatcher
+void FakeInputTracingBackend::traceRawEvent(const RawEvent& entry) {
+    // TODO(b/394861376): log the traced raw event in the VerifyingTrace, like we do with the other
+    // types of traced event, and write some tests for raw tracing in InputTracingTest.cpp.
+    // (InputReaderIntegrationTest should provide good inspiration.)
+}
+
+} // namespace android::input_trace

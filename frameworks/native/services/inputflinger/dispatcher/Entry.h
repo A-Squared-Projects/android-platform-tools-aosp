@@ -20,6 +20,7 @@
 #include "InputTargetFlags.h"
 #include "trace/EventTrackerInterface.h"
 
+#include <ftl/flags.h>
 #include <gui/InputApplication.h>
 #include <input/Input.h>
 #include <stdint.h>
@@ -32,7 +33,6 @@ namespace android::inputdispatcher {
 
 struct EventEntry {
     enum class Type {
-        CONFIGURATION_CHANGED,
         DEVICE_RESET,
         FOCUS,
         KEY,
@@ -78,15 +78,10 @@ struct EventEntry {
     virtual ~EventEntry() = default;
 };
 
-struct ConfigurationChangedEntry : EventEntry {
-    explicit ConfigurationChangedEntry(int32_t id, nsecs_t eventTime);
-    std::string getDescription() const override;
-};
-
 struct DeviceResetEntry : EventEntry {
-    int32_t deviceId;
+    DeviceId deviceId;
 
-    DeviceResetEntry(int32_t id, nsecs_t eventTime, int32_t deviceId);
+    DeviceResetEntry(int32_t id, nsecs_t eventTime, DeviceId deviceId);
     std::string getDescription() const override;
 };
 
@@ -118,9 +113,9 @@ struct DragEntry : EventEntry {
 };
 
 struct KeyEntry : EventEntry {
-    int32_t deviceId;
+    DeviceId deviceId;
     uint32_t source;
-    int32_t displayId;
+    ui::LogicalDisplayId displayId;
     int32_t action;
     int32_t keyCode;
     int32_t scanCode;
@@ -131,37 +126,44 @@ struct KeyEntry : EventEntry {
     bool syntheticRepeat; // set to true for synthetic key repeats
 
     enum class InterceptKeyResult {
+        // The interception result is unknown.
         UNKNOWN,
+        // The event should be skipped and not sent to the application.
         SKIP,
+        // The event should be sent to the application.
         CONTINUE,
+        // The event should eventually be sent to the application, after a delay.
         TRY_AGAIN_LATER,
+        // The event should not be initially sent to the application, but instead go through
+        // post-processing to generate a fallback key event and then sent to the application.
+        FALLBACK,
     };
     // These are special fields that may need to be modified while the event is being dispatched.
     mutable InterceptKeyResult interceptKeyResult; // set based on the interception result
     mutable nsecs_t interceptKeyWakeupTime;        // used with INTERCEPT_KEY_RESULT_TRY_AGAIN_LATER
     mutable int32_t flags;
+    // TODO(b/328618922): Refactor key repeat generation to make repeatCount non-mutable.
     mutable int32_t repeatCount;
 
     KeyEntry(int32_t id, std::shared_ptr<InjectionState> injectionState, nsecs_t eventTime,
-             int32_t deviceId, uint32_t source, int32_t displayId, uint32_t policyFlags,
-             int32_t action, int32_t flags, int32_t keyCode, int32_t scanCode, int32_t metaState,
-             int32_t repeatCount, nsecs_t downTime);
+             DeviceId deviceId, uint32_t source, ui::LogicalDisplayId displayId,
+             uint32_t policyFlags, int32_t action, int32_t flags, int32_t keyCode, int32_t scanCode,
+             int32_t metaState, int32_t repeatCount, nsecs_t downTime);
     std::string getDescription() const override;
 };
 
 std::ostream& operator<<(std::ostream& out, const KeyEntry& motionEntry);
 
 struct MotionEntry : EventEntry {
-    int32_t deviceId;
+    DeviceId deviceId;
     uint32_t source;
-    int32_t displayId;
+    ui::LogicalDisplayId displayId;
     int32_t action;
     int32_t actionButton;
-    int32_t flags;
+    ftl::Flags<MotionFlag> flags;
     int32_t metaState;
     int32_t buttonState;
     MotionClassification classification;
-    int32_t edgeFlags;
     float xPrecision;
     float yPrecision;
     float xCursorPosition;
@@ -174,11 +176,12 @@ struct MotionEntry : EventEntry {
     size_t getPointerCount() const { return pointerProperties.size(); }
 
     MotionEntry(int32_t id, std::shared_ptr<InjectionState> injectionState, nsecs_t eventTime,
-                int32_t deviceId, uint32_t source, int32_t displayId, uint32_t policyFlags,
-                int32_t action, int32_t actionButton, int32_t flags, int32_t metaState,
-                int32_t buttonState, MotionClassification classification, int32_t edgeFlags,
-                float xPrecision, float yPrecision, float xCursorPosition, float yCursorPosition,
-                nsecs_t downTime, const std::vector<PointerProperties>& pointerProperties,
+                DeviceId deviceId, uint32_t source, ui::LogicalDisplayId displayId,
+                uint32_t policyFlags, int32_t action, int32_t actionButton,
+                ftl::Flags<MotionFlag> flags, int32_t metaState, int32_t buttonState,
+                MotionClassification classification, float xPrecision, float yPrecision,
+                float xCursorPosition, float yCursorPosition, nsecs_t downTime,
+                const std::vector<PointerProperties>& pointerProperties,
                 const std::vector<PointerCoords>& pointerCoords);
     std::string getDescription() const override;
 };
@@ -186,7 +189,7 @@ struct MotionEntry : EventEntry {
 std::ostream& operator<<(std::ostream& out, const MotionEntry& motionEntry);
 
 struct SensorEntry : EventEntry {
-    int32_t deviceId;
+    DeviceId deviceId;
     uint32_t source;
     InputDeviceSensorType sensorType;
     InputDeviceSensorAccuracy accuracy;
@@ -195,7 +198,7 @@ struct SensorEntry : EventEntry {
 
     std::vector<float> values;
 
-    SensorEntry(int32_t id, nsecs_t eventTime, int32_t deviceId, uint32_t source,
+    SensorEntry(int32_t id, nsecs_t eventTime, DeviceId deviceId, uint32_t source,
                 uint32_t policyFlags, nsecs_t hwTimestamp, InputDeviceSensorType sensorType,
                 InputDeviceSensorAccuracy accuracy, bool accuracyChanged,
                 std::vector<float> values);
@@ -204,9 +207,9 @@ struct SensorEntry : EventEntry {
 
 struct TouchModeEntry : EventEntry {
     bool inTouchMode;
-    int32_t displayId;
+    ui::LogicalDisplayId displayId;
 
-    TouchModeEntry(int32_t id, nsecs_t eventTime, bool inTouchMode, int32_t displayId);
+    TouchModeEntry(int32_t id, nsecs_t eventTime, bool inTouchMode, ui::LogicalDisplayId displayId);
     std::string getDescription() const override;
 };
 
@@ -225,7 +228,8 @@ struct DispatchEntry {
     // An ANR will be triggered if a response for this entry is not received by timeoutTime
     nsecs_t timeoutTime;
 
-    int32_t resolvedFlags;
+    // These are only valid for EventEntry::Type::MOTION
+    ftl::Flags<MotionFlag> resolvedMotionFlags;
 
     // Information about the dispatch window used for tracing. We avoid holding a window handle
     // here because information in a window handle may be dynamically updated within the lifespan

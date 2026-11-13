@@ -29,10 +29,10 @@ mod util;
 use crate::VbmetaData;
 use alloc::vec::Vec;
 use avb_bindgen::{
-    avb_descriptor_foreach, avb_descriptor_validate_and_byteswap, AvbDescriptor, AvbDescriptorTag,
+    AvbDescriptor, AvbDescriptorTag, avb_descriptor_foreach, avb_descriptor_validate_and_byteswap,
 };
 use core::{
-    ffi::{c_void, FromBytesUntilNulError},
+    ffi::{FromBytesUntilNulError, FromBytesWithNulError, c_void},
     mem::size_of,
     slice,
     str::Utf8Error,
@@ -82,6 +82,12 @@ impl From<Utf8Error> for DescriptorError {
     }
 }
 
+impl From<FromBytesWithNulError> for DescriptorError {
+    fn from(_: FromBytesWithNulError) -> Self {
+        Self::InvalidContents
+    }
+}
+
 impl From<FromBytesUntilNulError> for DescriptorError {
     fn from(_: FromBytesUntilNulError) -> Self {
         Self::InvalidContents
@@ -91,7 +97,7 @@ impl From<FromBytesUntilNulError> for DescriptorError {
 /// `Result` type for `DescriptorError` errors.
 pub type DescriptorResult<T> = Result<T, DescriptorError>;
 
-impl<'a> Descriptor<'a> {
+impl Descriptor<'_> {
     /// Extracts the fully-typed descriptor from the generic `AvbDescriptor` header.
     ///
     /// # Arguments
@@ -102,7 +108,7 @@ impl<'a> Descriptor<'a> {
     ///
     /// # Safety
     /// `raw_descriptor` must point to a valid `AvbDescriptor`, including the `num_bytes_following`
-    /// data contents, that lives at least as long as `'a`.
+    /// data contents, that lives at least as long as `'_`.
     unsafe fn new(raw_descriptor: *const AvbDescriptor) -> DescriptorResult<Self> {
         // Transform header to host-endian.
         let mut descriptor = AvbDescriptor {

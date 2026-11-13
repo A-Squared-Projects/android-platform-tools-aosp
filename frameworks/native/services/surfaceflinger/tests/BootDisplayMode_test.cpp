@@ -18,7 +18,7 @@
 
 #include <gtest/gtest.h>
 
-#include <gui/AidlStatusUtil.h>
+#include <gui/AidlUtil.h>
 #include <gui/SurfaceComposerClient.h>
 #include <private/gui/ComposerService.h>
 #include <private/gui/ComposerServiceAIDL.h>
@@ -65,13 +65,15 @@ protected:
     }
 
     void TearDown() override {
-        binder::Status status = mSf->setBootDisplayMode(mDisplayToken, mOldMode);
-        EXPECT_EQ(NO_ERROR, statusTFromBinderStatus(status));
+        if (!IsSkipped()) {
+            binder::Status status = mSf->setBootDisplayMode(mDisplayToken, mOldMode);
+            EXPECT_EQ(NO_ERROR, statusTFromBinderStatus(status));
 
-        gui::DynamicDisplayInfo info;
-        status = mSf->getDynamicDisplayInfoFromToken(mDisplayToken, &info);
-        EXPECT_EQ(NO_ERROR, statusTFromBinderStatus(status));
-        EXPECT_EQ(mOldMode, info.preferredBootDisplayMode);
+            gui::DynamicDisplayInfo info;
+            status = mSf->getDynamicDisplayInfoFromToken(mDisplayToken, &info);
+            EXPECT_EQ(NO_ERROR, statusTFromBinderStatus(status));
+            EXPECT_EQ(mOldMode, info.preferredBootDisplayMode);
+        }
     }
 
     ui::DisplayModeId mOldMode;

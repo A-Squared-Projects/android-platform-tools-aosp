@@ -16,41 +16,51 @@
 
 #include <renderengine/RenderEngine.h>
 
-#include <cutils/properties.h>
-#include <log/log.h>
 #include "renderengine/ExternalTexture.h"
-#include "threaded/RenderEngineThreaded.h"
-
+#include "skia/GaneshVkRenderEngine.h"
+#include "skia/GraphiteVkRenderEngine.h"
 #include "skia/SkiaGLRenderEngine.h"
-#include "skia/SkiaVkRenderEngine.h"
+#include "threaded/RenderEngineThreaded.h"
+#include "ui/GraphicTypes.h"
+
+#include <com_android_graphics_surfaceflinger_flags.h>
+#include <cutils/properties.h>
+#include <ftl/enum.h>
+#include <log/log.h>
 
 namespace android {
 namespace renderengine {
 
+// TODO: b/341728634 - Don't compile Ganesh unless requested once Graphite is the stable default.
 std::unique_ptr<RenderEngine> RenderEngine::create(const RenderEngineCreationArgs& args) {
-    if (args.threaded == Threaded::YES) {
-        switch (args.graphicsApi) {
-            case GraphicsApi::GL:
-                ALOGD("Threaded RenderEngine with SkiaGL Backend");
-                return renderengine::threaded::RenderEngineThreaded::create([args]() {
-                    return android::renderengine::skia::SkiaGLRenderEngine::create(args);
-                });
-            case GraphicsApi::VK:
-                ALOGD("Threaded RenderEngine with SkiaVK Backend");
-                return renderengine::threaded::RenderEngineThreaded::create([args]() {
-                    return android::renderengine::skia::SkiaVkRenderEngine::create(args);
-                });
+    threaded::CreateInstanceFactory createInstanceFactory;
+
+    ALOGD("%sRenderEngine with Skia%s Backend (%s)",
+          args.threaded == Threaded::Yes ? "Threaded " : "",
+          ftl::enum_string(args.graphicsApi).c_str(), ftl::enum_string(args.skiaBackend).c_str());
+
+    if (args.skiaBackend == SkiaBackend::Graphite) {
+        createInstanceFactory = [args]() {
+            return android::renderengine::skia::GraphiteVkRenderEngine::create(args);
+        };
+    } else { // GANESH
+        if (args.graphicsApi == GraphicsApi::Vk) {
+            createInstanceFactory = [args]() {
+                return android::renderengine::skia::GaneshVkRenderEngine::create(args);
+            };
+        } else { // GL
+            createInstanceFactory = [args]() {
+                return android::renderengine::skia::SkiaGLRenderEngine::create(args);
+            };
         }
     }
 
-    switch (args.graphicsApi) {
-        case GraphicsApi::GL:
-            ALOGD("RenderEngine with SkiaGL Backend");
-            return renderengine::skia::SkiaGLRenderEngine::create(args);
-        case GraphicsApi::VK:
-            ALOGD("RenderEngine with SkiaVK Backend");
-            return renderengine::skia::SkiaVkRenderEngine::create(args);
+    if (args.threaded != Threaded::Yes) {
+        ALOGE("Non-threaded RenderEngine not supported, please update or "
+              "remove " PROPERTY_DEBUG_RENDERENGINE_BACKEND " to use a supported backend");
     }
+
+    return renderengine::threaded::RenderEngineThreaded::create(createInstanceFactory);
 }
 
 RenderEngine::~RenderEngine() = default;
@@ -71,17 +81,33 @@ ftl::Future<FenceResult> RenderEngine::drawLayers(const DisplaySettings& display
                                                   base::unique_fd&& bufferFence) {
     const auto resultPromise = std::make_shared<std::promise<FenceResult>>();
     std::future<FenceResult> resultFuture = resultPromise->get_future();
-    updateProtectedContext(layers, buffer);
+    updateProtectedContext(layers, {buffer.get()});
     drawLayersInternal(std::move(resultPromise), display, layers, buffer, std::move(bufferFence));
     return resultFuture;
 }
 
+ftl::Future<FenceResult> RenderEngine::tonemapAndDrawGainmap(
+        const std::shared_ptr<ExternalTexture>& hdr, base::borrowed_fd&& hdrFence,
+        float hdrSdrRatio, ui::Dataspace dataspace, const std::shared_ptr<ExternalTexture>& sdr,
+        const std::shared_ptr<ExternalTexture>& gainmap) {
+    const auto resultPromise = std::make_shared<std::promise<FenceResult>>();
+    std::future<FenceResult> resultFuture = resultPromise->get_future();
+    updateProtectedContext({}, {sdr.get(), hdr.get(), gainmap.get()});
+    tonemapAndDrawGainmapInternal(std::move(resultPromise), hdr, std::move(hdrFence), hdrSdrRatio,
+                                  dataspace, sdr, gainmap);
+    return resultFuture;
+}
+
 void RenderEngine::updateProtectedContext(const std::vector<LayerSettings>& layers,
-                                          const std::shared_ptr<ExternalTexture>& buffer) {
+                                          vector<const ExternalTexture*> buffers) {
     const bool needsProtectedContext =
-            (buffer && (buffer->getUsage() & GRALLOC_USAGE_PROTECTED)) ||
-            std::any_of(layers.begin(), layers.end(), [](const LayerSettings& layer) {
-                const std::shared_ptr<ExternalTexture>& buffer = layer.source.buffer.buffer;
+            std::any_of(layers.begin(), layers.end(),
+                        [](const LayerSettings& layer) {
+                            const std::shared_ptr<ExternalTexture>& buffer =
+                                    layer.source.buffer.buffer;
+                            return buffer && (buffer->getUsage() & GRALLOC_USAGE_PROTECTED);
+                        }) ||
+            std::any_of(buffers.begin(), buffers.end(), [](const ExternalTexture* buffer) {
                 return buffer && (buffer->getUsage() & GRALLOC_USAGE_PROTECTED);
             });
     useProtectedContext(needsProtectedContext);

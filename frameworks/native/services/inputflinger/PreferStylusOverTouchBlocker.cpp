@@ -16,6 +16,7 @@
 
 #include "PreferStylusOverTouchBlocker.h"
 #include <com_android_input_flags.h>
+#include <input/Input.h>
 #include <input/PrintTools.h>
 
 namespace input_flags = com::android::input::flags;
@@ -192,7 +193,7 @@ std::vector<NotifyMotionArgs> PreferStylusOverTouchBlocker::processMotion(
 
 void PreferStylusOverTouchBlocker::notifyInputDevicesChanged(
         const std::vector<InputDeviceInfo>& inputDevices) {
-    std::set<int32_t> presentDevices;
+    std::set<DeviceId> presentDevices;
     for (const InputDeviceInfo& device : inputDevices) {
         presentDevices.insert(device.getId());
     }
@@ -216,10 +217,10 @@ static std::string dumpArgs(const NotifyMotionArgs& args) {
 
 std::string PreferStylusOverTouchBlocker::dump() const {
     std::string out;
-    out += "mActiveStyli: " + dumpSet(mActiveStyli) + "\n";
+    out += "mActiveStyli: " + dumpContainer(mActiveStyli) + "\n";
     out += "mLastTouchEvents: " + dumpMap(mLastTouchEvents, constToString, dumpArgs) + "\n";
-    out += "mDevicesWithMixedToolType: " + dumpSet(mDevicesWithMixedToolType) + "\n";
-    out += "mCanceledDevices: " + dumpSet(mCanceledDevices) + "\n";
+    out += "mDevicesWithMixedToolType: " + dumpContainer(mDevicesWithMixedToolType) + "\n";
+    out += "mCanceledDevices: " + dumpContainer(mCanceledDevices) + "\n";
     return out;
 }
 

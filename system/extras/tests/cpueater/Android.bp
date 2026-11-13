@@ -37,6 +37,7 @@ cc_binary {
         "-Wall",
         "-Werror",
         "-Wno-unused-parameter",
+        "-Wno-unused-but-set-variable",
     ],
 }
 

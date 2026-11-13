@@ -29,12 +29,15 @@ class BlockDevInitializer final {
   public:
     BlockDevInitializer();
 
+    bool InitBootDevicesFromPartUuid();
     bool InitDeviceMapper();
     bool InitDmUser(const std::string& name);
     bool InitDevices(std::set<std::string> devices);
     bool InitDmDevice(const std::string& device);
     bool InitPlatformDevice(const std::string& device);
     bool InitHvcDevice(const std::string& device);
+    void InitLoopDevices();
+    bool InitUblkMiscDevices(const std::string& name);
 
   private:
     ListenerAction HandleUevent(const Uevent& uevent, std::set<std::string>* devices);

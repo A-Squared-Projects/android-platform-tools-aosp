@@ -102,6 +102,9 @@ cc_defaults {
         "libcrypto",
         "libbase",
     ],
+    export_shared_lib_headers: [
+        "libcrypto",
+    ],
 
     host_supported: true,
 }
@@ -154,9 +157,4 @@ cc_test {
 python_binary_host {
     name: "build_verity_metadata",
     srcs: ["build_verity_metadata.py"],
-    version: {
-        py3: {
-            embedded_launcher: true,
-        },
-    },
 }

@@ -17,6 +17,8 @@
 
 #define LOG_TAG "GraphicBufferAllocator"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
+#define ATRACE_ALLOC_COUNTER_NAME "mem.gralloc.buffers"
+#define ATRACE_ALLOC_TRACK_NAME "mem.gralloc.allocations"
 
 #include <ui/GraphicBufferAllocator.h>
 
@@ -41,6 +43,7 @@ namespace android {
 // ---------------------------------------------------------------------------
 
 using base::StringAppendF;
+using base::StringPrintf;
 
 ANDROID_SINGLETON_STATIC_INSTANCE( GraphicBufferAllocator )
 
@@ -89,14 +92,14 @@ void GraphicBufferAllocator::dump(std::string& result, bool less) const {
     uint64_t total = 0;
     result.append("GraphicBufferAllocator buffers:\n");
     const size_t count = list.size();
-    StringAppendF(&result, "%14s | %11s | %18s | %s | %8s | %10s | %s\n", "Handle", "Size",
+    StringAppendF(&result, "%18s | %12s | %18s | %s | %8s | %10s | %s\n", "Handle", "Size",
                   "W (Stride) x H", "Layers", "Format", "Usage", "Requestor");
     for (size_t i = 0; i < count; i++) {
         const alloc_rec_t& rec(list.valueAt(i));
         std::string sizeStr = (rec.size)
                 ? base::StringPrintf("%7.2f KiB", static_cast<double>(rec.size) / 1024.0)
                 : "unknown";
-        StringAppendF(&result, "%14p | %11s | %4u (%4u) x %4u | %6u | %8X | 0x%8" PRIx64 " | %s\n",
+        StringAppendF(&result, "%18p | %12s | %4u (%4u) x %4u | %6u | %8X | 0x%8" PRIx64 " | %s\n",
                       list.keyAt(i), sizeStr.c_str(), rec.width, rec.stride, rec.height,
                       rec.layerCount, rec.format, rec.usage, rec.requestorName.c_str());
         total += rec.size;
@@ -183,6 +186,13 @@ auto GraphicBufferAllocator::allocate(const AllocationRequest& request) -> Alloc
     rec.requestorName = request.requestorName;
     list.add(result.handle, rec);
 
+    if (ATRACE_ENABLED()) {
+        ATRACE_INT64(ATRACE_ALLOC_COUNTER_NAME, list.size());
+        std::string allocInfo = std::format("[{}] {}x{} - {:p}", rec.requestorName, width, height,
+                                            static_cast<const void*>(result.handle));
+        ATRACE_INSTANT_FOR_TRACK(ATRACE_ALLOC_TRACK_NAME, allocInfo.c_str());
+    }
+
     return result;
 }
 
@@ -249,6 +259,13 @@ status_t GraphicBufferAllocator::allocateHelper(uint32_t width, uint32_t height,
     rec.requestorName = std::move(requestorName);
     list.add(*handle, rec);
 
+    if (ATRACE_ENABLED()) {
+        ATRACE_INT64(ATRACE_ALLOC_COUNTER_NAME, list.size());
+        std::string allocInfo = std::format("[{}] {}x{} - {:p}", rec.requestorName, width, height,
+                                            static_cast<const void*>(handle));
+        ATRACE_INSTANT_FOR_TRACK(ATRACE_ALLOC_TRACK_NAME, allocInfo.c_str());
+    }
+
     return NO_ERROR;
 }
 status_t GraphicBufferAllocator::allocate(uint32_t width, uint32_t height, PixelFormat format,
@@ -288,7 +305,16 @@ status_t GraphicBufferAllocator::free(buffer_handle_t handle)
     KeyedVector<buffer_handle_t, alloc_rec_t>& list(sAllocList);
     list.removeItem(handle);
 
+    if (ATRACE_ENABLED()) {
+        ATRACE_INT64(ATRACE_ALLOC_COUNTER_NAME, list.size());
+        std::string freeInfo = std::format("free - {:p}", static_cast<const void*>(handle));
+        ATRACE_INSTANT_FOR_TRACK(ATRACE_ALLOC_TRACK_NAME, freeInfo.c_str());
+    }
     return NO_ERROR;
+}
+
+bool GraphicBufferAllocator::supportsAdditionalOptions() const {
+    return mAllocator->supportsAdditionalOptions();
 }
 
 // ---------------------------------------------------------------------------

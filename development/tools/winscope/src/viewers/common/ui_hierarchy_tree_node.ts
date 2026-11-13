@@ -1,5 +1,5 @@
 /*
- * Copyright 2024, The Android Open Source Project
+ * Copyright (C) 2024 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import {HierarchyTreeNode} from 'trace/tree_node/hierarchy_tree_node';
+import {HierarchyTreeNode} from 'tree_node/hierarchy_tree_node';
 import {Chip} from './chip';
 import {DiffNode} from './diff_node';
 import {DiffType} from './diff_type';
@@ -25,6 +25,8 @@ export class UiHierarchyTreeNode extends HierarchyTreeNode implements DiffNode {
   private displayName: string = this.name;
   private isOldNodeInternal = false;
   private showHeading = true;
+  private nextNodeDfs: this | undefined;
+  private prevNodeDfs: this | undefined;
 
   static from(
     node: HierarchyTreeNode,
@@ -38,13 +40,25 @@ export class UiHierarchyTreeNode extends HierarchyTreeNode implements DiffNode {
     const rects = node.getRects();
     if (rects) displayNode.setRects(rects);
 
-    if (parent) displayNode.setZParent(parent);
+    const secondaryRects = node.getSecondaryRects();
+    if (secondaryRects) displayNode.setSecondaryRects(secondaryRects);
+
+    if (parent) displayNode.setParent(parent);
+
+    const zParent = node.getZParent();
+    if (zParent) displayNode.setZParent(zParent);
+
+    node
+      .getRelativeChildren()
+      .forEach((zChild) => displayNode.addRelativeChild(zChild));
 
     node.getAllChildren().forEach((child) => {
       displayNode.addOrReplaceChild(
         UiHierarchyTreeNode.from(child, displayNode),
       );
     });
+    node.getWarnings().forEach((warning) => displayNode.addWarning(warning));
+
     return displayNode;
   }
 
@@ -86,5 +100,37 @@ export class UiHierarchyTreeNode extends HierarchyTreeNode implements DiffNode {
 
   isOldNode() {
     return this.isOldNodeInternal;
+  }
+
+  getNextDfs(): this | undefined {
+    return this.nextNodeDfs;
+  }
+
+  getPrevDfs(): this | undefined {
+    return this.prevNodeDfs;
+  }
+
+  assignDfsOrder() {
+    if (!this.isRoot()) {
+      console.warn('Attempted to assign DFS order from non-root node.');
+      return;
+    }
+
+    let prev: this | undefined;
+    this.forEachNodeDfs((node) => {
+      if (prev) {
+        prev.setNextDfs(node);
+        node.setPrevDfs(prev);
+      }
+      prev = node;
+    });
+  }
+
+  private setNextDfs(node: this) {
+    this.nextNodeDfs = node;
+  }
+
+  private setPrevDfs(node: this) {
+    this.prevNodeDfs = node;
   }
 }

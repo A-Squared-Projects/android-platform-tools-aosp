@@ -44,7 +44,6 @@ license {
 
 cc_defaults {
     name: "libincfs_defaults_common",
-    cpp_std: "c++2a",
     cflags: [
         "-Werror",
         "-Wall",
@@ -189,6 +188,9 @@ cc_benchmark {
         "libincfs",
         "libincfs-utils",
     ],
+    cflags: [
+        "-Wno-unused-but-set-variable",
+    ],
 }
 
 cc_binary {
@@ -203,7 +205,7 @@ cc_binary {
         "incfsdump/dump.cpp",
     ],
     target: {
-        linux_glibc: {
+        host_linux: {
             enabled: true,
         },
     },

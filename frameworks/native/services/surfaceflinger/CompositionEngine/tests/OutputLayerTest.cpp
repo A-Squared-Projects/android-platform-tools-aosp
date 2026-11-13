@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <com_android_graphics_libgui_flags.h>
 #include <compositionengine/impl/HwcBufferCache.h>
 #include <compositionengine/impl/OutputLayer.h>
 #include <compositionengine/impl/OutputLayerCompositionState.h>
@@ -23,13 +24,14 @@
 #include <compositionengine/mock/Output.h>
 #include <gtest/gtest.h>
 #include <log/log.h>
-
 #include <renderengine/impl/ExternalTexture.h>
 #include <renderengine/mock/RenderEngine.h>
+#include <ui/FloatRect.h>
 #include <ui/PixelFormat.h>
-#include "MockHWC2.h"
-#include "MockHWComposer.h"
+
 #include "RegionMatcher.h"
+#include "mock/DisplayHardware/MockHWC2.h"
+#include "mock/DisplayHardware/MockHWComposer.h"
 
 #include <aidl/android/hardware/graphics/composer3/Composition.h>
 
@@ -270,7 +272,7 @@ struct OutputLayerDisplayFrameTest : public OutputLayerTest {
         mLayerFEState.geomLayerTransform = ui::Transform{TR_IDENT};
         mLayerFEState.geomBufferSize = Rect{0, 0, 1920, 1080};
         mLayerFEState.geomBufferUsesDisplayInverseTransform = false;
-        mLayerFEState.geomCrop = Rect{0, 0, 1920, 1080};
+        mLayerFEState.geomCrop = FloatRect{0, 0, 1920, 1080};
         mLayerFEState.geomLayerBounds = FloatRect{0.f, 0.f, 1920.f, 1080.f};
 
         mOutputState.layerStackSpace.setContent(Rect{0, 0, 1920, 1080});
@@ -291,25 +293,27 @@ TEST_F(OutputLayerDisplayFrameTest, correctForSimpleDefaultCase) {
 
 TEST_F(OutputLayerDisplayFrameTest, fullActiveTransparentRegionReturnsEmptyFrame) {
     mLayerFEState.transparentRegionHint = Region{Rect{0, 0, 1920, 1080}};
-    const Rect expected{0, 0, 0, 0};
+    const Rect expected = (FlagManager::getInstance().disable_transparent_region_hint())
+            ? Rect(0, 0, 1920, 1080)
+            : Rect(0, 0, 0, 0);
     EXPECT_THAT(calculateOutputDisplayFrame(), expected);
 }
 
 TEST_F(OutputLayerDisplayFrameTest, cropAffectsDisplayFrame) {
-    mLayerFEState.geomCrop = Rect{100, 200, 300, 500};
+    mLayerFEState.geomCrop = FloatRect{100, 200, 300, 500};
     const Rect expected{100, 200, 300, 500};
     EXPECT_THAT(calculateOutputDisplayFrame(), expected);
 }
 
 TEST_F(OutputLayerDisplayFrameTest, cropAffectsDisplayFrameRotated) {
-    mLayerFEState.geomCrop = Rect{100, 200, 300, 500};
+    mLayerFEState.geomCrop = FloatRect{100, 200, 300, 500};
     mLayerFEState.geomLayerTransform.set(HAL_TRANSFORM_ROT_90, 1920, 1080);
     const Rect expected{1420, 100, 1720, 300};
     EXPECT_THAT(calculateOutputDisplayFrame(), expected);
 }
 
 TEST_F(OutputLayerDisplayFrameTest, emptyGeomCropIsNotUsedToComputeFrame) {
-    mLayerFEState.geomCrop = Rect{};
+    mLayerFEState.geomCrop = FloatRect{};
     const Rect expected{0, 0, 1920, 1080};
     EXPECT_THAT(calculateOutputDisplayFrame(), expected);
 }
@@ -339,13 +343,60 @@ TEST_F(OutputLayerDisplayFrameTest, shadowExpandsDisplayFrame) {
 
     mLayerFEState.geomLayerBounds = FloatRect{100.f, 100.f, 200.f, 200.f};
     Rect expected{mLayerFEState.geomLayerBounds};
-    expected.inset(-kShadowRadius, -kShadowRadius, -kShadowRadius, -kShadowRadius);
+    expected.inset(-2 * kShadowRadius, -2 * kShadowRadius, -2 * kShadowRadius, -2 * kShadowRadius);
     EXPECT_THAT(calculateOutputDisplayFrame(), expected);
 }
 
 TEST_F(OutputLayerDisplayFrameTest, shadowExpandsDisplayFrame_onlyIfForcingClientComposition) {
     const int kShadowRadius = 5;
     mLayerFEState.shadowSettings.length = kShadowRadius;
+    mLayerFEState.forceClientComposition = false;
+
+    mLayerFEState.geomLayerBounds = FloatRect{100.f, 100.f, 200.f, 200.f};
+    Rect expected{mLayerFEState.geomLayerBounds};
+    EXPECT_THAT(calculateOutputDisplayFrame(), expected);
+}
+
+TEST_F(OutputLayerDisplayFrameTest, outlineExpandsDisplayFrame) {
+    const int kStrokeWidth = 3;
+    mLayerFEState.borderSettings.strokeWidth = kStrokeWidth;
+    mLayerFEState.forceClientComposition = true;
+
+    mLayerFEState.geomLayerBounds = FloatRect{100.f, 100.f, 200.f, 200.f};
+    Rect expected{mLayerFEState.geomLayerBounds};
+    expected.inset(-kStrokeWidth - 2, -kStrokeWidth - 2, -kStrokeWidth - 2, -kStrokeWidth - 2);
+    EXPECT_THAT(calculateOutputDisplayFrame(), expected);
+}
+TEST_F(OutputLayerDisplayFrameTest, outlineExpandsDisplayFrame_onlyIfForcingClientComposition) {
+    const int kStrokeWidth = 3;
+    mLayerFEState.borderSettings.strokeWidth = kStrokeWidth;
+    mLayerFEState.forceClientComposition = false;
+
+    mLayerFEState.geomLayerBounds = FloatRect{100.f, 100.f, 200.f, 200.f};
+    Rect expected{mLayerFEState.geomLayerBounds};
+    EXPECT_THAT(calculateOutputDisplayFrame(), expected);
+}
+
+TEST_F(OutputLayerDisplayFrameTest, boxShadowExpandsDisplayFrame) {
+    gui::BoxShadowSettings::BoxShadowParams boxShadow;
+    boxShadow.blurRadius = 4;
+    boxShadow.spreadRadius = 1;
+    boxShadow.offsetX = 3;
+    boxShadow.offsetY = 2;
+    mLayerFEState.boxShadowSettings.boxShadows.push_back(boxShadow);
+    mLayerFEState.forceClientComposition = true;
+
+    mLayerFEState.geomLayerBounds = FloatRect{100.f, 100.f, 200.f, 200.f};
+    // See LayerFECompositionState::outsetRectForShadow for how to calculate expected value.
+    EXPECT_THAT(calculateOutputDisplayFrame(), Rect(93, 92, 213, 212));
+}
+
+TEST_F(OutputLayerDisplayFrameTest, boxShadowExpandsDisplayFrame_onlyIfForcingClientComposition) {
+    gui::BoxShadowSettings::BoxShadowParams boxShadow;
+    boxShadow.blurRadius = 5;
+    boxShadow.offsetX = 3;
+    boxShadow.offsetY = 2;
+    mLayerFEState.boxShadowSettings.boxShadows.push_back(boxShadow);
     mLayerFEState.forceClientComposition = false;
 
     mLayerFEState.geomLayerBounds = FloatRect{100.f, 100.f, 200.f, 200.f};
@@ -539,6 +590,9 @@ struct OutputLayerPartialMockForUpdateCompositionState : public impl::OutputLaye
     MOCK_CONST_METHOD1(calculateOutputSourceCrop, FloatRect(uint32_t));
     MOCK_CONST_METHOD0(calculateOutputDisplayFrame, Rect());
     MOCK_CONST_METHOD1(calculateOutputRelativeBufferTransform, uint32_t(uint32_t));
+    MOCK_METHOD(void, updateLuts,
+                (const LayerFECompositionState&,
+                 const std::optional<std::vector<std::optional<LutProperties>>>&));
 
     // compositionengine::OutputLayer overrides
     const compositionengine::Output& getOutput() const override { return mOutput; }
@@ -983,21 +1037,24 @@ TEST_F(OutputLayerWriteStateToHWCTest, doesNothingIfNoFECompositionState) {
     EXPECT_CALL(mLayerFE, getCompositionState()).WillOnce(Return(nullptr));
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, doesNothingIfNoHWCState) {
     mOutputLayer.editState().hwc.reset();
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, doesNothingIfNoHWCLayer) {
     mOutputLayer.editState().hwc = impl::OutputLayerCompositionState::Hwc(nullptr);
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, canSetAllState) {
@@ -1008,7 +1065,8 @@ TEST_F(OutputLayerWriteStateToHWCTest, canSetAllState) {
     EXPECT_CALL(mLayerFE, hasRoundedCorners()).WillOnce(Return(false));
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerTest, displayInstallOrientationBufferTransformSetTo90) {
@@ -1039,7 +1097,8 @@ TEST_F(OutputLayerWriteStateToHWCTest, canSetPerFrameStateForSolidColor) {
     expectSetColorCall();
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ false, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, canSetPerFrameStateForSideband) {
@@ -1050,7 +1109,8 @@ TEST_F(OutputLayerWriteStateToHWCTest, canSetPerFrameStateForSideband) {
     expectSetCompositionTypeCall(Composition::SIDEBAND);
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ false, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, canSetPerFrameStateForCursor) {
@@ -1061,7 +1121,8 @@ TEST_F(OutputLayerWriteStateToHWCTest, canSetPerFrameStateForCursor) {
     expectSetCompositionTypeCall(Composition::CURSOR);
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ false, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, canSetPerFrameStateForDevice) {
@@ -1072,7 +1133,8 @@ TEST_F(OutputLayerWriteStateToHWCTest, canSetPerFrameStateForDevice) {
     expectSetCompositionTypeCall(Composition::DEVICE);
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ false, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, compositionTypeIsNotSetIfUnchanged) {
@@ -1085,7 +1147,8 @@ TEST_F(OutputLayerWriteStateToHWCTest, compositionTypeIsNotSetIfUnchanged) {
     expectNoSetCompositionTypeCall();
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ false, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, compositionTypeIsSetToClientIfColorTransformNotSupported) {
@@ -1096,7 +1159,8 @@ TEST_F(OutputLayerWriteStateToHWCTest, compositionTypeIsSetToClientIfColorTransf
     expectSetCompositionTypeCall(Composition::CLIENT);
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ false, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, compositionTypeIsSetToClientIfClientCompositionForced) {
@@ -1109,7 +1173,8 @@ TEST_F(OutputLayerWriteStateToHWCTest, compositionTypeIsSetToClientIfClientCompo
     expectSetCompositionTypeCall(Composition::CLIENT);
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ false, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, allStateIncludesMetadataIfPresent) {
@@ -1123,7 +1188,8 @@ TEST_F(OutputLayerWriteStateToHWCTest, allStateIncludesMetadataIfPresent) {
     expectSetCompositionTypeCall(Composition::DEVICE);
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, perFrameStateDoesNotIncludeMetadataIfPresent) {
@@ -1135,7 +1201,8 @@ TEST_F(OutputLayerWriteStateToHWCTest, perFrameStateDoesNotIncludeMetadataIfPres
     expectSetCompositionTypeCall(Composition::DEVICE);
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ false, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, overriddenSkipLayerDoesNotSendBuffer) {
@@ -1150,7 +1217,8 @@ TEST_F(OutputLayerWriteStateToHWCTest, overriddenSkipLayerDoesNotSendBuffer) {
     expectSetCompositionTypeCall(Composition::DEVICE);
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ true, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, overriddenSkipLayerForSolidColorDoesNotSendBuffer) {
@@ -1165,7 +1233,8 @@ TEST_F(OutputLayerWriteStateToHWCTest, overriddenSkipLayerForSolidColorDoesNotSe
     expectSetCompositionTypeCall(Composition::DEVICE);
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ true, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, includesOverrideInfoIfPresent) {
@@ -1180,7 +1249,8 @@ TEST_F(OutputLayerWriteStateToHWCTest, includesOverrideInfoIfPresent) {
     expectSetCompositionTypeCall(Composition::DEVICE);
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, includesOverrideInfoForSolidColorIfPresent) {
@@ -1195,7 +1265,8 @@ TEST_F(OutputLayerWriteStateToHWCTest, includesOverrideInfoForSolidColorIfPresen
     expectSetCompositionTypeCall(Composition::DEVICE);
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, previousOverriddenLayerSendsSurfaceDamage) {
@@ -1209,7 +1280,8 @@ TEST_F(OutputLayerWriteStateToHWCTest, previousOverriddenLayerSendsSurfaceDamage
     expectSetCompositionTypeCall(Composition::DEVICE);
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, previousSkipLayerSendsUpdatedDeviceCompositionInfo) {
@@ -1225,7 +1297,8 @@ TEST_F(OutputLayerWriteStateToHWCTest, previousSkipLayerSendsUpdatedDeviceCompos
     expectSetCompositionTypeCall(Composition::DEVICE);
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, previousSkipLayerSendsUpdatedClientCompositionInfo) {
@@ -1242,7 +1315,8 @@ TEST_F(OutputLayerWriteStateToHWCTest, previousSkipLayerSendsUpdatedClientCompos
     expectSetCompositionTypeCall(Composition::CLIENT);
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, peekThroughChangesBlendMode) {
@@ -1256,7 +1330,8 @@ TEST_F(OutputLayerWriteStateToHWCTest, peekThroughChangesBlendMode) {
     expectPerFrameCommonCalls();
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, isPeekingThroughSetsOverride) {
@@ -1264,7 +1339,8 @@ TEST_F(OutputLayerWriteStateToHWCTest, isPeekingThroughSetsOverride) {
     expectPerFrameCommonCalls();
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ true);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ true,
+                                 /*hasLutsProperties*/ false);
     EXPECT_TRUE(mOutputLayer.getState().hwc->stateOverridden);
 }
 
@@ -1274,7 +1350,7 @@ TEST_F(OutputLayerWriteStateToHWCTest, zIsOverriddenSetsOverride) {
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
                                  /*zIsOverridden*/ true, /*isPeekingThrough*/
-                                 false);
+                                 false, /*hasLutsProperties*/ false);
     EXPECT_TRUE(mOutputLayer.getState().hwc->stateOverridden);
 }
 
@@ -1286,7 +1362,7 @@ TEST_F(OutputLayerWriteStateToHWCTest, roundedCornersForceClientComposition) {
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
                                  /*zIsOverridden*/ false, /*isPeekingThrough*/
-                                 false);
+                                 false, /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, roundedCornersPeekingThroughAllowsDeviceComposition) {
@@ -1299,7 +1375,7 @@ TEST_F(OutputLayerWriteStateToHWCTest, roundedCornersPeekingThroughAllowsDeviceC
     mLayerFEState.compositionType = Composition::DEVICE;
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
                                  /*zIsOverridden*/ false, /*isPeekingThrough*/
-                                 true);
+                                 true, /*hasLutsProperties*/ false);
     EXPECT_EQ(Composition::DEVICE, mOutputLayer.getState().hwc->hwcCompositionType);
 }
 
@@ -1316,7 +1392,7 @@ TEST_F(OutputLayerWriteStateToHWCTest, setBlockingRegion) {
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
                                  /*zIsOverridden*/ false, /*isPeekingThrough*/
-                                 false);
+                                 false, /*hasLutsProperties*/ false);
 }
 
 TEST_F(OutputLayerWriteStateToHWCTest, setCompositionTypeRefreshRateIndicator) {
@@ -1328,7 +1404,77 @@ TEST_F(OutputLayerWriteStateToHWCTest, setCompositionTypeRefreshRateIndicator) {
     expectSetCompositionTypeCall(Composition::REFRESH_RATE_INDICATOR);
 
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
+}
+
+TEST_F(OutputLayerWriteStateToHWCTest, setsPictureProfileWhenCommitted) {
+    if (!com_android_graphics_libgui_flags_apply_picture_profiles()) {
+        GTEST_SKIP() << "Feature flag disabled, skipping";
+    }
+    mLayerFEState.compositionType = Composition::DEVICE;
+    mLayerFEState.pictureProfileHandle = PictureProfileHandle(1);
+
+    expectGeometryCommonCalls();
+    expectPerFrameCommonCalls();
+    expectSetHdrMetadataAndBufferCalls();
+    expectSetCompositionTypeCall(Composition::DEVICE);
+
+    EXPECT_CALL(*mHwcLayer, setPictureProfileHandle(PictureProfileHandle(1)));
+
+    mOutputLayer.commitPictureProfileToCompositionState();
+    mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
+}
+
+TEST_F(OutputLayerWriteStateToHWCTest, doesNotSetPictureProfileWhenNotCommitted) {
+    if (!com_android_graphics_libgui_flags_apply_picture_profiles()) {
+        GTEST_SKIP() << "Feature flag disabled, skipping";
+    }
+    mLayerFEState.compositionType = Composition::DEVICE;
+    mLayerFEState.pictureProfileHandle = PictureProfileHandle(1);
+
+    expectGeometryCommonCalls();
+    expectPerFrameCommonCalls();
+    expectSetHdrMetadataAndBufferCalls();
+    expectSetCompositionTypeCall(Composition::DEVICE);
+
+    EXPECT_CALL(*mHwcLayer, setPictureProfileHandle(_)).Times(0);
+
+    mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
+}
+
+TEST_F(OutputLayerWriteStateToHWCTest, doesNotSetPictureProfileWhenNotCommittedLater) {
+    if (!com_android_graphics_libgui_flags_apply_picture_profiles()) {
+        GTEST_SKIP() << "Feature flag disabled, skipping";
+    }
+    mLayerFEState.compositionType = Composition::DEVICE;
+    mLayerFEState.pictureProfileHandle = PictureProfileHandle(1);
+
+    expectGeometryCommonCalls();
+    expectPerFrameCommonCalls();
+    expectSetHdrMetadataAndBufferCalls();
+    expectSetCompositionTypeCall(Composition::DEVICE);
+
+    EXPECT_CALL(*mHwcLayer, setPictureProfileHandle(PictureProfileHandle(1)));
+
+    mOutputLayer.commitPictureProfileToCompositionState();
+    mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
+
+    expectGeometryCommonCalls();
+    expectPerFrameCommonCalls();
+    expectSetHdrMetadataAndBufferCalls(kExpectedHwcSlot, nullptr, kFence);
+
+    EXPECT_CALL(*mHwcLayer, setPictureProfileHandle(PictureProfileHandle(1))).Times(0);
+    // No committing of picture profile before writing the state
+    mOutputLayer.writeStateToHWC(/*includeGeometry*/ true, /*skipLayer*/ false, 0,
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
 }
 
 /*
@@ -1374,21 +1520,24 @@ TEST_F(OutputLayerUncacheBufferTest, canUncacheAndReuseSlot) {
     mLayerFEState.buffer = kBuffer1;
     EXPECT_CALL(mHwcLayer, setBuffer(/*slot*/ 0, kBuffer1, kFence));
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ false, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
     Mock::VerifyAndClearExpectations(&mHwcLayer);
 
     // Buffer2 is stored in slot 1
     mLayerFEState.buffer = kBuffer2;
     EXPECT_CALL(mHwcLayer, setBuffer(/*slot*/ 1, kBuffer2, kFence));
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ false, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
     Mock::VerifyAndClearExpectations(&mHwcLayer);
 
     // Buffer3 is stored in slot 2
     mLayerFEState.buffer = kBuffer3;
     EXPECT_CALL(mHwcLayer, setBuffer(/*slot*/ 2, kBuffer3, kFence));
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ false, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
     Mock::VerifyAndClearExpectations(&mHwcLayer);
 
     // Buffer2 becomes the active buffer again (with a nullptr) and reuses slot 1
@@ -1396,7 +1545,8 @@ TEST_F(OutputLayerUncacheBufferTest, canUncacheAndReuseSlot) {
     sp<GraphicBuffer> nullBuffer = nullptr;
     EXPECT_CALL(mHwcLayer, setBuffer(/*slot*/ 1, nullBuffer, kFence));
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ false, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
     Mock::VerifyAndClearExpectations(&mHwcLayer);
 
     // Buffer slots are cleared
@@ -1414,7 +1564,8 @@ TEST_F(OutputLayerUncacheBufferTest, canUncacheAndReuseSlot) {
     mLayerFEState.buffer = kBuffer1;
     EXPECT_CALL(mHwcLayer, setBuffer(/*slot*/ 1, kBuffer1, kFence));
     mOutputLayer.writeStateToHWC(/*includeGeometry*/ false, /*skipLayer*/ false, 0,
-                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false);
+                                 /*zIsOverridden*/ false, /*isPeekingThrough*/ false,
+                                 /*hasLutsProperties*/ false);
     Mock::VerifyAndClearExpectations(&mHwcLayer);
 }
 

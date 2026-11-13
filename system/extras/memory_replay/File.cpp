@@ -18,18 +18,20 @@
 #include <errno.h>
 #include <stdint.h>
 #include <sys/mman.h>
+#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include <string>
+#include <unordered_map>
 
 #include <android-base/file.h>
 #include <android-base/strings.h>
 #include <ziparchive/zip_archive.h>
 
-#include "Alloc.h"
-#include "AllocParser.h"
+#include <memory_trace/MemoryTrace.h>
+
 #include "File.h"
 
 std::string ZipGetContents(const char* filename) {
@@ -75,9 +77,56 @@ static void WaitPid(pid_t pid) {
   }
 }
 
+static void UpdatePresentBytes(std::unordered_map<uint64_t, memory_trace::Entry*>& entries_by_ptr,
+                               memory_trace::Entry* entry) {
+  switch (entry->type) {
+    case memory_trace::FREE:
+      if (entry->present_bytes != -1) {
+        // Need to find the pointer for this free and update the present bytes
+        // on the original pointer.
+        auto iter = entries_by_ptr.find(entry->ptr);
+        if (iter != entries_by_ptr.end()) {
+          // Present bytes can be larger than the recorded size when the
+          // real size returned by malloc_usable_size is greater than that.
+          // Therefore, always choose the smaller of the two.
+          iter->second->present_bytes =
+              MIN(entry->present_bytes, static_cast<int64_t>(iter->second->size));
+          entries_by_ptr.erase(entry->ptr);
+        }
+      }
+      break;
+    case memory_trace::CALLOC:
+    case memory_trace::MALLOC:
+    case memory_trace::MEMALIGN:
+      entries_by_ptr[entry->ptr] = entry;
+      break;
+
+    case memory_trace::REALLOC:
+      if (entry->ptr != 0) {
+        entries_by_ptr[entry->ptr] = entry;
+      }
+      if (entry->u.old_ptr != 0 && entry->present_bytes != -1) {
+        // The old pointer got freed, so add it that way.
+        auto iter = entries_by_ptr.find(entry->u.old_ptr);
+        if (iter != entries_by_ptr.end()) {
+          // Present bytes can be larger than the recorded size when the
+          // real size returned by malloc_usable_size is greater than that.
+          // Therefore, always choose the smaller of the two.
+          iter->second->present_bytes =
+              MIN(entry->present_bytes, static_cast<int64_t>(iter->second->size));
+          entries_by_ptr.erase(entry->u.old_ptr);
+          entry->present_bytes = -1;
+        }
+      }
+      break;
+    default:
+      break;
+  }
+}
+
 // This function should not do any memory allocations in the main function.
 // Any true allocation should happen in fork'd code.
-void GetUnwindInfo(const char* filename, AllocEntry** entries, size_t* num_entries) {
+void GetUnwindInfo(const char* filename, memory_trace::Entry** entries, size_t* num_entries) {
   void* mem =
       mmap(nullptr, sizeof(size_t), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
   if (mem == MAP_FAILED) {
@@ -123,12 +172,13 @@ void GetUnwindInfo(const char* filename, AllocEntry** entries, size_t* num_entri
   *num_entries = *reinterpret_cast<size_t*>(mem);
   munmap(mem, sizeof(size_t));
 
-  mem = mmap(nullptr, *num_entries * sizeof(AllocEntry), PROT_READ | PROT_WRITE,
+  mem = mmap(nullptr, *num_entries * sizeof(memory_trace::Entry), PROT_READ | PROT_WRITE,
              MAP_ANONYMOUS | MAP_SHARED, -1, 0);
   if (mem == MAP_FAILED) {
-    err(1, "Unable to allocate a shared map of size %zu", *num_entries * sizeof(AllocEntry));
+    err(1, "Unable to allocate a shared map of size %zu",
+        *num_entries * sizeof(memory_trace::Entry));
   }
-  *entries = reinterpret_cast<AllocEntry*>(mem);
+  *entries = reinterpret_cast<memory_trace::Entry*>(mem);
 
   if ((pid = fork()) == 0) {
     std::string contents;
@@ -141,6 +191,7 @@ void GetUnwindInfo(const char* filename, AllocEntry** entries, size_t* num_entri
       errx(1, "Contents of zip file %s is empty.", filename);
     }
 
+    std::unordered_map<uint64_t, memory_trace::Entry*> entries_by_ptr;
     size_t entry_idx = 0;
     size_t start_str = 0;
     size_t end_str = 0;
@@ -153,8 +204,17 @@ void GetUnwindInfo(const char* filename, AllocEntry** entries, size_t* num_entri
         errx(1, "Too many entries, stopped at entry %zu", entry_idx);
       }
       contents[end_str] = '\0';
-      AllocGetData(&contents[start_str], &(*entries)[entry_idx++]);
+
+      std::string error;
+      memory_trace::Entry* entry = &(*entries)[entry_idx++];
+      if (!memory_trace::FillInEntryFromString(&contents[start_str], *entry, error)) {
+        errx(1, "%s", error.c_str());
+      }
       start_str = end_str + 1;
+
+      // If this operation does a free, set the present_bytes on the original
+      // allocation.
+      UpdatePresentBytes(entries_by_ptr, entry);
     }
     if (entry_idx != *num_entries) {
       errx(1, "Mismatched number of entries found: expected %zu, found %zu", *num_entries,
@@ -167,6 +227,6 @@ void GetUnwindInfo(const char* filename, AllocEntry** entries, size_t* num_entri
   WaitPid(pid);
 }
 
-void FreeEntries(AllocEntry* entries, size_t num_entries) {
-  munmap(entries, num_entries * sizeof(AllocEntry));
+void FreeEntries(memory_trace::Entry* entries, size_t num_entries) {
+  munmap(entries, num_entries * sizeof(memory_trace::Entry));
 }

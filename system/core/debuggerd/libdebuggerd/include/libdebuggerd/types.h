@@ -34,6 +34,7 @@ struct ThreadInfo {
 
   pid_t pid;
 
+  std::string executable_name;
   std::vector<std::string> command_line;
   std::string selinux_label;
 
@@ -41,6 +42,9 @@ struct ThreadInfo {
   siginfo_t* siginfo = nullptr;
 
   std::unique_ptr<unwindstack::Regs> guest_registers;
+#if defined(__aarch64__)
+  uintptr_t tls;  // This is currently used for MTE stack history buffer.
+#endif
 };
 
 // This struct is written into a pipe from inside the crashing process.

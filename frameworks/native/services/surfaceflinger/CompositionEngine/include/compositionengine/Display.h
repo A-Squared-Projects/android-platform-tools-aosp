@@ -17,9 +17,6 @@
 #pragma once
 
 #include <cstdint>
-#include <optional>
-
-#include <ui/DisplayIdentification.h>
 
 #include <compositionengine/Output.h>
 
@@ -36,6 +33,9 @@ class Display : public virtual Output {
 public:
     // Gets the DisplayId for the display
     virtual DisplayId getId() const = 0;
+
+    // True if the display has a secure layer
+    virtual bool hasSecureLayers() const = 0;
 
     // True if the display is secure
     virtual bool isSecure() const = 0;

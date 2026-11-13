@@ -54,9 +54,9 @@ UString RootFolder_GetName_Computer(int &iconIndex);
 UString RootFolder_GetName_Computer(int &iconIndex)
 {
   #ifdef USE_WIN_PATHS
-  iconIndex = GetIconIndexForCSIDL(CSIDL_DRIVES);
+  iconIndex = Shell_GetFileInfo_SysIconIndex_for_CSIDL(CSIDL_DRIVES);
   #else
-  GetRealIconIndex(FSTRING_PATH_SEPARATOR, FILE_ATTRIBUTE_DIRECTORY, iconIndex);
+  iconIndex = Shell_GetFileInfo_SysIconIndex_for_Path(FSTRING_PATH_SEPARATOR, FILE_ATTRIBUTE_DIRECTORY);
   #endif
   return LangString(IDS_COMPUTER);
 }
@@ -64,14 +64,14 @@ UString RootFolder_GetName_Computer(int &iconIndex)
 UString RootFolder_GetName_Network(int &iconIndex);
 UString RootFolder_GetName_Network(int &iconIndex)
 {
-  iconIndex = GetIconIndexForCSIDL(CSIDL_NETWORK);
+  iconIndex = Shell_GetFileInfo_SysIconIndex_for_CSIDL(CSIDL_NETWORK);
   return LangString(IDS_NETWORK);
 }
 
 UString RootFolder_GetName_Documents(int &iconIndex);
 UString RootFolder_GetName_Documents(int &iconIndex)
 {
-  iconIndex = GetIconIndexForCSIDL(CSIDL_PERSONAL);
+  iconIndex = Shell_GetFileInfo_SysIconIndex_for_CSIDL(CSIDL_PERSONAL);
   return LangString(IDS_DOCUMENTS);
 }
 
@@ -96,7 +96,7 @@ void CRootFolder::Init()
   _names[ROOT_INDEX_DOCUMENTS] = RootFolder_GetName_Documents(_iconIndices[ROOT_INDEX_DOCUMENTS]);
   _names[ROOT_INDEX_NETWORK] = RootFolder_GetName_Network(_iconIndices[ROOT_INDEX_NETWORK]);
   _names[ROOT_INDEX_VOLUMES] = kVolPrefix;
-  _iconIndices[ROOT_INDEX_VOLUMES] = GetIconIndexForCSIDL(CSIDL_DRIVES);
+  _iconIndices[ROOT_INDEX_VOLUMES] = Shell_GetFileInfo_SysIconIndex_for_CSIDL(CSIDL_DRIVES);
   #endif
 }
 
@@ -249,7 +249,7 @@ Z7_COM7F_IMF(CRootFolder::BindToFolder(const wchar_t *name, IFolderFolder **resu
       AreEqualNames(name2, L"Documents"))
     return BindToFolder((UInt32)ROOT_INDEX_DOCUMENTS, resultFolder);
   #else
-  if (name2 == WSTRING_PATH_SEPARATOR)
+  if (name2.IsEqualTo(STRING_PATH_SEPARATOR))
     return BindToFolder((UInt32)ROOT_INDEX_COMPUTER, resultFolder);
   #endif
   
@@ -257,7 +257,7 @@ Z7_COM7F_IMF(CRootFolder::BindToFolder(const wchar_t *name, IFolderFolder **resu
       AreEqualNames(name2, L"Computer"))
     return BindToFolder((UInt32)ROOT_INDEX_COMPUTER, resultFolder);
   
-  if (name2 == WSTRING_PATH_SEPARATOR)
+  if (name2.IsEqualTo(STRING_PATH_SEPARATOR))
   {
     CMyComPtr<IFolderFolder> subFolder = this;
     *resultFolder = subFolder.Detach();

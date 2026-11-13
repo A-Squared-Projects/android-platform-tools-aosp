@@ -25,13 +25,11 @@
 #include "DisplayDevice.h"
 #include "FrameTracer/FrameTracer.h"
 #include "Layer.h"
-#include "NativeWindowSurface.h"
-#include "StartPropertySetThread.h"
 #include "SurfaceFlingerDefaultFactory.h"
 #include "SurfaceFlingerProperties.h"
 
 #include "DisplayHardware/ComposerHal.h"
-#include "FrameTimeline/FrameTimeline.h"
+#include "Scheduler/FrameTimeline.h"
 #include "Scheduler/Scheduler.h"
 #include "Scheduler/VsyncConfiguration.h"
 #include "Scheduler/VsyncController.h"
@@ -53,11 +51,6 @@ std::unique_ptr<scheduler::VsyncConfiguration> DefaultFactory::createVsyncConfig
     }
 }
 
-sp<StartPropertySetThread> DefaultFactory::createStartPropertySetThread(
-        bool timestampPropertyValue) {
-    return sp<StartPropertySetThread>::make(timestampPropertyValue);
-}
-
 sp<DisplayDevice> DefaultFactory::createDisplayDevice(DisplayDeviceCreationArgs& creationArgs) {
     return sp<DisplayDevice>::make(creationArgs);
 }
@@ -68,30 +61,15 @@ sp<GraphicBuffer> DefaultFactory::createGraphicBuffer(uint32_t width, uint32_t h
     return sp<GraphicBuffer>::make(width, height, format, layerCount, usage, requestorName);
 }
 
-void DefaultFactory::createBufferQueue(sp<IGraphicBufferProducer>* outProducer,
-                                       sp<IGraphicBufferConsumer>* outConsumer,
-                                       bool consumerIsSurfaceFlinger) {
-    BufferQueue::createBufferQueue(outProducer, outConsumer, consumerIsSurfaceFlinger);
-}
-
-std::unique_ptr<surfaceflinger::NativeWindowSurface> DefaultFactory::createNativeWindowSurface(
-        const sp<IGraphicBufferProducer>& producer) {
-    return surfaceflinger::impl::createNativeWindowSurface(producer);
-}
-
 std::unique_ptr<compositionengine::CompositionEngine> DefaultFactory::createCompositionEngine() {
     return compositionengine::impl::createCompositionEngine();
 }
 
-sp<Layer> DefaultFactory::createBufferStateLayer(const LayerCreationArgs& args) {
+sp<Layer> DefaultFactory::createLayer(const LayerCreationArgs& args) {
     return sp<Layer>::make(args);
 }
 
-sp<Layer> DefaultFactory::createEffectLayer(const LayerCreationArgs& args) {
-    return sp<Layer>::make(args);
-}
-
-sp<LayerFE> DefaultFactory::createLayerFE(const std::string& layerName) {
+sp<LayerFE> DefaultFactory::createLayerFE(const std::string& layerName, const Layer* /* owner */) {
     return sp<LayerFE>::make(layerName);
 }
 
@@ -99,9 +77,9 @@ std::unique_ptr<FrameTracer> DefaultFactory::createFrameTracer() {
     return std::make_unique<FrameTracer>();
 }
 
-std::unique_ptr<frametimeline::FrameTimeline> DefaultFactory::createFrameTimeline(
+std::unique_ptr<scheduler::FrameTimeline> DefaultFactory::createFrameTimeline(
         std::shared_ptr<TimeStats> timeStats, pid_t surfaceFlingerPid) {
-    return std::make_unique<frametimeline::impl::FrameTimeline>(timeStats, surfaceFlingerPid);
+    return std::make_unique<scheduler::impl::FrameTimeline>(timeStats, surfaceFlingerPid);
 }
 
 } // namespace android::surfaceflinger

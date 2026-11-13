@@ -18,6 +18,7 @@
 #define ANDROID_PRIVATE_NATIVE_PERFORMANCE_HINT_PRIVATE_H
 
 #include <stdint.h>
+#include <android/performance_hint.h>
 
 __BEGIN_DECLS
 
@@ -73,6 +74,30 @@ enum SessionHint: int32_t {
      * baseline to prepare for an arbitrary load, and must wake up if inactive.
      */
     GPU_LOAD_RESET = 7,
+
+    /**
+     * This hint indicates an upcoming CPU workload that is abnormally large and
+     * not representative of the workload. This should be used for rare, one-time
+     * operations and should be ignored by any load tracking or session hysteresis.
+     */
+    CPU_LOAD_SPIKE = 8,
+
+    /**
+     * This hint indicates an upcoming GPU workload that is abnormally large and
+     * not representative of the workload. This should be used for rare, one-time
+     * operations and should be ignored by any load tracking or session hysteresis.
+     */
+    GPU_LOAD_SPIKE = 9,
+};
+
+// Allows access to PowerHAL's SessionTags without needing to import its AIDL
+enum class SessionTag : int32_t {
+  OTHER = 0,
+  SURFACEFLINGER = 1,
+  HWUI = 2,
+  GAME = 3,
+  APP = 4,
+  SYSUI = 5,
 };
 
 /**
@@ -83,13 +108,66 @@ enum SessionHint: int32_t {
  * @return 0 on success
  *         EPIPE if communication with the system service has failed.
  */
-int APerformanceHint_sendHint(void* session, SessionHint hint);
+int APerformanceHint_sendHint(APerformanceHintSession* session, SessionHint hint);
 
 /**
  * Return the list of thread ids, this API should only be used for testing only.
  */
-int APerformanceHint_getThreadIds(void* aPerformanceHintSession,
+int APerformanceHint_getThreadIds(APerformanceHintSession* session,
                                   int32_t* const threadIds, size_t* const size);
+
+/**
+ * Creates a session with additional options
+ */
+APerformanceHintSession* APerformanceHint_createSessionInternal(APerformanceHintManager* manager,
+                                        const int32_t* threadIds, size_t size,
+                                        int64_t initialTargetWorkDurationNanos, SessionTag tag);
+/**
+ * Creates a session using ASessionCreationConfig
+ */
+int APerformanceHint_createSessionUsingConfigInternal(
+        APerformanceHintManager* manager,
+        ASessionCreationConfig* config,
+        APerformanceHintSession** sessionOut,
+        SessionTag tag);
+
+/**
+ * Creates a session from the Java SDK implementation
+ */
+APerformanceHintSession* APerformanceHint_createSessionFromJava(APerformanceHintManager* manager,
+                                        const int32_t* threadIds, size_t size,
+                                        int64_t initialTargetWorkDurationNanos);
+
+/**
+ * Special method for Java SDK implementation to kill sessions
+ */
+void APerformanceHint_closeSessionFromJava(APerformanceHintSession* session);
+
+/**
+ * Forces FMQ to be enabled or disabled, for testing only.
+ */
+void APerformanceHint_setUseFMQForTesting(bool enabled);
+
+/**
+ * Get the rate limiter properties for testing.
+ */
+void APerformanceHint_getRateLimiterPropertiesForTesting(
+        int32_t* maxLoadHintsPerInterval, int64_t* loadHintInterval);
+
+/*
+ * Forces the "new load hint" flag to be disabled for testing.
+ */
+void APerformanceHint_setUseNewLoadHintBehaviorForTesting(bool newBehavior);
+
+/*
+ * Forces the graphics pipeline flag to be enabled or disabled, for testing only.
+ */
+void APerformanceHint_setUseGraphicsPipelineForTesting(bool enabled);
+
+/*
+ * Set the reporting duration max batch size cap. Passing -1 removes the cap.
+ */
+void APerformanceHint_setReportBatchSizeCapForTesting(int cap);
 
 __END_DECLS
 

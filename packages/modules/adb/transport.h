@@ -115,13 +115,16 @@ struct Connection {
 
     virtual bool Write(std::unique_ptr<apacket> packet) = 0;
 
-    virtual void Start() = 0;
+    // Return true if the transport successfully started.
+    virtual bool Start() = 0;
     virtual void Stop() = 0;
 
     virtual bool DoTlsHandshake(RSA* key, std::string* auth_key = nullptr) = 0;
 
     // Stop, and reset the device if it's a USB connection.
     virtual void Reset();
+
+    virtual bool SupportsDetach() const { return false; }
 
     virtual bool Attach(std::string* error) {
         *error = "transport type doesn't support attach";
@@ -175,7 +178,7 @@ struct BlockingConnectionAdapter : public Connection {
 
     virtual bool Write(std::unique_ptr<apacket> packet) override final;
 
-    virtual void Start() override final;
+    virtual bool Start() override final;
     virtual void Stop() override final;
     virtual bool DoTlsHandshake(RSA* key, std::string* auth_key) override final;
 
@@ -264,8 +267,9 @@ class atransport : public enable_weak_from_this<atransport> {
 
     using ReconnectCallback = std::function<ReconnectResult(atransport*)>;
 
-    atransport(ReconnectCallback reconnect, ConnectionState state)
+    atransport(TransportType t, ReconnectCallback reconnect, ConnectionState state)
         : id(NextTransportId()),
+          type(t),
           kicked_(false),
           connection_state_(state),
           connection_(nullptr),
@@ -279,8 +283,8 @@ class atransport : public enable_weak_from_this<atransport> {
         protocol_version = A_VERSION_MIN;
         max_payload = MAX_PAYLOAD;
     }
-    atransport(ConnectionState state = kCsOffline)
-        : atransport([](atransport*) { return ReconnectResult::Abort; }, state) {}
+    atransport(TransportType t, ConnectionState state = kCsOffline)
+        : atransport(t, [](atransport*) { return ReconnectResult::Abort; }, state) {}
     ~atransport();
 
     int Write(apacket* p);
@@ -484,8 +488,6 @@ void init_mdns_transport_discovery();
 atransport* find_transport(const char* serial);
 
 void kick_all_tcp_devices();
-
-bool using_bonjour(void);
 #endif
 
 void kick_all_transports();
@@ -501,20 +503,27 @@ void register_transport(atransport* transport);
 #if ADB_HOST
 void init_usb_transport(atransport* t, usb_handle* usb);
 
-void register_usb_transport(std::shared_ptr<Connection> connection, const char* serial,
-                            const char* devpath, unsigned writeable);
+void register_libusb_transport(std::shared_ptr<Connection> connection, const char* serial,
+                               const char* devpath, unsigned writable);
+
 void register_usb_transport(usb_handle* h, const char* serial, const char* devpath,
                             unsigned writeable);
 
 // This should only be used for transports with connection_state == kCsNoPerm.
 void unregister_usb_transport(usb_handle* usb);
-#endif
 
+bool connect_emulator(int port);
+int connect_emulator_arbitrary_ports(int console_port, int adb_port, std::string* error);
 /* Connect to a network address and register it as a device */
 void connect_device(const std::string& address, std::string* response);
 
+#endif
+
+/* initialize a transport object's func pointers and state */
+int init_socket_transport(atransport* t, unique_fd fd, int port, bool is_emulator);
+
 /* cause new transports to be init'd and added to the list */
-bool register_socket_transport(unique_fd s, std::string serial, int port, int local,
+bool register_socket_transport(unique_fd s, std::string serial, int port, bool is_emulator,
                                atransport::ReconnectCallback reconnect, bool use_tls,
                                int* error = nullptr);
 
@@ -529,12 +538,7 @@ void send_packet(apacket* p, atransport* t);
 enum TrackerOutputType { SHORT_TEXT, LONG_TEXT, PROTOBUF, TEXT_PROTOBUF };
 asocket* create_device_tracker(TrackerOutputType type);
 std::string list_transports(TrackerOutputType type);
-#endif
-
-#if !ADB_HOST
-unique_fd adb_listen(std::string_view addr, std::string* error);
-void server_socket_thread(std::function<unique_fd(std::string_view, std::string*)> listen_func,
-                          std::string_view addr);
+bool burst_mode_enabled();
 #endif
 
 #endif /* __TRANSPORT_H */

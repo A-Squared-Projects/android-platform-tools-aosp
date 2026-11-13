@@ -26,6 +26,7 @@
 #include <deque>
 #include <future>
 #include <iostream>
+#include <thread>
 
 #include <aidl/android/hardware/boot/MergeStatus.h>
 #include <android-base/file.h>
@@ -47,6 +48,7 @@
 #include <android/snapshot/snapshot.pb.h>
 #include <libsnapshot/test_helpers.h>
 #include "partition_cow_creator.h"
+#include "scratch_super.h"
 #include "utility.h"
 
 // Mock classes are not used. Header included to ensure mocked class definition aligns with the
@@ -64,7 +66,9 @@ DEFINE_string(force_mode, DEFAULT_MODE,
               "Force testing older modes (vab-legacy) ignoring device config.");
 DEFINE_string(force_iouring_disable, "",
               "Force testing mode (iouring_disabled) - disable io_uring");
+DEFINE_string(force_ublk_mode, "auto", "Force ublk for testing: enabled, disabled, or auto.");
 DEFINE_string(compression_method, "gz", "Default compression algorithm.");
+DEFINE_int32(num_ublk_threads, 0, "Number of ublk threads to use for testing.");
 
 namespace android {
 namespace snapshot {
@@ -79,7 +83,6 @@ using android::fs_mgr::BlockDeviceInfo;
 using android::fs_mgr::CreateLogicalPartitionParams;
 using android::fs_mgr::DestroyLogicalPartition;
 using android::fs_mgr::EnsurePathMounted;
-using android::fs_mgr::EnsurePathUnmounted;
 using android::fs_mgr::Extent;
 using android::fs_mgr::Fstab;
 using android::fs_mgr::GetPartitionGroupName;
@@ -121,6 +124,19 @@ class SnapshotTest : public ::testing::Test {
 
         LOG(INFO) << "Starting test: " << test_name_;
 
+        if (FLAGS_force_ublk_mode == "enabled") {
+            ASSERT_TRUE(android::base::SetProperty("snapuserd.test.ublk.force_mode", "enabled"));
+        } else if (FLAGS_force_ublk_mode == "disabled") {
+            ASSERT_TRUE(android::base::SetProperty("snapuserd.test.ublk.force_mode", "disabled"));
+        } else {
+            ASSERT_TRUE(android::base::SetProperty("snapuserd.test.ublk.force_mode", ""));
+        }
+
+        if (FLAGS_num_ublk_threads > 0) {
+            ASSERT_TRUE(android::base::SetProperty("snapuserd.test.num_worker_threads",
+                                                   std::to_string(FLAGS_num_ublk_threads)));
+        }
+
         SKIP_IF_NON_VIRTUAL_AB();
         SKIP_IF_VENDOR_ON_ANDROID_S();
 
@@ -153,8 +169,8 @@ class SnapshotTest : public ::testing::Test {
             properties["ro.virtual_ab.io_uring.enabled"] = "false";
         }
 
-        auto fetcher = std::make_unique<SnapshotTestPropertyFetcher>("_a", std::move(properties));
-        IPropertyFetcher::OverrideForTesting(std::move(fetcher));
+        fetcher_ = std::make_shared<SnapshotTestPropertyFetcher>("_a", std::move(properties));
+        IPropertyFetcher::OverrideForTesting(fetcher_);
 
         if (GetLegacyCompressionEnabledProperty() || CanUseUserspaceSnapshots()) {
             // If we're asked to test the device's actual configuration, then it
@@ -172,6 +188,9 @@ class SnapshotTest : public ::testing::Test {
         RETURN_IF_VENDOR_ON_ANDROID_S();
 
         LOG(INFO) << "Tearing down SnapshotTest test: " << test_name_;
+
+        ASSERT_TRUE(android::base::SetProperty("snapuserd.test.ublk.force_mode", ""));
+        ASSERT_TRUE(android::base::SetProperty("snapuserd.test.num_worker_threads", ""));
 
         lock_ = nullptr;
 
@@ -199,7 +218,7 @@ class SnapshotTest : public ::testing::Test {
         if (api_level == -1) {
             api_level = android::base::GetIntProperty("ro.product.first_api_level", -1);
         }
-        return api_level != __ANDROID_API_S__;
+        return api_level <= __ANDROID_API_S__;
     }
 
     void InitializeState() {
@@ -246,26 +265,31 @@ class SnapshotTest : public ::testing::Test {
             unlink(state_file.c_str());
         }
     }
-
-    void CleanupSnapshotArtifacts(const std::string& snapshot) {
-        // The device-mapper stack may have been collapsed to dm-linear, so it's
-        // necessary to check what state it's in before attempting a cleanup.
-        // SnapshotManager has no path like this because we'd never remove a
-        // merged snapshot (a live partition).
+    void CleanupUserspaceSnapshotArtifacts(const std::string& snapshot) {
         bool is_dm_user = false;
+        bool is_ublk = false;
         DeviceMapper::TargetInfo target;
         if (sm->IsSnapshotDevice(snapshot, &target)) {
             is_dm_user = (DeviceMapper::GetTargetType(target.spec) == "user");
+            is_ublk = (DeviceMapper::GetTargetType(target.spec) == "linear");
         }
 
-        if (is_dm_user) {
+        if (is_dm_user || is_ublk) {
             ASSERT_TRUE(sm->EnsureSnapuserdConnected());
             ASSERT_TRUE(AcquireLock());
 
             auto local_lock = std::move(lock_);
             ASSERT_TRUE(sm->UnmapUserspaceSnapshotDevice(local_lock.get(), snapshot));
         }
+    }
 
+    void CleanupSnapshotArtifacts(const std::string& snapshot) {
+        // The device-mapper stack may have been collapsed to dm-linear, so it's
+        // necessary to check what state it's in before attempting a cleanup.
+        // SnapshotManager has no path like this because we'd never remove a
+        // merged snapshot (a live partition).
+
+        CleanupUserspaceSnapshotArtifacts(snapshot);
         ASSERT_TRUE(DeleteSnapshotDevice(snapshot));
         DeleteBackingImage(image_manager_, snapshot + "-cow-img");
 
@@ -379,6 +403,15 @@ class SnapshotTest : public ::testing::Test {
 
     AssertionResult DeleteSnapshotDevice(const std::string& snapshot) {
         AssertionResult res = AssertionSuccess();
+        DeviceMapper::TargetInfo target;
+        if (sm->IsSnapshotDevice(snapshot, &target)) {
+            auto target_type = DeviceMapper::GetTargetType(target.spec);
+            if (target_type == "user" || target_type == "linear") {
+                if (!sm->UnmapDmUserDevice(snapshot)) {
+                    return AssertionFailure() << "Cannot unmap snapshot device for " << snapshot;
+                }
+            }
+        }
         if (!(res = DeleteDevice(snapshot))) return res;
         if (!sm->UnmapDmUserDevice(snapshot + "-user-cow")) {
             return AssertionFailure() << "Cannot delete dm-user device for " << snapshot;
@@ -533,6 +566,7 @@ class SnapshotTest : public ::testing::Test {
     std::string fake_super_;
     bool snapuserd_required_ = false;
     std::string test_name_;
+    std::shared_ptr<SnapshotTestPropertyFetcher> fetcher_;
 };
 
 TEST_F(SnapshotTest, CreateSnapshot) {
@@ -640,11 +674,13 @@ TEST_F(SnapshotTest, Merge) {
     test_string.resize(kBlockSize);
 
     bool userspace_snapshots = false;
+    bool using_ublk = false;
     if (snapuserd_required_) {
         std::unique_ptr<ICowWriter> writer;
         ASSERT_TRUE(PrepareOneSnapshot(kDeviceSize, &writer));
 
         userspace_snapshots = sm->UpdateUsesUserSnapshots(lock_.get());
+        using_ublk = sm->UpdateUsesUblk(lock_.get());
 
         // Release the lock.
         lock_ = nullptr;
@@ -694,12 +730,17 @@ TEST_F(SnapshotTest, Merge) {
     DeviceMapper::TargetInfo target;
     ASSERT_TRUE(sm->IsSnapshotDevice("test_partition_b", &target));
     if (userspace_snapshots) {
-        ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "user");
+        if (using_ublk) {
+            ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "linear");
+        } else {
+            ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "user");
+        }
     } else {
         ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "snapshot-merge");
     }
 
     // We should not be able to cancel an update now.
+    ASSERT_EQ(sm->TryCancelUpdate(), CancelResult::NEEDS_MERGE);
     ASSERT_FALSE(sm->CancelUpdate());
 
     ASSERT_EQ(sm->ProcessUpdateState(), UpdateState::MergeCompleted);
@@ -744,6 +785,7 @@ TEST_F(SnapshotTest, FirstStageMountAndMerge) {
     ASSERT_TRUE(AcquireLock());
 
     bool userspace_snapshots = init->UpdateUsesUserSnapshots(lock_.get());
+    bool using_ublk = init->UpdateUsesUblk(lock_.get());
 
     // Validate that we have a snapshot device.
     SnapshotStatus status;
@@ -758,7 +800,11 @@ TEST_F(SnapshotTest, FirstStageMountAndMerge) {
     DeviceMapper::TargetInfo target;
     ASSERT_TRUE(init->IsSnapshotDevice("test_partition_b", &target));
     if (userspace_snapshots) {
-        ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "user");
+        if (using_ublk) {
+            ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "linear");
+        } else {
+            ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "user");
+        }
     } else {
         ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "snapshot");
     }
@@ -813,6 +859,7 @@ TEST_F(SnapshotTest, FlashSuperDuringMerge) {
 
     // Now, reflash super. Note that we haven't called ProcessUpdateState, so the
     // status is still Merging.
+    CleanupUserspaceSnapshotArtifacts("test_partition_b");
     ASSERT_TRUE(DeleteSnapshotDevice("test_partition_b"));
     ASSERT_TRUE(init->image_manager()->UnmapImageIfExists("test_partition_b-cow-img"));
     FormatFakeSuper();
@@ -1114,14 +1161,12 @@ class SnapshotUpdateTest : public SnapshotTest {
         MountMetadata();
         for (const auto& suffix : {"_a", "_b"}) {
             test_device->set_slot_suffix(suffix);
-
             // Cheat our way out of merge failed states.
             if (sm->ProcessUpdateState() == UpdateState::MergeFailed) {
                 ASSERT_TRUE(AcquireLock());
                 ASSERT_TRUE(sm->WriteUpdateState(lock_.get(), UpdateState::None));
                 lock_ = {};
             }
-
             EXPECT_TRUE(sm->CancelUpdate()) << suffix;
         }
         EXPECT_TRUE(UnmapAll());
@@ -1341,6 +1386,16 @@ class SnapshotUpdateTest : public SnapshotTest {
     PartitionUpdate* prd_ = nullptr;
     DynamicPartitionGroup* group_ = nullptr;
 };
+
+TEST_F(SnapshotUpdateTest, SuperOtaMetadataTest) {
+    auto info = new TestDeviceInfo(fake_super);
+    ASSERT_TRUE(CleanupScratchOtaMetadataIfPresent(info));
+    ASSERT_TRUE(CreateScratchOtaMetadataOnSuper(info));
+    std::string scratch_device = GetScratchOtaMetadataPartition();
+    ASSERT_NE(scratch_device, "");
+    ASSERT_NE(MapScratchOtaMetadataPartition(scratch_device), "");
+    ASSERT_TRUE(CleanupScratchOtaMetadataIfPresent(info));
+}
 
 // Test full update flow executed by update_engine. Some partitions uses super empty space,
 // some uses images, and some uses both.
@@ -1564,12 +1619,27 @@ TEST_F(SnapshotUpdateTest, SpaceSwapUpdate) {
     ASSERT_TRUE(init->IsSnapshotDevice("prd_b", &target));
 
     bool userspace_snapshots = init->UpdateUsesUserSnapshots();
+    bool ublk_snapshots = false;
+    {
+        ASSERT_TRUE(AcquireLock());
+        auto local_lock = std::move(lock_);
+        ublk_snapshots = init->UpdateUsesUblk(local_lock.get());
+    }
+
     if (userspace_snapshots) {
-        ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "user");
-        ASSERT_TRUE(init->IsSnapshotDevice("sys_b", &target));
-        ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "user");
-        ASSERT_TRUE(init->IsSnapshotDevice("vnd_b", &target));
-        ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "user");
+        if (!ublk_snapshots) {
+            ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "user");
+            ASSERT_TRUE(init->IsSnapshotDevice("sys_b", &target));
+            ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "user");
+            ASSERT_TRUE(init->IsSnapshotDevice("vnd_b", &target));
+            ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "user");
+        } else {
+            ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "linear");
+            ASSERT_TRUE(init->IsSnapshotDevice("sys_b", &target));
+            ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "linear");
+            ASSERT_TRUE(init->IsSnapshotDevice("vnd_b", &target));
+            ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "linear");
+        }
     } else {
         ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "snapshot-merge");
         ASSERT_TRUE(init->IsSnapshotDevice("sys_b", &target));
@@ -1579,6 +1649,146 @@ TEST_F(SnapshotUpdateTest, SpaceSwapUpdate) {
     }
 
     // Complete the merge.
+    ASSERT_EQ(UpdateState::MergeCompleted, init->ProcessUpdateState());
+
+    // Make sure the second phase ran and deleted snapshots.
+    {
+        ASSERT_TRUE(AcquireLock());
+        auto local_lock = std::move(lock_);
+        std::vector<std::string> snapshots;
+        ASSERT_TRUE(init->ListSnapshots(local_lock.get(), &snapshots));
+        ASSERT_TRUE(snapshots.empty());
+    }
+
+    // Check that the target partitions have the same content after the merge.
+    for (const auto& name : {"sys_b", "vnd_b", "prd_b"}) {
+        ASSERT_TRUE(IsPartitionUnchanged(name))
+                << "Content of " << name << " changes after the merge";
+    }
+}
+
+// Test that shrinking and growing partitions at the same time is handled
+// correctly in VABC.
+TEST_F(SnapshotUpdateTest, InterruptMergeDuringPhaseUpdate) {
+    if (!snapuserd_required_) {
+        // b/179111359
+        GTEST_SKIP() << "Skipping snapuserd test";
+    }
+
+    auto old_sys_size = GetSize(sys_);
+    auto old_prd_size = GetSize(prd_);
+
+    // Grow |sys| but shrink |prd|.
+    SetSize(sys_, old_sys_size * 2);
+    sys_->set_estimate_cow_size(8_MiB);
+    SetSize(prd_, old_prd_size / 2);
+    prd_->set_estimate_cow_size(1_MiB);
+
+    AddOperationForPartitions();
+
+    ASSERT_TRUE(sm->BeginUpdate());
+    ASSERT_TRUE(sm->CreateUpdateSnapshots(manifest_));
+
+    // Check that the old partition sizes were saved correctly.
+    {
+        ASSERT_TRUE(AcquireLock());
+        auto local_lock = std::move(lock_);
+
+        SnapshotStatus status;
+        ASSERT_TRUE(sm->ReadSnapshotStatus(local_lock.get(), "prd_b", &status));
+        ASSERT_EQ(status.old_partition_size(), 3145728);
+        ASSERT_TRUE(sm->ReadSnapshotStatus(local_lock.get(), "sys_b", &status));
+        ASSERT_EQ(status.old_partition_size(), 3145728);
+    }
+
+    ASSERT_TRUE(WriteSnapshotAndHash(sys_));
+    ASSERT_TRUE(WriteSnapshotAndHash(vnd_));
+    ASSERT_TRUE(ShiftAllSnapshotBlocks("prd_b", old_prd_size));
+
+    sync();
+
+    // Assert that source partitions aren't affected.
+    for (const auto& name : {"sys_a", "vnd_a", "prd_a"}) {
+        ASSERT_TRUE(IsPartitionUnchanged(name));
+    }
+
+    ASSERT_TRUE(sm->FinishedSnapshotWrites(false));
+
+    // Simulate shutting down the device.
+    ASSERT_TRUE(UnmapAll());
+
+    // After reboot, init does first stage mount.
+    auto init = NewManagerForFirstStageMount("_b");
+    ASSERT_NE(init, nullptr);
+    ASSERT_TRUE(init->NeedSnapshotsInFirstStageMount());
+    ASSERT_TRUE(init->CreateLogicalAndSnapshotPartitions("super", snapshot_timeout_));
+
+    // Check that the target partitions have the same content.
+    for (const auto& name : {"sys_b", "vnd_b", "prd_b"}) {
+        ASSERT_TRUE(IsPartitionUnchanged(name));
+    }
+
+    // Initiate the merge and wait for it to be completed.
+    if (ShouldSkipLegacyMerging()) {
+        LOG(INFO) << "Skipping legacy merge in test";
+        return;
+    }
+    ASSERT_TRUE(init->InitiateMerge());
+    ASSERT_EQ(init->IsSnapuserdRequired(), snapuserd_required_);
+    {
+        // Check that the merge phase is FIRST_PHASE until at least one call
+        // to ProcessUpdateState() occurs.
+        ASSERT_TRUE(AcquireLock());
+        auto local_lock = std::move(lock_);
+        auto status = init->ReadSnapshotUpdateStatus(local_lock.get());
+        ASSERT_EQ(status.merge_phase(), MergePhase::FIRST_PHASE);
+    }
+
+    // Wait until prd_b merge is completed which is part of first phase
+    std::chrono::milliseconds timeout(6000);
+    auto start = std::chrono::steady_clock::now();
+    // Keep polling until the merge is complete or timeout is reached
+    while (true) {
+        // Query the merge status
+        const auto merge_status = init->snapuserd_client()->QuerySnapshotStatus("prd_b");
+        if (merge_status == "snapshot-merge-complete") {
+            break;
+        }
+
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - start);
+
+        ASSERT_TRUE(elapsed < timeout);
+        // sleep for a second and allow merge to complete
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    }
+    auto using_ublk_ = false;
+    // Now, forcefully update the snapshot-update status to SECOND PHASE
+    // This will not update the snapshot status of sys_b to MERGING
+    if (init->UpdateUsesUserSnapshots()) {
+        ASSERT_TRUE(AcquireLock());
+        auto local_lock = std::move(lock_);
+        auto status = init->ReadSnapshotUpdateStatus(local_lock.get());
+        status.set_merge_phase(MergePhase::SECOND_PHASE);
+        using_ublk_ = sm->UpdateUsesUblk(local_lock.get());
+        ASSERT_TRUE(init->WriteSnapshotUpdateStatus(local_lock.get(), status));
+    }
+
+    // Simulate shutting down the device and creating partitions again.
+    ASSERT_TRUE(UnmapAll());
+    ASSERT_TRUE(init->CreateLogicalAndSnapshotPartitions("super", snapshot_timeout_));
+    auto snapshotType = using_ublk_ ? "linear" : "user";
+    DeviceMapper::TargetInfo target;
+    ASSERT_TRUE(init->IsSnapshotDevice("prd_b", &target));
+    ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), snapshotType);
+    ASSERT_TRUE(init->IsSnapshotDevice("sys_b", &target));
+    ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), snapshotType);
+    ASSERT_TRUE(init->IsSnapshotDevice("vnd_b", &target));
+    ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), snapshotType);
+
+    // Complete the merge; "sys" and "vnd" should resume the merge
+    // even though merge was interrupted after update_status was updated to
+    // SECOND_PHASE
     ASSERT_EQ(UpdateState::MergeCompleted, init->ProcessUpdateState());
 
     // Make sure the second phase ran and deleted snapshots.
@@ -1981,23 +2191,6 @@ TEST_F(MetadataMountedTest, Android) {
     EXPECT_TRUE(sm->CancelUpdate()) << "Metadata dir should never be unmounted in Android mode";
 }
 
-TEST_F(MetadataMountedTest, Recovery) {
-    GTEST_SKIP() << "b/350715463";
-
-    test_device->set_recovery(true);
-    metadata_dir_ = test_device->GetMetadataDir();
-
-    EXPECT_TRUE(android::fs_mgr::EnsurePathUnmounted(&fstab_, metadata_dir_));
-    EXPECT_FALSE(IsMetadataMounted());
-
-    auto device = sm->EnsureMetadataMounted();
-    EXPECT_NE(nullptr, device);
-    EXPECT_TRUE(IsMetadataMounted());
-
-    device.reset();
-    EXPECT_FALSE(IsMetadataMounted());
-}
-
 // Test that during a merge, we can wipe data in recovery.
 TEST_F(SnapshotUpdateTest, MergeInRecovery) {
     // Execute the first update.
@@ -2102,10 +2295,10 @@ TEST_F(SnapshotUpdateTest, DataWipeRollbackInRecovery) {
     test_device->set_recovery(true);
     auto new_sm = NewManagerForFirstStageMount(test_device);
 
+    EXPECT_EQ(new_sm->GetUpdateState(), UpdateState::Unverified);
     ASSERT_TRUE(new_sm->HandleImminentDataWipe());
     // Manually mount metadata so that we can call GetUpdateState() below.
     MountMetadata();
-    EXPECT_EQ(new_sm->GetUpdateState(), UpdateState::None);
     EXPECT_TRUE(test_device->IsSlotUnbootable(1));
     EXPECT_FALSE(test_device->IsSlotUnbootable(0));
 }
@@ -2127,6 +2320,7 @@ TEST_F(SnapshotUpdateTest, DataWipeAfterRollback) {
     test_device->set_recovery(true);
     auto new_sm = NewManagerForFirstStageMount(test_device);
 
+    EXPECT_EQ(new_sm->GetUpdateState(), UpdateState::Unverified);
     ASSERT_TRUE(new_sm->HandleImminentDataWipe());
     EXPECT_EQ(new_sm->GetUpdateState(), UpdateState::None);
     EXPECT_FALSE(test_device->IsSlotUnbootable(0));
@@ -2135,10 +2329,6 @@ TEST_F(SnapshotUpdateTest, DataWipeAfterRollback) {
 
 // Test update package that requests data wipe.
 TEST_F(SnapshotUpdateTest, DataWipeRequiredInPackage) {
-    if (ShouldSkipLegacyMerging()) {
-        GTEST_SKIP() << "Skipping legacy merge in test";
-    }
-
     AddOperationForPartitions();
     // Execute the update.
     ASSERT_TRUE(sm->BeginUpdate());
@@ -2157,6 +2347,7 @@ TEST_F(SnapshotUpdateTest, DataWipeRequiredInPackage) {
     test_device->set_recovery(true);
     auto new_sm = NewManagerForFirstStageMount(test_device);
 
+    EXPECT_EQ(new_sm->GetUpdateState(), UpdateState::Unverified);
     ASSERT_TRUE(new_sm->HandleImminentDataWipe());
     // Manually mount metadata so that we can call GetUpdateState() below.
     MountMetadata();
@@ -2176,12 +2367,40 @@ TEST_F(SnapshotUpdateTest, DataWipeRequiredInPackage) {
     }
 }
 
+// Cancel an OTA in recovery.
+TEST_F(SnapshotUpdateTest, CancelInRecovery) {
+    AddOperationForPartitions();
+    // Execute the update.
+    ASSERT_TRUE(sm->BeginUpdate());
+    ASSERT_TRUE(sm->CreateUpdateSnapshots(manifest_));
+
+    // Write some data to target partitions.
+    ASSERT_TRUE(WriteSnapshots());
+
+    ASSERT_TRUE(sm->FinishedSnapshotWrites(true /* wipe */));
+
+    // Simulate shutting down the device.
+    ASSERT_TRUE(UnmapAll());
+
+    // Simulate a reboot into recovery.
+    auto test_device = new TestDeviceInfo(fake_super, "_b");
+    test_device->set_recovery(true);
+    auto new_sm = NewManagerForFirstStageMount(test_device);
+
+    EXPECT_EQ(new_sm->GetUpdateState(), UpdateState::Unverified);
+    ASSERT_FALSE(new_sm->IsCancelUpdateSafe());
+    ASSERT_TRUE(new_sm->CancelUpdate());
+
+    ASSERT_TRUE(new_sm->EnsureImageManager());
+    auto im = new_sm->image_manager();
+    ASSERT_NE(im, nullptr);
+    ASSERT_TRUE(im->IsImageDisabled("sys_b"));
+    ASSERT_TRUE(im->IsImageDisabled("vnd_b"));
+    ASSERT_TRUE(im->IsImageDisabled("prd_b"));
+}
+
 // Test update package that requests data wipe.
 TEST_F(SnapshotUpdateTest, DataWipeWithStaleSnapshots) {
-    if (ShouldSkipLegacyMerging()) {
-        GTEST_SKIP() << "Skipping legacy merge in test";
-    }
-
     AddOperationForPartitions();
 
     // Execute the update.
@@ -2222,6 +2441,7 @@ TEST_F(SnapshotUpdateTest, DataWipeWithStaleSnapshots) {
     test_device->set_recovery(true);
     auto new_sm = NewManagerForFirstStageMount(test_device);
 
+    EXPECT_EQ(new_sm->GetUpdateState(), UpdateState::Unverified);
     ASSERT_TRUE(new_sm->HandleImminentDataWipe());
     // Manually mount metadata so that we can call GetUpdateState() below.
     MountMetadata();
@@ -2375,9 +2595,14 @@ TEST_F(SnapshotUpdateTest, AddPartition) {
     }
 
     if (snapuserd_required_) {
+        bool userspace_snapshots = init->UpdateUsesUserSnapshots();
         ASSERT_TRUE(init->PerformInitTransition(SnapshotManager::InitTransition::SECOND_STAGE));
         for (const auto& name : partitions) {
-            ASSERT_TRUE(init->snapuserd_client()->WaitForDeviceDelete(name + "-user-cow-init"));
+            if (userspace_snapshots) {
+                ASSERT_TRUE(init->snapuserd_client()->WaitForDeviceDelete(name + "-init"));
+            } else {
+                ASSERT_TRUE(init->snapuserd_client()->WaitForDeviceDelete(name + "-user-cow-init"));
+            }
         }
     }
 
@@ -2437,10 +2662,13 @@ TEST_F(SnapshotUpdateTest, DaemonTransition) {
     ASSERT_TRUE(init->CreateLogicalAndSnapshotPartitions("super", snapshot_timeout_));
 
     bool userspace_snapshots = init->UpdateUsesUserSnapshots();
+    bool ublk_snapshots = init->UpdateUsesUblk();
 
     if (userspace_snapshots) {
-        ASSERT_EQ(access("/dev/dm-user/sys_b-init", F_OK), 0);
-        ASSERT_EQ(access("/dev/dm-user/sys_b", F_OK), -1);
+        if (!ublk_snapshots) {
+            ASSERT_EQ(access("/dev/dm-user/sys_b-init", F_OK), 0);
+            ASSERT_EQ(access("/dev/dm-user/sys_b", F_OK), -1);
+        }
     } else {
         ASSERT_EQ(access("/dev/dm-user/sys_b-user-cow-init", F_OK), 0);
         ASSERT_EQ(access("/dev/dm-user/sys_b-user-cow", F_OK), -1);
@@ -2457,8 +2685,10 @@ TEST_F(SnapshotUpdateTest, DaemonTransition) {
         ASSERT_TRUE(init->snapuserd_client()->WaitForDeviceDelete("prd_b-init"));
 
         // The control device should have been renamed.
-        ASSERT_TRUE(android::fs_mgr::WaitForFileDeleted("/dev/dm-user/sys_b-init", 10s));
-        ASSERT_EQ(access("/dev/dm-user/sys_b", F_OK), 0);
+        if (!ublk_snapshots) {
+            ASSERT_TRUE(android::fs_mgr::WaitForFileDeleted("/dev/dm-user/sys_b-init", 10s));
+            ASSERT_EQ(access("/dev/dm-user/sys_b", F_OK), 0);
+        }
     } else {
         ASSERT_TRUE(init->snapuserd_client()->WaitForDeviceDelete("sys_b-user-cow-init"));
         ASSERT_TRUE(init->snapuserd_client()->WaitForDeviceDelete("vnd_b-user-cow-init"));
@@ -2491,7 +2721,9 @@ TEST_F(SnapshotUpdateTest, MapAllSnapshotsWithoutSlotSwitch) {
     ASSERT_TRUE(sm->BootFromSnapshotsWithoutSlotSwitch());
 
     ASSERT_TRUE(sm->EnsureSnapuserdConnected());
-    sm->set_use_first_stage_snapuserd(true);
+    // TODOUBLK: b/414812023 Fix the test to do the transition or
+    // delete the use of first_stage_snapuserd
+    // sm->set_use_first_stage_snapuserd(true);
 
     ASSERT_TRUE(sm->NeedSnapshotsInFirstStageMount());
 
@@ -2512,9 +2744,6 @@ TEST_F(SnapshotUpdateTest, MapAllSnapshotsWithoutSlotSwitch) {
 
     // Remove the indicators
     ASSERT_TRUE(sm->PrepareDeviceToBootWithoutSnapshot());
-
-    // Ensure snapshots are still mounted
-    ASSERT_TRUE(sm->IsUserspaceSnapshotUpdateInProgress());
 
     // Cleanup snapshots
     ASSERT_TRUE(sm->UnmapAllSnapshots());
@@ -2653,6 +2882,40 @@ TEST_F(SnapshotUpdateTest, BadCowVersion) {
     ASSERT_TRUE(sm->CreateUpdateSnapshots(manifest_));
 }
 
+TEST_F(SnapshotUpdateTest, MergeSwitchoverInterrupted) {
+    if (!snapuserd_required_) {
+        GTEST_SKIP() << "VABC only";
+    }
+
+    auto old_sys_size = GetSize(sys_);
+    auto old_prd_size = GetSize(prd_);
+
+    // Grow |sys| but shrink |prd|.
+    SetSize(sys_, old_sys_size * 2);
+    sys_->set_estimate_cow_size(8_MiB);
+    SetSize(prd_, old_prd_size / 2);
+    prd_->set_estimate_cow_size(1_MiB);
+
+    AddOperationForPartitions();
+
+    ASSERT_TRUE(sm->BeginUpdate());
+    ASSERT_TRUE(sm->CreateUpdateSnapshots(manifest_));
+    ASSERT_TRUE(WriteSnapshots());
+    ASSERT_TRUE(sm->FinishedSnapshotWrites(false));
+    ASSERT_TRUE(UnmapAll());
+
+    fetcher_->SetProperty("persist.virtual_ab.testing.block_merge_switchover", "true");
+
+    auto init = NewManagerForFirstStageMount("_b");
+    ASSERT_NE(init, nullptr);
+    ASSERT_TRUE(init->NeedSnapshotsInFirstStageMount());
+    ASSERT_TRUE(init->CreateLogicalAndSnapshotPartitions("super", snapshot_timeout_));
+    ASSERT_TRUE(init->InitiateMerge());
+
+    fetcher_->SetProperty("persist.virtual_ab.testing.block_merge_switchover", "false");
+    ASSERT_EQ(init->ProcessUpdateState(), UpdateState::MergeCompleted);
+}
+
 TEST_F(SnapshotTest, FlagCheck) {
     if (!snapuserd_required_) {
         GTEST_SKIP() << "Skipping snapuserd test";
@@ -2689,6 +2952,94 @@ TEST_F(SnapshotTest, FlagCheck) {
                 snapuserd_argv.end());
     ASSERT_TRUE(std::find(snapuserd_argv.begin(), snapuserd_argv.end(), "-cow_op_merge_size=16") !=
                 snapuserd_argv.end());
+}
+
+TEST_F(SnapshotUpdateTest, MergeRespectsSourceUblkDisabled) {
+    // This test simulates an OTA from a build that does not have ublk support,
+    // to a build that does. The merge should happen over dm-user, not ublk.
+    if (!snapuserd_required_) {
+        GTEST_SKIP() << "Test is for userspace snapshots only";
+    }
+    if (android::snapshot::IsUblkEnabled()) {
+        GTEST_SKIP() << "Test is for non ublk supporting builds only";
+    }
+    // Source build does not have ublk.
+    auto previous_ublk_mode = android::base::GetProperty("snapuserd.test.ublk.force_mode", "");
+    auto previous_dm_user_mode = android::base::GetProperty("snapuserd.test.force_dm_user", "");
+    ASSERT_TRUE(android::base::SetProperty("snapuserd.test.ublk.force_mode", "disabled"));
+    ASSERT_TRUE(android::base::SetProperty("snapuserd.test.force_dm_user", "true"));
+
+    constexpr uint64_t partition_size = 3788_KiB;
+    SetSize(sys_, partition_size);
+    SetSize(vnd_, partition_size);
+    SetSize(prd_, 18_MiB);
+    vnd_->set_estimate_cow_size(30_MiB);
+    prd_->set_estimate_cow_size(30_MiB);
+    AddOperationForPartitions();
+
+    ASSERT_TRUE(sm->BeginUpdate());
+    ASSERT_TRUE(sm->CreateUpdateSnapshots(manifest_));
+
+    // Check that ublk was not used for the snapshots.
+    {
+        ASSERT_TRUE(AcquireLock());
+        auto local_lock = std::move(lock_);
+        auto status = sm->ReadSnapshotUpdateStatus(local_lock.get());
+        ASSERT_FALSE(sm->UpdateUsesUblk());
+    }
+
+    ASSERT_TRUE(WriteSnapshots());
+    ASSERT_TRUE(sm->FinishedSnapshotWrites(false));
+    ASSERT_TRUE(UnmapAll());
+
+    // Target build has ublk enabled.
+    ASSERT_TRUE(android::base::SetProperty("snapuserd.test.ublk.force_mode", "enabled"));
+    ASSERT_TRUE(android::base::SetProperty("snapuserd.test.force_dm_user", "true"));
+
+    // After reboot, init does first stage mount.
+    auto init = NewManagerForFirstStageMount("_b");
+    ASSERT_NE(init, nullptr);
+    ASSERT_TRUE(init->NeedSnapshotsInFirstStageMount());
+    ASSERT_TRUE(init->CreateLogicalAndSnapshotPartitions("super", snapshot_timeout_));
+
+    // Check that the target partitions have the same content.
+    for (const auto& name : {"sys_b", "vnd_b", "prd_b"}) {
+        ASSERT_TRUE(IsPartitionUnchanged(name));
+    }
+
+    // Initiate the merge.
+    ASSERT_TRUE(init->InitiateMerge());
+
+    // The device should have been switched to a dm-user target, because the
+    // source did not have ublk enabled.
+    DeviceMapper::TargetInfo target;
+    ASSERT_TRUE(init->IsSnapshotDevice("sys_b", &target));
+    ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "user");
+    ASSERT_TRUE(init->IsSnapshotDevice("vnd_b", &target));
+    ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "user");
+    ASSERT_TRUE(init->IsSnapshotDevice("prd_b", &target));
+    ASSERT_EQ(DeviceMapper::GetTargetType(target.spec), "user");
+
+    ASSERT_EQ(UpdateState::MergeCompleted, init->ProcessUpdateState());
+
+    // Check that the target partitions have the same content after the merge.
+    for (const auto& name : {"sys_b", "vnd_b", "prd_b"}) {
+        ASSERT_TRUE(IsPartitionUnchanged(name))
+                << "Content of " << name << " changes after the merge";
+    }
+
+    // Restore original properties
+    ASSERT_TRUE(android::base::SetProperty("snapuserd.test.ublk.force_mode", previous_ublk_mode));
+    ASSERT_TRUE(android::base::SetProperty("snapuserd.test.force_dm_user", previous_dm_user_mode));
+}
+
+TEST_F(SnapshotUpdateTest, NoSpaceSimulation) {
+    fetcher_->SetProperty("persist.virtual_ab.testing.no_snapshot_space", "true");
+    ASSERT_TRUE(sm->BeginUpdate());
+
+    auto ret = sm->CreateUpdateSnapshots(manifest_);
+    ASSERT_FALSE(ret.is_ok());
+    ASSERT_EQ(ret.error_code(), Return::ErrorCode::NO_SPACE);
 }
 
 class FlashAfterUpdateTest : public SnapshotUpdateTest,
@@ -2840,7 +3191,6 @@ void SnapshotTestEnvironment::SetUp() {
     // that is fixed, don't call GTEST_SKIP here, but instead call GTEST_SKIP in individual test
     // suites.
     RETURN_IF_NON_VIRTUAL_AB_MSG("Virtual A/B is not enabled, skipping global setup.\n");
-    RETURN_IF_VENDOR_ON_ANDROID_S_MSG("Test not enabled for Vendor on Android S.\n");
 
     std::vector<std::string> paths = {
             // clang-format off
@@ -2929,6 +3279,20 @@ int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     ::testing::AddGlobalTestEnvironment(new ::android::snapshot::SnapshotTestEnvironment());
     gflags::ParseCommandLineFlags(&argc, &argv, false);
+
+    // During incremental flashing, snapshot updates are in progress.
+    //
+    // When snapshot update is in-progress, snapuserd daemon
+    // will be up and running. These tests will start and stop the daemon
+    // thereby interfering with the update and snapshot-merge progress.
+    // Hence, wait until the update is complete.
+    auto sm = android::snapshot::SnapshotManager::New();
+    std::vector<std::string> snapshot_partitions;
+    while (sm->IsUserspaceSnapshotUpdateInProgress(snapshot_partitions)) {
+        LOG(INFO) << "Waiting for: " << snapshot_partitions.size()
+                  << " partitions to finish snapshot-merge";
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    }
 
     bool vab_legacy = false;
     if (FLAGS_force_mode == "vab-legacy") {

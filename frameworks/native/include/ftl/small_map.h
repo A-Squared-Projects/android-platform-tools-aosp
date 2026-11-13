@@ -234,6 +234,12 @@ class SmallMap final {
   //
   bool erase(const key_type& key) { return erase(key, begin()); }
 
+  // Removes a mapping.
+  //
+  // The last() and end() iterators, as well as those to the erased mapping, are invalidated.
+  //
+  void erase(iterator it) { map_.unstable_erase(it); }
+
   // Removes all mappings.
   //
   // All iterators are invalidated.
@@ -289,5 +295,11 @@ template <typename K, typename V, std::size_t N, typename Q, typename W, std::si
 inline bool operator!=(const SmallMap<K, V, N, E>& lhs, const SmallMap<Q, W, M, E>& rhs) {
   return !(lhs == rhs);
 }
+
+template <typename>
+struct is_small_map : std::false_type {};
+
+template <typename K, typename V, std::size_t N>
+struct is_small_map<SmallMap<K, V, N>> : std::true_type {};
 
 }  // namespace android::ftl

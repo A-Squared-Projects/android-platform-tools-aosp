@@ -39,29 +39,14 @@ struct NotifyInputDevicesChangedArgs {
     NotifyInputDevicesChangedArgs& operator=(const NotifyInputDevicesChangedArgs&) = default;
 };
 
-/* Describes a configuration change event. */
-struct NotifyConfigurationChangedArgs {
-    int32_t id;
-    nsecs_t eventTime;
-
-    inline NotifyConfigurationChangedArgs() {}
-
-    NotifyConfigurationChangedArgs(int32_t id, nsecs_t eventTime);
-
-    bool operator==(const NotifyConfigurationChangedArgs& rhs) const = default;
-
-    NotifyConfigurationChangedArgs(const NotifyConfigurationChangedArgs& other) = default;
-    NotifyConfigurationChangedArgs& operator=(const NotifyConfigurationChangedArgs&) = default;
-};
-
 /* Describes a key event. */
 struct NotifyKeyArgs {
     int32_t id;
     nsecs_t eventTime;
 
-    int32_t deviceId;
+    DeviceId deviceId;
     uint32_t source;
-    int32_t displayId;
+    ui::LogicalDisplayId displayId{ui::LogicalDisplayId::INVALID};
     uint32_t policyFlags;
     int32_t action;
     int32_t flags;
@@ -73,10 +58,10 @@ struct NotifyKeyArgs {
 
     inline NotifyKeyArgs() {}
 
-    NotifyKeyArgs(int32_t id, nsecs_t eventTime, nsecs_t readTime, int32_t deviceId,
-                  uint32_t source, int32_t displayId, uint32_t policyFlags, int32_t action,
-                  int32_t flags, int32_t keyCode, int32_t scanCode, int32_t metaState,
-                  nsecs_t downTime);
+    NotifyKeyArgs(int32_t id, nsecs_t eventTime, nsecs_t readTime, DeviceId deviceId,
+                  uint32_t source, ui::LogicalDisplayId displayId, uint32_t policyFlags,
+                  int32_t action, int32_t flags, int32_t keyCode, int32_t scanCode,
+                  int32_t metaState, nsecs_t downTime);
 
     bool operator==(const NotifyKeyArgs& rhs) const = default;
 
@@ -89,9 +74,9 @@ struct NotifyMotionArgs {
     int32_t id;
     nsecs_t eventTime;
 
-    int32_t deviceId;
+    DeviceId deviceId;
     uint32_t source;
-    int32_t displayId;
+    ui::LogicalDisplayId displayId{ui::LogicalDisplayId::INVALID};
     uint32_t policyFlags;
     int32_t action;
     int32_t actionButton;
@@ -102,7 +87,6 @@ struct NotifyMotionArgs {
      * Classification of the current touch gesture
      */
     MotionClassification classification;
-    int32_t edgeFlags;
 
     // Vectors 'pointerProperties' and 'pointerCoords' must always have the same number of elements
     std::vector<PointerProperties> pointerProperties;
@@ -122,13 +106,13 @@ struct NotifyMotionArgs {
 
     inline NotifyMotionArgs() {}
 
-    NotifyMotionArgs(int32_t id, nsecs_t eventTime, nsecs_t readTime, int32_t deviceId,
-                     uint32_t source, int32_t displayId, uint32_t policyFlags, int32_t action,
-                     int32_t actionButton, int32_t flags, int32_t metaState, int32_t buttonState,
-                     MotionClassification classification, int32_t edgeFlags, uint32_t pointerCount,
-                     const PointerProperties* pointerProperties, const PointerCoords* pointerCoords,
-                     float xPrecision, float yPrecision, float xCursorPosition,
-                     float yCursorPosition, nsecs_t downTime,
+    NotifyMotionArgs(int32_t id, nsecs_t eventTime, nsecs_t readTime, DeviceId deviceId,
+                     uint32_t source, ui::LogicalDisplayId displayId, uint32_t policyFlags,
+                     int32_t action, int32_t actionButton, int32_t flags, int32_t metaState,
+                     int32_t buttonState, MotionClassification classification,
+                     uint32_t pointerCount, const PointerProperties* pointerProperties,
+                     const PointerCoords* pointerCoords, float xPrecision, float yPrecision,
+                     float xCursorPosition, float yCursorPosition, nsecs_t downTime,
                      const std::vector<TouchVideoFrame>& videoFrames);
 
     NotifyMotionArgs(const NotifyMotionArgs& other) = default;
@@ -146,7 +130,7 @@ struct NotifySensorArgs {
     int32_t id;
     nsecs_t eventTime;
 
-    int32_t deviceId;
+    DeviceId deviceId;
     uint32_t source;
     InputDeviceSensorType sensorType;
     InputDeviceSensorAccuracy accuracy;
@@ -156,7 +140,7 @@ struct NotifySensorArgs {
 
     inline NotifySensorArgs() {}
 
-    NotifySensorArgs(int32_t id, nsecs_t eventTime, int32_t deviceId, uint32_t source,
+    NotifySensorArgs(int32_t id, nsecs_t eventTime, DeviceId deviceId, uint32_t source,
                      InputDeviceSensorType sensorType, InputDeviceSensorAccuracy accuracy,
                      bool accuracyChanged, nsecs_t hwTimestamp, std::vector<float> values);
 
@@ -190,11 +174,11 @@ struct NotifyDeviceResetArgs {
     int32_t id;
     nsecs_t eventTime;
 
-    int32_t deviceId;
+    DeviceId deviceId;
 
     inline NotifyDeviceResetArgs() {}
 
-    NotifyDeviceResetArgs(int32_t id, nsecs_t eventTime, int32_t deviceId);
+    NotifyDeviceResetArgs(int32_t id, nsecs_t eventTime, DeviceId deviceId);
 
     NotifyDeviceResetArgs(const NotifyDeviceResetArgs& other) = default;
     NotifyDeviceResetArgs& operator=(const NotifyDeviceResetArgs&) = default;
@@ -222,22 +206,24 @@ struct NotifyVibratorStateArgs {
     int32_t id;
     nsecs_t eventTime;
 
-    int32_t deviceId;
+    DeviceId deviceId;
     bool isOn;
 
     inline NotifyVibratorStateArgs() {}
 
-    NotifyVibratorStateArgs(int32_t id, nsecs_t eventTIme, int32_t deviceId, bool isOn);
+    NotifyVibratorStateArgs(int32_t id, nsecs_t eventTIme, DeviceId deviceId, bool isOn);
 
     NotifyVibratorStateArgs(const NotifyVibratorStateArgs& other) = default;
     NotifyVibratorStateArgs& operator=(const NotifyVibratorStateArgs&) = default;
 };
 
 using NotifyArgs =
-        std::variant<NotifyInputDevicesChangedArgs, NotifyConfigurationChangedArgs, NotifyKeyArgs,
-                     NotifyMotionArgs, NotifySensorArgs, NotifySwitchArgs, NotifyDeviceResetArgs,
+        std::variant<NotifyInputDevicesChangedArgs, NotifyKeyArgs, NotifyMotionArgs,
+                     NotifySensorArgs, NotifySwitchArgs, NotifyDeviceResetArgs,
                      NotifyPointerCaptureChangedArgs, NotifyVibratorStateArgs>;
 
 const char* toString(const NotifyArgs& args);
+
+std::ostream& operator<<(std::ostream& out, const NotifyArgs& args);
 
 } // namespace android

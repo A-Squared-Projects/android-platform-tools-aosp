@@ -25,35 +25,40 @@
 #include <InputReaderBase.h>
 #include <MapperHelpers.h>
 #include <TouchpadInputMapper.h>
+#include <input/Input.h>
 
 namespace android {
 
 namespace {
 
 void setAxisInfo(ThreadSafeFuzzedDataProvider& fdp, FuzzEventHub& eventHub, int32_t id, int axis) {
+    eventHub.setAbsoluteAxisInfo(id, axis,
+                                 RawAbsoluteAxisInfo{
+                                         .minValue = fdp.ConsumeIntegral<int32_t>(),
+                                         .maxValue = fdp.ConsumeIntegral<int32_t>(),
+                                         .flat = fdp.ConsumeIntegral<int32_t>(),
+                                         .fuzz = fdp.ConsumeIntegral<int32_t>(),
+                                         .resolution = fdp.ConsumeIntegral<int32_t>(),
+                                 });
+}
+
+void maybeSetAxisInfo(ThreadSafeFuzzedDataProvider& fdp, FuzzEventHub& eventHub, int32_t id,
+                      int axis) {
     if (fdp.ConsumeBool()) {
-        eventHub.setAbsoluteAxisInfo(id, axis,
-                                     RawAbsoluteAxisInfo{
-                                             .valid = fdp.ConsumeBool(),
-                                             .minValue = fdp.ConsumeIntegral<int32_t>(),
-                                             .maxValue = fdp.ConsumeIntegral<int32_t>(),
-                                             .flat = fdp.ConsumeIntegral<int32_t>(),
-                                             .fuzz = fdp.ConsumeIntegral<int32_t>(),
-                                             .resolution = fdp.ConsumeIntegral<int32_t>(),
-                                     });
+        setAxisInfo(fdp, eventHub, id, axis);
     }
 }
 
-void setAxisInfos(ThreadSafeFuzzedDataProvider& fdp, FuzzEventHub& eventHub, int32_t id) {
-    setAxisInfo(fdp, eventHub, id, ABS_MT_SLOT);
+void setAxisInfos(ThreadSafeFuzzedDataProvider& fdp, FuzzEventHub& eventHub, DeviceId id) {
+    maybeSetAxisInfo(fdp, eventHub, id, ABS_MT_SLOT);
     setAxisInfo(fdp, eventHub, id, ABS_MT_POSITION_X);
     setAxisInfo(fdp, eventHub, id, ABS_MT_POSITION_Y);
-    setAxisInfo(fdp, eventHub, id, ABS_MT_PRESSURE);
-    setAxisInfo(fdp, eventHub, id, ABS_MT_ORIENTATION);
-    setAxisInfo(fdp, eventHub, id, ABS_MT_TOUCH_MAJOR);
-    setAxisInfo(fdp, eventHub, id, ABS_MT_TOUCH_MINOR);
-    setAxisInfo(fdp, eventHub, id, ABS_MT_WIDTH_MAJOR);
-    setAxisInfo(fdp, eventHub, id, ABS_MT_WIDTH_MINOR);
+    maybeSetAxisInfo(fdp, eventHub, id, ABS_MT_PRESSURE);
+    maybeSetAxisInfo(fdp, eventHub, id, ABS_MT_ORIENTATION);
+    maybeSetAxisInfo(fdp, eventHub, id, ABS_MT_TOUCH_MAJOR);
+    maybeSetAxisInfo(fdp, eventHub, id, ABS_MT_TOUCH_MINOR);
+    maybeSetAxisInfo(fdp, eventHub, id, ABS_MT_WIDTH_MAJOR);
+    maybeSetAxisInfo(fdp, eventHub, id, ABS_MT_WIDTH_MINOR);
 }
 
 const std::vector<std::string> boolPropertiesToFuzz = {
@@ -125,6 +130,9 @@ void setTouchpadSettings(ThreadSafeFuzzedDataProvider& fdp, InputReaderConfigura
     config.touchpadTapToClickEnabled = fdp.ConsumeBool();
     config.touchpadTapDraggingEnabled = fdp.ConsumeBool();
     config.touchpadRightClickZoneEnabled = fdp.ConsumeBool();
+
+    config.pointerCaptureRequest.window = fdp.ConsumeBool() ? sp<BBinder>::make() : nullptr;
+    config.pointerCaptureRequest.seq = fdp.ConsumeIntegral<uint32_t>();
 }
 
 } // namespace
@@ -145,7 +153,6 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t* data, size_t size) {
     // Some settings are fuzzed here, as well as in the main loop, to provide randomized data to the
     // TouchpadInputMapper constructor.
     setTouchpadSettings(*fdp, policyConfig);
-    policyConfig.pointerCaptureRequest.enable = fdp->ConsumeBool();
     TouchpadInputMapper& mapper =
             getMapperForDevice<ThreadSafeFuzzedDataProvider, TouchpadInputMapper>(*fdp, device,
                                                                                   policyConfig);
@@ -164,7 +171,6 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t* data, size_t size) {
                 [&]() -> void { mapper.getSources(); },
                 [&]() -> void {
                     setTouchpadSettings(*fdp, policyConfig);
-                    policyConfig.pointerCaptureRequest.enable = fdp->ConsumeBool();
                     std::list<NotifyArgs> unused =
                             mapper.reconfigure(fdp->ConsumeIntegral<nsecs_t>(), policyConfig,
                                                InputReaderConfiguration::Change(
@@ -175,7 +181,7 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t* data, size_t size) {
                 },
                 [&]() -> void {
                     RawEvent event = getFuzzedRawEvent(*fdp);
-                    std::list<NotifyArgs> unused = mapper.process(&event);
+                    std::list<NotifyArgs> unused = mapper.process(event);
                 },
         })();
     }

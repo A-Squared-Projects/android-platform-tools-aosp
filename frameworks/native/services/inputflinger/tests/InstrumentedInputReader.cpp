@@ -21,7 +21,8 @@ namespace android {
 InstrumentedInputReader::InstrumentedInputReader(std::shared_ptr<EventHubInterface> eventHub,
                                                  const sp<InputReaderPolicyInterface>& policy,
                                                  InputListenerInterface& listener)
-      : InputReader(eventHub, policy, listener), mFakeContext(this) {}
+      : InputReader(eventHub, policy, listener, /*env=*/nullptr, /*tracingBackend=*/nullptr),
+        mFakeContext(this) {}
 
 void InstrumentedInputReader::pushNextDevice(std::shared_ptr<InputDevice> device) {
     mNextDevices.push(device);
@@ -38,13 +39,14 @@ std::shared_ptr<InputDevice> InstrumentedInputReader::newDevice(int32_t deviceId
 }
 
 std::shared_ptr<InputDevice> InstrumentedInputReader::createDeviceLocked(
-        nsecs_t when, int32_t eventHubId, const InputDeviceIdentifier& identifier) REQUIRES(mLock) {
+        nsecs_t when, int32_t eventHubId, const InputDeviceIdentifier& identifier,
+        ftl::Flags<InputDeviceClass> classes) REQUIRES(mLock) {
     if (!mNextDevices.empty()) {
         std::shared_ptr<InputDevice> device(std::move(mNextDevices.front()));
         mNextDevices.pop();
         return device;
     }
-    return InputReader::createDeviceLocked(when, eventHubId, identifier);
+    return InputReader::createDeviceLocked(when, eventHubId, identifier, classes);
 }
 
 } // namespace android

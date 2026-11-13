@@ -15,25 +15,107 @@
  */
 
 export const viewerCardStyle = `
-    .rects-view,
-    .hierarchy-view,
-    .ime-additional-properties,
-    .properties-view {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        overflow: auto;
-        border-radius: 4px;
-    }
+  .rects-view:not(.collapsed),
+  .hierarchy-view:not(.collapsed),
+  .ime-additional-properties:not(.collapsed),
+  .properties-view:not(.collapsed),
+  .log-view:not(.collapsed),
+  .property-groups:not(.collapsed),
+  .global-search:not(.collapsed),
+  .search-results:not(.collapsed),
+  .how-to-search:not(.collapsed) {
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+    border-radius: 4px;
+    margin: 4px;
+    background-color: var(--background-color);
+    box-shadow: 0px 1px 3px var(--border-color), 0px 1px 2px var(--border-color);
+  }
 
-    .rects-view, .hierarchy-view, .properties-view {
-        padding-top: 0px;
-        padding-bottom: 16px;
-        padding-left: 16px;
-        padding-right: 16px;
-    }
+  .hierarchy-view:not(.collapsed),
+  .ime-additional-properties:not(.collapsed),
+  .properties-view:not(.collapsed),
+  .log-view:not(.collapsed),
+  .property-groups:not(.collapsed),
+  .global-search:not(.collapsed),
+  .search-results:not(.collapsed),
+  .how-to-search:not(.collapsed) {
+    padding-bottom: 12px;
+  }
 
-    .ime-additional-properties {
-        padding: 16px;
-    }
+  .rects-view:not(.collapsed),
+  .hierarchy-view:not(.collapsed),
+  .ime-additional-properties:not(.collapsed),
+  .properties-view:not(.collapsed),
+  .global-search:not(.collapsed),
+  .how-to-search:not(.collapsed) {
+    flex: 1;
+  }
+
+  .property-groups:not(.collapsed):not(.empty) {
+    flex: 2;
+  }
+
+  .property-groups.empty:not(.collapsed) {
+    flex: 0.2;
+  }
+
+  .log-view:not(.collapsed),
+  .search-results:not(.collapsed) {
+    flex: 3;
+  }
+
+  .collapsed {
+    display: none;
+  }
+
+  .rects-view:not(.collapsed) {
+    overflow-y: hidden;
+  }
+`;
+
+export const viewerCardInnerStyle = `
+  .title-section {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    background-color: var(--card-title-background-color);
+    padding: 0px 6px 0px 0px;
+  }
+
+  .view-controls {
+    display: flex;
+    flex-direction: row;
+    align-items: baseline;
+    padding: 8px 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .placeholder-text {
+    padding: 8px 12px;
+  }
+
+  .padded-title {
+    padding-bottom: 8px;
+  }
+
+  .warning {
+    display: flex;
+    align-items: center;
+    padding: 2px 12px;
+    background-color: var(--warning-background-color);
+  }
+  .warning-message {
+    padding-inline-start: 2px;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    width: 100%;
+  }
+  .warning-icon {
+    padding-inline-end: 4px;
+  }
 `;

@@ -14,14 +14,41 @@
  * limitations under the License.
  */
 
-import {Transition} from 'trace/transition';
+import {TraceEntry} from 'trace_api/trace';
+import {HierarchyTreeNode} from 'tree_node/hierarchy_tree_node';
+import {LazyPropertiesStrategyType} from 'tree_node/properties_provider';
+import {TextFilter} from 'viewers/common/text_filter';
+import {
+  LogEntry,
+  LogField,
+  LogHeader,
+  UiDataLog,
+} from 'viewers/common/ui_data_log';
 import {UiPropertyTreeNode} from 'viewers/common/ui_property_tree_node';
 
-export class UiData {
+export class UiData implements UiDataLog {
   constructor(
-    public entries: Transition[],
-    public selectedTransition?: UiPropertyTreeNode,
+    public headers: LogHeader[],
+    public entries: LogEntry[],
+    public currentIndex: undefined | number,
+    public selectedIndex: undefined | number,
+    public scrollToIndex: undefined | number,
+    public propertiesTree: undefined | UiPropertyTreeNode,
   ) {}
 
-  static EMPTY = new UiData([], undefined);
+  isFetchingData = false;
+  checkScrollViewport = false;
+  propertiesFilter = new TextFilter();
+
+  static createEmpty(): UiData {
+    return new UiData([], [], undefined, undefined, undefined, undefined);
+  }
+}
+
+export class TransitionsEntry implements LogEntry {
+  constructor(
+    public traceEntry: TraceEntry<HierarchyTreeNode>,
+    public fields: LogField[],
+    public getPropertiesTree: LazyPropertiesStrategyType | undefined,
+  ) {}
 }

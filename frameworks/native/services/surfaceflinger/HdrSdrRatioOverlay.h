@@ -32,6 +32,8 @@ private:
 public:
     static std::unique_ptr<HdrSdrRatioOverlay> create();
 
+    ~HdrSdrRatioOverlay();
+
     void setLayerStack(ui::LayerStack);
     void setViewport(ui::Size);
     void animate();
@@ -49,9 +51,11 @@ private:
     const sp<GraphicBuffer> getOrCreateBuffers(float currentHdrSdrRatio);
 
     float mCurrentHdrSdrRatio = 1.f;
-    const std::unique_ptr<SurfaceControlHolder> mSurfaceControl;
+    std::unique_ptr<SurfaceControlHolder> mSurfaceControl;
 
     size_t mIndex = 0;
     std::array<sp<GraphicBuffer>, 2> mRingBuffer;
+
+    SurfaceComposerClient::Transaction createTransaction() const;
 };
 } // namespace android

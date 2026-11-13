@@ -16,20 +16,30 @@
 
 #pragma once
 
-#include <PointerControllerInterface.h>
 #include <android-base/thread_annotations.h>
+#include <input/Input.h>
 #include <utils/Condition.h>
 #include <utils/Mutex.h>
 
+#include <chrono>
+#include <condition_variable>
+#include <filesystem>
+#include <list>
 #include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "EventHub.h"
+#include "InputDevice.h"
 #include "InputListener.h"
 #include "InputReaderBase.h"
 #include "InputReaderContext.h"
+#include "InputReaderTracer.h"
 #include "InputThread.h"
+#include "InputTracingBackendInterface.h"
 
 namespace android {
 
@@ -51,7 +61,9 @@ struct StylusState;
 class InputReader : public InputReaderInterface {
 public:
     InputReader(std::shared_ptr<EventHubInterface> eventHub,
-                const sp<InputReaderPolicyInterface>& policy, InputListenerInterface& listener);
+                const sp<InputReaderPolicyInterface>& policy, InputListenerInterface& listener,
+                JNIEnv* env,
+                std::shared_ptr<input_trace::InputTracingBackendInterface> tracingBackend);
     virtual ~InputReader();
 
     void dump(std::string& dump) override;
@@ -62,67 +74,78 @@ public:
 
     std::vector<InputDeviceInfo> getInputDevices() const override;
 
-    bool isInputDeviceEnabled(int32_t deviceId) override;
+    int32_t getScanCodeState(DeviceId deviceId, uint32_t sourceMask, int32_t scanCode) override;
+    int32_t getKeyCodeState(DeviceId deviceId, uint32_t sourceMask, int32_t keyCode) override;
+    int32_t getSwitchState(DeviceId deviceId, uint32_t sourceMask, int32_t sw) override;
 
-    int32_t getScanCodeState(int32_t deviceId, uint32_t sourceMask, int32_t scanCode) override;
-    int32_t getKeyCodeState(int32_t deviceId, uint32_t sourceMask, int32_t keyCode) override;
-    int32_t getSwitchState(int32_t deviceId, uint32_t sourceMask, int32_t sw) override;
+    int32_t getKeyCodeForKeyLocation(DeviceId deviceId, int32_t locationKeyCode) const override;
 
-    void addKeyRemapping(int32_t deviceId, int32_t fromKeyCode, int32_t toKeyCode) const override;
+    void toggleCapsLockState(DeviceId deviceId) override;
 
-    int32_t getKeyCodeForKeyLocation(int32_t deviceId, int32_t locationKeyCode) const override;
+    void resetLockedModifierState() override;
 
-    void toggleCapsLockState(int32_t deviceId) override;
-
-    bool hasKeys(int32_t deviceId, uint32_t sourceMask, const std::vector<int32_t>& keyCodes,
+    bool hasKeys(DeviceId deviceId, uint32_t sourceMask, const std::vector<int32_t>& keyCodes,
                  uint8_t* outFlags) override;
 
     void requestRefreshConfiguration(ConfigurationChanges changes) override;
 
-    void vibrate(int32_t deviceId, const VibrationSequence& sequence, ssize_t repeat,
+    void vibrate(DeviceId deviceId, const VibrationSequence& sequence, ssize_t repeat,
                  int32_t token) override;
-    void cancelVibrate(int32_t deviceId, int32_t token) override;
+    void cancelVibrate(DeviceId deviceId, int32_t token) override;
 
-    bool isVibrating(int32_t deviceId) override;
+    bool isVibrating(DeviceId deviceId) override;
 
-    std::vector<int32_t> getVibratorIds(int32_t deviceId) override;
+    std::vector<int32_t> getVibratorIds(DeviceId deviceId) override;
 
-    bool canDispatchToDisplay(int32_t deviceId, int32_t displayId) override;
+    bool canDispatchToDisplay(DeviceId deviceId, ui::LogicalDisplayId displayId) override;
 
-    bool enableSensor(int32_t deviceId, InputDeviceSensorType sensorType,
+    bool enableSensor(DeviceId deviceId, InputDeviceSensorType sensorType,
                       std::chrono::microseconds samplingPeriod,
                       std::chrono::microseconds maxBatchReportLatency) override;
 
-    void disableSensor(int32_t deviceId, InputDeviceSensorType sensorType) override;
+    void disableSensor(DeviceId deviceId, InputDeviceSensorType sensorType) override;
 
-    void flushSensor(int32_t deviceId, InputDeviceSensorType sensorType) override;
+    void flushSensor(DeviceId deviceId, InputDeviceSensorType sensorType) override;
 
-    std::optional<int32_t> getBatteryCapacity(int32_t deviceId) override;
+    std::optional<int32_t> getBatteryCapacity(DeviceId deviceId) override;
 
-    std::optional<int32_t> getBatteryStatus(int32_t deviceId) override;
+    std::optional<int32_t> getBatteryStatus(DeviceId deviceId) override;
 
-    std::optional<std::string> getBatteryDevicePath(int32_t deviceId) override;
+    std::optional<std::string> getBatteryDevicePath(DeviceId deviceId) override;
 
-    std::vector<InputDeviceLightInfo> getLights(int32_t deviceId) override;
+    std::vector<InputDeviceLightInfo> getLights(DeviceId deviceId) override;
 
-    std::vector<InputDeviceSensorInfo> getSensors(int32_t deviceId) override;
+    std::vector<InputDeviceSensorInfo> getSensors(DeviceId deviceId) override;
 
-    bool setLightColor(int32_t deviceId, int32_t lightId, int32_t color) override;
+    std::optional<HardwareProperties> getTouchpadHardwareProperties(DeviceId deviceId) override;
 
-    bool setLightPlayerId(int32_t deviceId, int32_t lightId, int32_t playerId) override;
+    bool setLightColor(DeviceId deviceId, int32_t lightId, int32_t color) override;
 
-    std::optional<int32_t> getLightColor(int32_t deviceId, int32_t lightId) override;
+    bool setLightPlayerId(DeviceId deviceId, int32_t lightId, int32_t playerId) override;
 
-    std::optional<int32_t> getLightPlayerId(int32_t deviceId, int32_t lightId) override;
+    std::optional<int32_t> getLightColor(DeviceId deviceId, int32_t lightId) override;
 
-    std::optional<std::string> getBluetoothAddress(int32_t deviceId) const override;
+    std::optional<int32_t> getLightPlayerId(DeviceId deviceId, int32_t lightId) override;
+
+    std::optional<std::string> getBluetoothAddress(DeviceId deviceId) const override;
+
+    std::optional<std::string> getPhysicalLocationPath(DeviceId deviceId) const override;
+
+    std::filesystem::path getSysfsRootPath(DeviceId deviceId) const override;
 
     void sysfsNodeChanged(const std::string& sysfsNodePath) override;
 
+    DeviceId getLastUsedInputDeviceId() override;
+
+    void notifyMouseCursorFadedOnTyping() override;
+
+    bool setKernelWakeEnabled(DeviceId deviceId, bool enabled) override;
+
 protected:
     // These members are protected so they can be instrumented by test cases.
-    virtual std::shared_ptr<InputDevice> createDeviceLocked(nsecs_t when, int32_t deviceId,
-                                                            const InputDeviceIdentifier& identifier)
+    virtual std::shared_ptr<InputDevice> createDeviceLocked(nsecs_t when, RawDeviceId deviceId,
+                                                            const InputDeviceIdentifier& identifier,
+                                                            ftl::Flags<InputDeviceClass> classes)
             REQUIRES(mLock);
 
     // With each iteration of the loop, InputReader reads and processes one incoming message from
@@ -135,14 +158,12 @@ protected:
 
     public:
         explicit ContextImpl(InputReader* reader);
+        std::string dump() REQUIRES(mReader->mLock) override;
         // lock is already held by the input loop
         void updateGlobalMetaState() NO_THREAD_SAFETY_ANALYSIS override;
         int32_t getGlobalMetaState() NO_THREAD_SAFETY_ANALYSIS override;
         void disableVirtualKeysUntil(nsecs_t time) REQUIRES(mReader->mLock) override;
         bool shouldDropVirtualKey(nsecs_t now, int32_t keyCode, int32_t scanCode)
-                REQUIRES(mReader->mLock) override;
-        void fadePointer() REQUIRES(mReader->mLock) override;
-        std::shared_ptr<PointerControllerInterface> getPointerController(int32_t deviceId)
                 REQUIRES(mReader->mLock) override;
         void requestTimeoutAtTime(nsecs_t when) REQUIRES(mReader->mLock) override;
         int32_t bumpGeneration() NO_THREAD_SAFETY_ANALYSIS override;
@@ -152,7 +173,7 @@ protected:
                 REQUIRES(mReader->mLock) override;
         InputReaderPolicyInterface* getPolicy() REQUIRES(mReader->mLock) override;
         EventHubInterface* getEventHub() REQUIRES(mReader->mLock) override;
-        int32_t getNextId() NO_THREAD_SAFETY_ANALYSIS override;
+        int32_t getNextId() const NO_THREAD_SAFETY_ANALYSIS override;
         void updateLedMetaState(int32_t metaState) REQUIRES(mReader->mLock) override;
         int32_t getLedMetaState() REQUIRES(mReader->mLock) REQUIRES(mLock) override;
         void setPreventingTouchpadTaps(bool prevent) REQUIRES(mReader->mLock)
@@ -161,6 +182,7 @@ protected:
         void setLastKeyDownTimestamp(nsecs_t when) REQUIRES(mReader->mLock)
                 REQUIRES(mLock) override;
         nsecs_t getLastKeyDownTimestamp() REQUIRES(mReader->mLock) REQUIRES(mLock) override;
+        KeyboardClassifier& getKeyboardClassifier() override;
     } mContext;
 
     friend class ContextImpl;
@@ -168,6 +190,7 @@ protected:
     mutable std::mutex mLock;
 
 private:
+    JNIEnv* mJniEnv;
     std::unique_ptr<InputThread> mThread;
 
     std::condition_variable mReaderIsAliveCondition;
@@ -180,6 +203,10 @@ private:
 
     // The next stage that should receive the events generated inside InputReader.
     InputListenerInterface& mNextListener;
+
+    // Classifier for keyboard/keyboard-like devices
+    std::unique_ptr<KeyboardClassifier> mKeyboardClassifier;
+
     // As various events are generated inside InputReader, they are stored inside this list. The
     // list can only be accessed with the lock, so the events inside it are well-ordered.
     // Once the reader is done working, these events will be swapped into a temporary storage and
@@ -190,32 +217,35 @@ private:
 
     // An input device can represent a collection of EventHub devices. This map provides a way
     // to lookup the input device instance from the EventHub device id.
-    std::unordered_map<int32_t /*eventHubId*/, std::shared_ptr<InputDevice>> mDevices
+    std::unordered_map<RawDeviceId /*eventHubId*/, std::shared_ptr<InputDevice>> mDevices
             GUARDED_BY(mLock);
 
     // An input device contains one or more eventHubId, this map provides a way to lookup the
     // EventHubIds contained in the input device from the input device instance.
-    std::unordered_map<std::shared_ptr<InputDevice>, std::vector<int32_t> /*eventHubId*/>
+    std::unordered_map<std::shared_ptr<InputDevice>, std::vector<RawDeviceId> /*eventHubId*/>
             mDeviceToEventHubIdsMap GUARDED_BY(mLock);
 
-    // true if tap-to-click on touchpad currently disabled
+    // true if tap-to-click on touchpad is currently disabled
     bool mPreventingTouchpadTaps GUARDED_BY(mLock){false};
 
     // records timestamp of the last key press on the physical keyboard
     nsecs_t mLastKeyDownTimestamp GUARDED_BY(mLock){0};
 
+    // The input device that produced a new gesture most recently.
+    DeviceId mLastUsedDeviceId GUARDED_BY(mLock){ReservedInputDeviceId::INVALID_INPUT_DEVICE_ID};
+
+    void dumpLocked(std::string& dump) REQUIRES(mLock);
+
     // low-level input event decoding and device management
     [[nodiscard]] std::list<NotifyArgs> processEventsLocked(const RawEvent* rawEvents, size_t count)
             REQUIRES(mLock);
 
-    void addDeviceLocked(nsecs_t when, int32_t eventHubId) REQUIRES(mLock);
-    void removeDeviceLocked(nsecs_t when, int32_t eventHubId) REQUIRES(mLock);
-    [[nodiscard]] std::list<NotifyArgs> processEventsForDeviceLocked(int32_t eventHubId,
+    void addDeviceLocked(nsecs_t when, RawDeviceId eventHubId) REQUIRES(mLock);
+    void removeDeviceLocked(nsecs_t when, RawDeviceId eventHubId) REQUIRES(mLock);
+    [[nodiscard]] std::list<NotifyArgs> processEventsForDeviceLocked(RawDeviceId eventHubId,
                                                                      const RawEvent* rawEvents,
                                                                      size_t count) REQUIRES(mLock);
     [[nodiscard]] std::list<NotifyArgs> timeoutExpiredLocked(nsecs_t when) REQUIRES(mLock);
-
-    void handleConfigurationChangedLocked(nsecs_t when) REQUIRES(mLock);
 
     int32_t mGlobalMetaState GUARDED_BY(mLock);
     void updateGlobalMetaStateLocked() REQUIRES(mLock);
@@ -230,18 +260,11 @@ private:
     [[nodiscard]] std::list<NotifyArgs> dispatchExternalStylusStateLocked(const StylusState& state)
             REQUIRES(mLock);
 
-    // The PointerController that is shared among all the input devices that need it.
-    std::weak_ptr<PointerControllerInterface> mPointerController;
-    std::shared_ptr<PointerControllerInterface> getPointerControllerLocked(int32_t deviceId)
-            REQUIRES(mLock);
-    void updatePointerDisplayLocked() REQUIRES(mLock);
-    void fadePointerLocked() REQUIRES(mLock);
-
     int32_t mGeneration GUARDED_BY(mLock);
     int32_t bumpGenerationLocked() REQUIRES(mLock);
 
-    int32_t mNextInputDeviceId GUARDED_BY(mLock);
-    int32_t nextInputDeviceIdLocked() REQUIRES(mLock);
+    DeviceId mNextInputDeviceId GUARDED_BY(mLock);
+    DeviceId nextInputDeviceIdLocked() REQUIRES(mLock);
 
     std::vector<InputDeviceInfo> getInputDevicesLocked() const REQUIRES(mLock);
 
@@ -259,14 +282,16 @@ private:
 
     // state queries
     typedef int32_t (InputDevice::*GetStateFunc)(uint32_t sourceMask, int32_t code);
-    int32_t getStateLocked(int32_t deviceId, uint32_t sourceMask, int32_t code,
+    int32_t getStateLocked(DeviceId deviceId, uint32_t sourceMask, int32_t code,
                            GetStateFunc getStateFunc) REQUIRES(mLock);
-    bool markSupportedKeyCodesLocked(int32_t deviceId, uint32_t sourceMask,
+    bool markSupportedKeyCodesLocked(DeviceId deviceId, uint32_t sourceMask,
                                      const std::vector<int32_t>& keyCodes, uint8_t* outFlags)
             REQUIRES(mLock);
 
     // find an InputDevice from an InputDevice id
-    InputDevice* findInputDeviceLocked(int32_t deviceId) const REQUIRES(mLock);
+    InputDevice* findInputDeviceLocked(DeviceId deviceId) const REQUIRES(mLock);
+
+    std::shared_ptr<InputReaderTracer> mTracer;
 };
 
 } // namespace android

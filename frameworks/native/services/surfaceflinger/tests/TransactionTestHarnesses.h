@@ -16,9 +16,11 @@
 #ifndef ANDROID_TRANSACTION_TEST_HARNESSES
 #define ANDROID_TRANSACTION_TEST_HARNESSES
 
+#include <com_android_graphics_libgui_flags.h>
 #include <ui/DisplayState.h>
 
 #include "LayerTransactionTest.h"
+#include "ui/LayerStack.h"
 
 namespace android {
 
@@ -26,51 +28,59 @@ using android::hardware::graphics::common::V1_1::BufferUsage;
 
 class LayerRenderPathTestHarness {
 public:
-    LayerRenderPathTestHarness(LayerTransactionTest* delegate, RenderPath renderPath)
-          : mDelegate(delegate), mRenderPath(renderPath) {}
+    LayerRenderPathTestHarness(LayerTransactionTest* delegate, RenderPath renderPath,
+                               ui::Rotation virtualDisplayRotation = ui::Rotation::Rotation0)
+          : mDelegate(delegate), mRenderPath(renderPath) {
+        const auto ids = SurfaceComposerClient::getPhysicalDisplayIds();
+        mDisplayId = ids.front();
+        const auto displayToken =
+                ids.empty() ? nullptr : SurfaceComposerClient::getPhysicalDisplayToken(mDisplayId);
+
+        ui::DisplayState displayState;
+        SurfaceComposerClient::getDisplayState(displayToken, &displayState);
+
+        ui::DisplayMode displayMode;
+        SurfaceComposerClient::getActiveDisplayMode(displayToken, &displayMode);
+        mBufferSize = displayMode.resolution;
+
+        if (mRenderPath == RenderPath::VIRTUAL_DISPLAY) {
+            mRotation = virtualDisplayRotation;
+        } else {
+            mRotation = displayState.orientation;
+        }
+    }
 
     std::unique_ptr<ScreenCapture> getScreenCapture() {
         switch (mRenderPath) {
             case RenderPath::SCREENSHOT:
                 return mDelegate->screenshot();
             case RenderPath::VIRTUAL_DISPLAY:
-
-                const auto ids = SurfaceComposerClient::getPhysicalDisplayIds();
-                const auto displayToken = ids.empty()
-                        ? nullptr
-                        : SurfaceComposerClient::getPhysicalDisplayToken(ids.front());
-
-                ui::DisplayState displayState;
-                SurfaceComposerClient::getDisplayState(displayToken, &displayState);
-
-                ui::DisplayMode displayMode;
-                SurfaceComposerClient::getActiveDisplayMode(displayToken, &displayMode);
-                const ui::Size& resolution = displayMode.resolution;
-
                 sp<IBinder> vDisplay;
-                sp<IGraphicBufferProducer> producer;
-                sp<IGraphicBufferConsumer> consumer;
-                sp<BufferItemConsumer> itemConsumer;
-                BufferQueue::createBufferQueue(&producer, &consumer);
 
-                consumer->setConsumerName(String8("Virtual disp consumer"));
-                consumer->setDefaultBufferSize(resolution.getWidth(), resolution.getHeight());
-
-                itemConsumer = sp<BufferItemConsumer>::make(consumer,
-                                                            // Sample usage bits from screenrecord
-                                                            GRALLOC_USAGE_HW_VIDEO_ENCODER |
-                                                                    GRALLOC_USAGE_SW_READ_OFTEN);
+                sp<BufferItemConsumer> itemConsumer = sp<BufferItemConsumer>::make(
+                        // Sample usage bits from screenrecord
+                        GRALLOC_USAGE_HW_VIDEO_ENCODER | GRALLOC_USAGE_SW_READ_OFTEN);
                 sp<BufferListener> listener = sp<BufferListener>::make(this);
                 itemConsumer->setFrameAvailableListener(listener);
+                itemConsumer->setName(String8("Virtual disp consumer (TransactionTest)"));
+                itemConsumer->setDefaultBufferSize(mBufferSize.width, mBufferSize.height);
 
-                vDisplay = SurfaceComposerClient::createDisplay(String8("VirtualDisplay"),
-                                                                false /*secure*/);
+                static const std::string kDisplayName("VirtualDisplay");
+                vDisplay = SurfaceComposerClient::createVirtualDisplay(kDisplayName,
+                                                                       false /*isSecure*/);
+
+                constexpr ui::LayerStack layerStack{
+                        848472}; // ASCII for TTH (TransactionTestHarnesses)
+                sp<SurfaceControl> mirrorSc =
+                        SurfaceComposerClient::getDefault()->mirrorDisplay(mDisplayId);
 
                 SurfaceComposerClient::Transaction t;
-                t.setDisplaySurface(vDisplay, producer);
-                t.setDisplayLayerStack(vDisplay, ui::DEFAULT_LAYER_STACK);
-                t.setDisplayProjection(vDisplay, displayState.orientation,
-                                       Rect(displayState.layerStackSpaceRect), Rect(resolution));
+                t.setDisplaySurface(vDisplay,
+                                    itemConsumer->getSurface()->getIGraphicBufferProducer());
+                t.setDisplayProjection(vDisplay, mRotation, Rect(getRotatedResolution()),
+                                       Rect(getRotatedResolution()));
+                t.setDisplayLayerStack(vDisplay, layerStack);
+                t.setLayerStack(mirrorSc, layerStack);
                 t.apply();
                 SurfaceComposerClient::Transaction().apply(true);
 
@@ -85,14 +95,39 @@ public:
                 constexpr bool kContainsHdr = false;
                 auto sc = std::make_unique<ScreenCapture>(item.mGraphicBuffer, kContainsHdr);
                 itemConsumer->releaseBuffer(item);
-                SurfaceComposerClient::destroyDisplay(vDisplay);
+
+                // Possible race condition with destroying virtual displays, in which
+                // CompositionEngine::present may attempt to be called on the same
+                // display multiple times. The layerStack is set as unassigned here so
+                // that the display is ignored if that scenario occurs.
+                t.setLayerStack(mirrorSc, ui::UNASSIGNED_LAYER_STACK);
+                t.apply(true);
+                SurfaceComposerClient::destroyVirtualDisplay(vDisplay);
                 return sc;
         }
+    }
+
+    std::string getRotationName() const { return ui::toCString(mRotation); }
+
+    ui::Size getRotatedResolution() const {
+        ui::Size size = mBufferSize;
+        size.rotate(mRotation);
+        return size;
+    }
+
+    android::Rect rotateRect(const android::Rect& r) const {
+        ui::Transform transform;
+        transform.set(ui::Transform::toRotationFlags(mRotation), mBufferSize.width,
+                      mBufferSize.height);
+        return transform.transform(r);
     }
 
 protected:
     LayerTransactionTest* mDelegate;
     RenderPath mRenderPath;
+    ui::Size mBufferSize;
+    PhysicalDisplayId mDisplayId;
+    ui::Rotation mRotation = ui::Rotation::Rotation0;
     std::mutex mMutex;
     std::condition_variable mCondition;
     bool mAvailable = false;

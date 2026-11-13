@@ -29,26 +29,33 @@ class DeviceInfo final : public SnapshotManager::IDeviceInfo {
     using MergeStatus = ::aidl::android::hardware::boot::MergeStatus;
 
   public:
+    DeviceInfo();
     std::string GetMetadataDir() const override;
     std::string GetSlotSuffix() const override;
     std::string GetOtherSlotSuffix() const override;
     const android::fs_mgr::IPartitionOpener& GetPartitionOpener() const override;
-    std::string GetSuperDevice(uint32_t slot) const override;
+    std::string GetSuperDevice() const override;
     bool IsOverlayfsSetup() const override;
     bool SetBootControlMergeStatus(MergeStatus status) override;
+    bool SetActiveBootSlot(unsigned int slot) override;
     bool SetSlotAsUnbootable(unsigned int slot) override;
     bool IsRecovery() const override;
     std::unique_ptr<IImageManager> OpenImageManager() const override;
     bool IsFirstStageInit() const override;
     android::dm::IDeviceMapper& GetDeviceMapper() override;
-
+    void SetMetadataDir(const std::string& value);
     void set_first_stage_init(bool value) { first_stage_init_ = value; }
+    bool IsTempMetadata() const override { return temp_metadata_; }
+    void SetTempMetadata() { temp_metadata_ = true; }
 
   private:
     bool EnsureBootHal();
 
     android::fs_mgr::PartitionOpener opener_;
     bool first_stage_init_ = false;
+    // Default value
+    std::string metadata_dir_ = "/metadata/ota";
+    bool temp_metadata_ = false;
 #ifdef LIBSNAPSHOT_USE_HAL
     std::unique_ptr<::android::hal::BootControlClient> boot_control_;
 #endif

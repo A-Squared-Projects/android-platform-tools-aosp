@@ -40,7 +40,18 @@ TEST(WindowInfo, ParcellingWithoutToken) {
     ASSERT_EQ(OK, i.writeToParcel(&p));
     p.setDataPosition(0);
     i2.readFromParcel(&p);
-    ASSERT_TRUE(i2.token == nullptr);
+    ASSERT_EQ(i2.token, nullptr);
+}
+
+TEST(WindowInfo, ParcellingWithoutCloneTransform) {
+    WindowInfo i, i2;
+    i.cloneLayerStackTransform.reset();
+
+    Parcel p;
+    ASSERT_EQ(OK, i.writeToParcel(&p));
+    p.setDataPosition(0);
+    i2.readFromParcel(&p);
+    ASSERT_EQ(i2.cloneLayerStackTransform, std::nullopt);
 }
 
 TEST(WindowInfo, Parcelling) {
@@ -64,13 +75,15 @@ TEST(WindowInfo, Parcelling) {
     i.ownerUid = gui::Uid{24};
     i.packageName = "com.example.package";
     i.inputConfig = WindowInfo::InputConfig::NOT_FOCUSABLE;
-    i.displayId = 34;
+    i.displayId = ui::LogicalDisplayId{34};
     i.replaceTouchableRegionWithCrop = true;
     i.touchableRegionCropHandle = touchableRegionCropHandle;
     i.applicationInfo.name = "ApplicationFooBar";
     i.applicationInfo.token = new BBinder();
     i.applicationInfo.dispatchingTimeoutMillis = 0x12345678ABCD;
     i.focusTransferTarget = new BBinder();
+    i.cloneLayerStackTransform = ui::Transform();
+    i.cloneLayerStackTransform->set({5, -1, 100, 4, 0, 40, 0, 0, 1});
 
     Parcel p;
     i.writeToParcel(&p);
@@ -100,6 +113,7 @@ TEST(WindowInfo, Parcelling) {
     ASSERT_EQ(i.touchableRegionCropHandle, i2.touchableRegionCropHandle);
     ASSERT_EQ(i.applicationInfo, i2.applicationInfo);
     ASSERT_EQ(i.focusTransferTarget, i2.focusTransferTarget);
+    ASSERT_EQ(i.cloneLayerStackTransform, i2.cloneLayerStackTransform);
 }
 
 TEST(InputApplicationInfo, Parcelling) {

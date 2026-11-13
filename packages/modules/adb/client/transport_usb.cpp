@@ -164,7 +164,6 @@ void init_usb_transport(atransport* t, usb_handle* h) {
     D("transport: usb");
     auto connection = std::make_unique<UsbConnection>(h);
     t->SetConnection(std::make_unique<BlockingConnectionAdapter>(std::move(connection)));
-    t->type = kTransportUsb;
     t->SetUsbHandle(h);
 }
 
@@ -178,9 +177,9 @@ bool is_adb_interface(int usb_class, int usb_subclass, int usb_protocol) {
 }
 
 bool is_libusb_enabled() {
-    bool enable = true;
-#if defined(_WIN32)
-    enable = false;
+    bool enable = false;
+#if defined(__APPLE__)
+    enable = true;
 #endif
     char* env = getenv("ADB_LIBUSB");
     if (env) {

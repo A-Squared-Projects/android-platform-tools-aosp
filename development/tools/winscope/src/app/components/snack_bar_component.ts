@@ -14,19 +14,40 @@
  * limitations under the License.
  */
 
-import {Component, Inject} from '@angular/core';
-import {MatSnackBarRef, MAT_SNACK_BAR_DATA} from '@angular/material/snack-bar';
+import {ClipboardModule} from '@angular/cdk/clipboard';
+import {CommonModule} from '@angular/common';
+import {Component, ElementRef, Inject} from '@angular/core';
+import {MatButtonModule} from '@angular/material/button';
+import {MAT_SNACK_BAR_DATA, MatSnackBarRef} from '@angular/material/snack-bar';
 
+/**
+ * A component for displaying a snack bar with a message and action buttons.
+ */
 @Component({
   selector: 'snack-bar',
+  standalone: true,
+  imports: [CommonModule, MatButtonModule, ClipboardModule],
   template: `
     <div class="snack-bar-container">
-      <p *ngFor="let message of messages" class="mat-body-1">
-        {{ message }}
-      </p>
-      <button color="primary" mat-button class="snack-bar-action" (click)="snackBarRef.dismiss()">
-        Close
-      </button>
+      <div class="message-container">
+        @for (message of messages; track $index) {
+          <p class="message mat-body-1">
+            {{ message }}
+          </p>
+        }
+      </div>
+      <div class="snack-bar-actions">
+        <button
+          color="primary"
+          mat-button
+          class="copy-button"
+          [cdkCopyToClipboard]="formatMessages()">Copy</button>
+        <button
+          color="primary"
+          mat-button
+          class="close-button"
+          (click)="snackBarRef.dismiss()">Close</button>
+      </div>
     </div>
   `,
   styles: [
@@ -34,9 +55,21 @@ import {MatSnackBarRef, MAT_SNACK_BAR_DATA} from '@angular/material/snack-bar';
       .snack-bar-container {
         display: flex;
         flex-direction: column;
+        white-space: pre-line;
       }
-      .snack-bar-action {
-        margin-left: 12px;
+      .message-container {
+        display: flex;
+        flex-direction: column;
+        white-space: pre-line;
+        max-height: 200px;
+        overflow-y: auto;
+      }
+      .message {
+        padding-block-end: 4px;
+      }
+      .snack-bar-actions {
+        display: flex;
+        justify-content: center;
       }
     `,
   ],
@@ -46,5 +79,10 @@ export class SnackBarComponent {
     @Inject(MatSnackBarRef)
     public snackBarRef: MatSnackBarRef<SnackBarComponent>,
     @Inject(MAT_SNACK_BAR_DATA) public messages: string[],
+    @Inject(ElementRef) public elementRef: ElementRef,
   ) {}
+
+  formatMessages(): string {
+    return this.messages.join('\n\n');
+  }
 }

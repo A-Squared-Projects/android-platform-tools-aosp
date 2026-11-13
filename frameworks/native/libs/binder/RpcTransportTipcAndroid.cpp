@@ -14,13 +14,14 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "RpcTransportTipcAndroid"
+#define LOG_TAG "libbinder.RpcTransportTipcAndroid"
 
 #include <binder/RpcSession.h>
 #include <binder/RpcTransportTipcAndroid.h>
 #include <log/log.h>
 #include <poll.h>
 #include <trusty/tipc.h>
+#include <type_traits>
 
 #include "FdTrigger.h"
 #include "RpcState.h"
@@ -31,6 +32,9 @@ using android::binder::borrowed_fd;
 using android::binder::unique_fd;
 
 namespace android {
+
+// Corresponds to IPC_MAX_MSG_HANDLES in the Trusty kernel
+constexpr size_t kMaxTipcHandles = 8;
 
 // RpcTransport for writing Trusty IPC clients in Android.
 class RpcTransportTipcAndroid : public RpcTransport {
@@ -78,12 +82,53 @@ public:
             FdTrigger* fdTrigger, iovec* iovs, int niovs,
             const std::optional<SmallFunction<status_t()>>& altPoll,
             const std::vector<std::variant<unique_fd, borrowed_fd>>* ancillaryFds) override {
+        bool sentFds = false;
         auto writeFn = [&](iovec* iovs, size_t niovs) -> ssize_t {
-            // TODO: send ancillaryFds. For now, we just abort if anyone tries
-            // to send any.
-            LOG_ALWAYS_FATAL_IF(ancillaryFds != nullptr && !ancillaryFds->empty(),
-                                "File descriptors are not supported on Trusty yet");
-            return TEMP_FAILURE_RETRY(tipc_send(mSocket.fd.get(), iovs, niovs, nullptr, 0));
+            // Collect the ancillary FDs.
+            trusty_shm shms[kMaxTipcHandles] = {{0}};
+            ssize_t shm_count = 0;
+
+            if (!sentFds && ancillaryFds != nullptr && !ancillaryFds->empty()) {
+                if (ancillaryFds->size() > kMaxTipcHandles) {
+                    ALOGE("Too many file descriptors for TIPC: %zu", ancillaryFds->size());
+                    errno = EINVAL;
+                    return -1;
+                }
+                for (const auto& fdVariant : *ancillaryFds) {
+                    shms[shm_count++] = {std::visit([](const auto& fd) { return fd.get(); },
+                                                    fdVariant),
+                                         TRUSTY_SEND_SECURE_OR_SHARE};
+                }
+            }
+
+            // Trusty currently has a message size limit, which will go away once we
+            // switch to vsock. The message is reassembled on the receiving side.
+            static const size_t maxMsgSize = VIRTIO_VSOCK_MSG_SIZE_LIMIT;
+            size_t niovsMsg;
+            size_t currSize = 0;
+            size_t cutSize = 0;
+            for (niovsMsg = 0; niovsMsg < niovs; niovsMsg++) {
+                if (__builtin_add_overflow(currSize, iovs[niovsMsg].iov_len, &currSize)) {
+                    ALOGE("%s: iov_len add_overflow", __FUNCTION__);
+                    return NO_MEMORY;
+                }
+                if (currSize >= maxMsgSize) {
+                    // Truncate the last iov but restore it at the end
+                    // so the caller can continue where we left off.
+                    cutSize = currSize - maxMsgSize;
+                    iovs[niovsMsg].iov_len -= cutSize;
+                    niovsMsg++;
+                    break;
+                }
+            }
+
+            auto ret = TEMP_FAILURE_RETRY(tipc_send(mSocket.fd.get(), iovs, niovsMsg,
+                                                    (shm_count == 0) ? nullptr : shms, shm_count));
+            sentFds |= ret >= 0;
+            if (niovsMsg > 0) {
+                iovs[niovsMsg - 1].iov_len += cutSize;
+            }
+            return ret;
         };
 
         status_t status = interruptableReadOrWrite(mSocket, fdTrigger, iovs, niovs, writeFn,
@@ -170,6 +215,7 @@ private:
                 if (savedErrno == EMSGSIZE) {
                     // Buffer was too small, double it and retry
                     if (__builtin_mul_overflow(mReadBufferCapacity, 2, &mReadBufferCapacity)) {
+                        ALOGE("%s: read buffer mul_overflow", __FUNCTION__);
                         return NO_MEMORY;
                     }
                     mReadBuffer.reset(new (std::nothrow) uint8_t[mReadBufferCapacity]);

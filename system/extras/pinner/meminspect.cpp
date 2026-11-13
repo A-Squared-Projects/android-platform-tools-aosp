@@ -1,5 +1,6 @@
 #include "meminspect.h"
 #include <android-base/unique_fd.h>
+#include <algorithm>
 #include "ziparchive/zip_archive.h"
 
 using namespace std;

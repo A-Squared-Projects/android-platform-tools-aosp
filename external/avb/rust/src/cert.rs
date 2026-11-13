@@ -104,6 +104,9 @@ pub use avb_bindgen::AvbCertUnlockCredential as CertUnlockCredential;
 /// Size in bytes of a SHA256 digest.
 pub const SHA256_DIGEST_SIZE: usize = avb_bindgen::AVB_SHA256_DIGEST_SIZE as usize;
 
+/// Size in bytes of a SHA512 digest.
+pub const SHA512_DIGEST_SIZE: usize = avb_bindgen::AVB_SHA512_DIGEST_SIZE as usize;
+
 /// Product intermediate key (PIK) rollback index location.
 ///
 /// If using libavb_cert, make sure no vbmetas use this location, it must be reserved for the PIK.
@@ -124,7 +127,7 @@ pub trait CertOps {
     ///
     /// # Arguments
     /// * `attributes`: permanent attributes to update; passed as an output parameter rather than a
-    ///                 return value due to the size (>1KiB).
+    ///   return value due to the size (>1KiB).
     ///
     /// # Returns
     /// Unit on success, error on failure.
@@ -329,7 +332,7 @@ struct CertOnlyOps<'a> {
     cert_ops: &'a mut dyn CertOps,
 }
 
-impl<'a> Ops<'static> for CertOnlyOps<'a> {
+impl Ops<'static> for CertOnlyOps<'_> {
     fn read_from_partition(
         &mut self,
         _partition: &CStr,

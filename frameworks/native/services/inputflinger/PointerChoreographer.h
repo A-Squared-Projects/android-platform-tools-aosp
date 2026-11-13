@@ -21,7 +21,10 @@
 #include "PointerChoreographerPolicyInterface.h"
 
 #include <android-base/thread_annotations.h>
+#include <gui/WindowInfosListener.h>
+#include <input/DisplayTopologyGraph.h>
 #include <type_traits>
+#include <unordered_set>
 
 namespace android {
 
@@ -53,11 +56,31 @@ public:
      * Set the display that pointers, like the mouse cursor and drawing tablets,
      * should be drawn on.
      */
-    virtual void setDefaultMouseDisplayId(int32_t displayId) = 0;
+    virtual void setDefaultMouseDisplayId(ui::LogicalDisplayId displayId) = 0;
     virtual void setDisplayViewports(const std::vector<DisplayViewport>& viewports) = 0;
     virtual std::optional<DisplayViewport> getViewportForPointerDevice(
-            int32_t associatedDisplayId = ADISPLAY_ID_NONE) = 0;
-    virtual FloatPoint getMouseCursorPosition(int32_t displayId) = 0;
+            ui::LogicalDisplayId associatedDisplayId = ui::LogicalDisplayId::INVALID) = 0;
+    /**
+     * Gets the current position of the mouse cursor on the specified display in the display
+     * physical coordinates.
+     *
+     * Returns optional.empty if no cursor is available, or if existing cursor is not on
+     * supplied `displayId`.
+     *
+     * This method is inherently racy, and should only be used for test purposes.
+     */
+    virtual std::optional<vec2> getMouseCursorPosition(ui::LogicalDisplayId displayId) = 0;
+    /**
+     * Gets the current position of the mouse cursor on the specified display in the display logical
+     * coordinates.
+     *
+     * Returns optional.empty if no cursor is available, or if existing cursor is not on
+     * supplied `displayId`.
+     *
+     * This method is inherently racy, and should only be used for test purposes.
+     */
+    virtual std::optional<vec2> getMouseCursorPositionInLogicalDisplay(
+            ui::LogicalDisplayId displayId) = 0;
     virtual void setShowTouchesEnabled(bool enabled) = 0;
     virtual void setStylusPointerIconEnabled(bool enabled) = 0;
     /**
@@ -66,38 +89,57 @@ public:
      * Returns true if the icon was changed successfully, false otherwise.
      */
     virtual bool setPointerIcon(std::variant<std::unique_ptr<SpriteIcon>, PointerIconStyle> icon,
-                                int32_t displayId, DeviceId deviceId) = 0;
+                                ui::LogicalDisplayId displayId, DeviceId deviceId) = 0;
     /**
      * Set whether pointer icons for mice, touchpads, and styluses should be visible on the
      * given display.
      */
-    virtual void setPointerIconVisibility(int32_t displayId, bool visible) = 0;
+    virtual void setPointerIconVisibility(ui::LogicalDisplayId displayId, bool visible) = 0;
+
+    /**
+     * Used by Dispatcher to notify changes in the current focused display.
+     */
+    virtual void setFocusedDisplay(ui::LogicalDisplayId displayId) = 0;
+
+    /*
+     * Used by InputManager to notify changes in the DisplayTopology
+     */
+    virtual void setDisplayTopology(const DisplayTopologyGraph& displayTopologyGraph) = 0;
 
     /**
      * This method may be called on any thread (usually by the input manager on a binder thread).
      */
     virtual void dump(std::string& dump) = 0;
+
+    /**
+     * Enables motion event filter before pointer coordinates are determined.
+     */
+    virtual void setAccessibilityPointerMotionFilterEnabled(bool enabled) = 0;
 };
 
 class PointerChoreographer : public PointerChoreographerInterface {
 public:
     explicit PointerChoreographer(InputListenerInterface& listener,
                                   PointerChoreographerPolicyInterface&);
-    ~PointerChoreographer() override = default;
+    ~PointerChoreographer() override;
 
-    void setDefaultMouseDisplayId(int32_t displayId) override;
+    void setDefaultMouseDisplayId(ui::LogicalDisplayId displayId) override;
     void setDisplayViewports(const std::vector<DisplayViewport>& viewports) override;
     std::optional<DisplayViewport> getViewportForPointerDevice(
-            int32_t associatedDisplayId) override;
-    FloatPoint getMouseCursorPosition(int32_t displayId) override;
+            ui::LogicalDisplayId associatedDisplayId) override;
+    std::optional<vec2> getMouseCursorPosition(ui::LogicalDisplayId displayId) override;
+    std::optional<vec2> getMouseCursorPositionInLogicalDisplay(
+            ui::LogicalDisplayId displayId) override;
     void setShowTouchesEnabled(bool enabled) override;
     void setStylusPointerIconEnabled(bool enabled) override;
     bool setPointerIcon(std::variant<std::unique_ptr<SpriteIcon>, PointerIconStyle> icon,
-                        int32_t displayId, DeviceId deviceId) override;
-    void setPointerIconVisibility(int32_t displayId, bool visible) override;
+                        ui::LogicalDisplayId displayId, DeviceId deviceId) override;
+    void setPointerIconVisibility(ui::LogicalDisplayId displayId, bool visible) override;
+    void setFocusedDisplay(ui::LogicalDisplayId displayId) override;
+    void setDisplayTopology(const DisplayTopologyGraph& displayTopologyGraph);
+    void setAccessibilityPointerMotionFilterEnabled(bool enabled) override;
 
     void notifyInputDevicesChanged(const NotifyInputDevicesChangedArgs& args) override;
-    void notifyConfigurationChanged(const NotifyConfigurationChangedArgs& args) override;
     void notifyKey(const NotifyKeyArgs& args) override;
     void notifyMotion(const NotifyMotionArgs& args) override;
     void notifySwitch(const NotifySwitchArgs& args) override;
@@ -110,52 +152,139 @@ public:
 
 private:
     using PointerDisplayChange =
-            std::optional<std::tuple<int32_t /*displayId*/, FloatPoint /*cursorPosition*/>>;
-    [[nodiscard]] PointerDisplayChange updatePointerControllersLocked() REQUIRES(mLock);
-    [[nodiscard]] PointerDisplayChange calculatePointerDisplayChangeToNotify() REQUIRES(mLock);
-    const DisplayViewport* findViewportByIdLocked(int32_t displayId) const REQUIRES(mLock);
-    int32_t getTargetMouseDisplayLocked(int32_t associatedDisplayId) const REQUIRES(mLock);
-    std::pair<int32_t /*displayId*/, PointerControllerInterface&> ensureMouseControllerLocked(
-            int32_t associatedDisplayId) REQUIRES(mLock);
-    InputDeviceInfo* findInputDeviceLocked(DeviceId deviceId) REQUIRES(mLock);
-    bool canUnfadeOnDisplay(int32_t displayId) REQUIRES(mLock);
+            std::optional<std::tuple<ui::LogicalDisplayId /*displayId*/, vec2 /*cursorPosition*/>>;
 
+    // PointerChoreographer's DisplayInfoListener can outlive the PointerChoreographer because when
+    // the listener is registered and called from display thread, a strong pointer to the listener
+    // (which can extend its lifecycle) is given away.
+    // If we use two locks it can also cause deadlocks due to race in acquiring them between the
+    // display and reader thread.
+    // To avoid these problems we use DisplayInfoListener's lock in PointerChoreographer.
+    std::mutex& getLock() const;
+
+    [[nodiscard]] PointerDisplayChange updatePointerControllersLocked() REQUIRES(getLock());
+    [[nodiscard]] PointerDisplayChange calculatePointerDisplayChangeToNotify() REQUIRES(getLock());
+    const DisplayViewport* findViewportByIdLocked(ui::LogicalDisplayId displayId) const
+            REQUIRES(getLock());
+    ui::LogicalDisplayId getTargetMouseDisplayLocked(ui::LogicalDisplayId associatedDisplayId) const
+            REQUIRES(getLock());
+    std::pair<ui::LogicalDisplayId /*displayId*/, PointerControllerInterface&>
+    ensureMouseControllerLocked(ui::LogicalDisplayId associatedDisplayId) REQUIRES(getLock());
+    InputDeviceInfo* findInputDeviceLocked(DeviceId deviceId) REQUIRES(getLock());
+    bool canUnfadeOnDisplay(ui::LogicalDisplayId displayId) REQUIRES(getLock());
+
+    void fadeMouseCursorOnKeyPress(const NotifyKeyArgs& args);
     NotifyMotionArgs processMotion(const NotifyMotionArgs& args);
-    NotifyMotionArgs processMouseEventLocked(const NotifyMotionArgs& args) REQUIRES(mLock);
-    NotifyMotionArgs processTouchpadEventLocked(const NotifyMotionArgs& args) REQUIRES(mLock);
-    void processDrawingTabletEventLocked(const NotifyMotionArgs& args) REQUIRES(mLock);
-    void processTouchscreenAndStylusEventLocked(const NotifyMotionArgs& args) REQUIRES(mLock);
-    void processStylusHoverEventLocked(const NotifyMotionArgs& args) REQUIRES(mLock);
+    NotifyMotionArgs processMouseEventLocked(const NotifyMotionArgs& args) REQUIRES(getLock());
+    NotifyMotionArgs processTouchpadEventLocked(const NotifyMotionArgs& args) REQUIRES(getLock());
+    void processDrawingTabletEventLocked(const NotifyMotionArgs& args) REQUIRES(getLock());
+    void processTouchscreenAndStylusEventLocked(const NotifyMotionArgs& args) REQUIRES(getLock());
+    void processStylusHoverEventLocked(const NotifyMotionArgs& args) REQUIRES(getLock());
+    void processPointerDeviceMotionEventLocked(NotifyMotionArgs& newArgs,
+                                               PointerControllerInterface& pc) REQUIRES(getLock());
     void processDeviceReset(const NotifyDeviceResetArgs& args);
+    void onControllerAddedOrRemovedLocked() REQUIRES(getLock());
+    void onPrivacySensitiveDisplaysChangedLocked(
+            const std::unordered_set<ui::LogicalDisplayId>& privacySensitiveDisplays)
+            REQUIRES(getLock());
+
+    void handleUnconsumedDeltaLocked(PointerControllerInterface& pc, const vec2& unconsumedDelta)
+            REQUIRES(getLock());
+
+    std::optional<std::pair<const DisplayViewport*, float /*offsetPx*/>>
+    findDestinationDisplayLocked(const ui::LogicalDisplayId sourceDisplayId,
+                                 const DisplayTopologyPosition sourceBoundary,
+                                 int32_t sourceCursorOffsetPx) const REQUIRES(getLock());
+
+    vec2 filterPointerMotionForAccessibilityLocked(const PointerControllerInterface& pc,
+                                                   const vec2& delta) REQUIRES(getLock());
+
+    /* Topology is initialized with default-constructed value, which is an empty topology. Till we
+     * receive setDisplayTopology call.
+     * Meanwhile Choreographer will treat every display as independent disconnected display.
+     */
+    DisplayTopologyGraph mTopology GUARDED_BY(getLock());
+
+    /* This listener keeps tracks of visible privacy sensitive displays and updates the
+     * choreographer if there are any changes.
+     *
+     * Listener uses mListenerLock to guard all private data as choreographer and SurfaceComposer
+     * both can call into the listener. To prevent deadlocks Choreographer can call listener with
+     * its lock held, but listener must not call choreographer with its lock.
+     */
+    class PointerChoreographerDisplayInfoListener : public gui::WindowInfosListener {
+    public:
+        explicit PointerChoreographerDisplayInfoListener(PointerChoreographer* pc)
+              : mPointerChoreographer(pc){};
+        void onWindowInfosChanged(const gui::WindowInfosUpdate&) override;
+        void setInitialDisplayInfosLocked(const std::vector<gui::WindowInfo>& windowInfos)
+                REQUIRES(mLock);
+        std::unordered_set<ui::LogicalDisplayId> getPrivacySensitiveDisplaysLocked()
+                REQUIRES(mLock);
+        void onPointerChoreographerDestroyed();
+
+        // This lock is also used by PointerChoreographer. See PointerChoreographer::getLock().
+        std::mutex mLock;
+
+    private:
+        PointerChoreographer* mPointerChoreographer GUARDED_BY(mLock);
+        std::unordered_set<ui::LogicalDisplayId /*displayId*/> mPrivacySensitiveDisplays
+                GUARDED_BY(mLock);
+    };
 
     using ControllerConstructor =
             ConstructorDelegate<std::function<std::shared_ptr<PointerControllerInterface>()>>;
-    ControllerConstructor mTouchControllerConstructor GUARDED_BY(mLock);
-    ControllerConstructor getMouseControllerConstructor(int32_t displayId) REQUIRES(mLock);
-    ControllerConstructor getStylusControllerConstructor(int32_t displayId) REQUIRES(mLock);
-
-    std::mutex mLock;
+    ControllerConstructor mTouchControllerConstructor GUARDED_BY(getLock());
+    ControllerConstructor getMouseControllerConstructor(ui::LogicalDisplayId displayId)
+            REQUIRES(getLock());
+    ControllerConstructor getStylusControllerConstructor(ui::LogicalDisplayId displayId)
+            REQUIRES(getLock());
 
     InputListenerInterface& mNextListener;
     PointerChoreographerPolicyInterface& mPolicy;
 
-    std::map<int32_t, std::shared_ptr<PointerControllerInterface>> mMousePointersByDisplay
-            GUARDED_BY(mLock);
+    std::map<ui::LogicalDisplayId, std::shared_ptr<PointerControllerInterface>>
+            mMousePointersByDisplay GUARDED_BY(getLock());
     std::map<DeviceId, std::shared_ptr<PointerControllerInterface>> mTouchPointersByDevice
-            GUARDED_BY(mLock);
+            GUARDED_BY(getLock());
     std::map<DeviceId, std::shared_ptr<PointerControllerInterface>> mStylusPointersByDevice
-            GUARDED_BY(mLock);
+            GUARDED_BY(getLock());
     std::map<DeviceId, std::shared_ptr<PointerControllerInterface>> mDrawingTabletPointersByDevice
-            GUARDED_BY(mLock);
+            GUARDED_BY(getLock());
 
-    int32_t mDefaultMouseDisplayId GUARDED_BY(mLock);
-    int32_t mNotifiedPointerDisplayId GUARDED_BY(mLock);
-    std::vector<InputDeviceInfo> mInputDeviceInfos GUARDED_BY(mLock);
-    std::set<DeviceId> mMouseDevices GUARDED_BY(mLock);
-    std::vector<DisplayViewport> mViewports GUARDED_BY(mLock);
-    bool mShowTouchesEnabled GUARDED_BY(mLock);
-    bool mStylusPointerIconEnabled GUARDED_BY(mLock);
-    std::set<int32_t /*displayId*/> mDisplaysWithPointersHidden;
+    // In connected displays scenario, this tracks the latest display the cursor is at, within the
+    // DisplayTopology. By default, this will be set to topology primary display, and updated when
+    // mouse crossed to another display.
+    // In non-connected displays scenario, this will be treated as the default display cursor
+    // will be on, when mouse doesn't have associated display.
+    ui::LogicalDisplayId mCurrentMouseDisplayId GUARDED_BY(getLock());
+    ui::LogicalDisplayId mNotifiedPointerDisplayId GUARDED_BY(getLock());
+    std::vector<InputDeviceInfo> mInputDeviceInfos GUARDED_BY(getLock());
+    std::set<DeviceId> mMouseDevices GUARDED_BY(getLock());
+    std::vector<DisplayViewport> mViewports GUARDED_BY(getLock());
+    bool mShowTouchesEnabled GUARDED_BY(getLock());
+    bool mStylusPointerIconEnabled GUARDED_BY(getLock());
+    bool mPointerMotionFilterEnabled GUARDED_BY(getLock());
+    std::set<ui::LogicalDisplayId /*displayId*/> mDisplaysWithPointersHidden;
+    ui::LogicalDisplayId mCurrentFocusedDisplay GUARDED_BY(getLock());
+
+protected:
+    using WindowListenerRegisterConsumer = std::function<std::vector<gui::WindowInfo>(
+            const sp<android::gui::WindowInfosListener>&)>;
+    using WindowListenerUnregisterConsumer =
+            std::function<void(const sp<android::gui::WindowInfosListener>&)>;
+    explicit PointerChoreographer(InputListenerInterface& listener,
+                                  PointerChoreographerPolicyInterface&,
+                                  const WindowListenerRegisterConsumer& registerListener,
+                                  const WindowListenerUnregisterConsumer& unregisterListener);
+
+private:
+    // WindowInfoListener object should always exist while PointerChoreographer exists, because we
+    // need to use the lock from it. But we don't always need to register the listener.
+    bool mIsWindowInfoListenerRegistered GUARDED_BY(getLock());
+    const sp<PointerChoreographerDisplayInfoListener> mWindowInfoListener;
+    const WindowListenerRegisterConsumer mRegisterListener;
+    const WindowListenerUnregisterConsumer mUnregisterListener;
 };
 
 } // namespace android

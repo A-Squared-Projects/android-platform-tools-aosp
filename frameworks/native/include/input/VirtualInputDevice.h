@@ -17,14 +17,31 @@
 #pragma once
 
 #include <android-base/unique_fd.h>
+#include <input/Input.h>
+#include <ui/Size.h>
+#include <map>
 
 namespace android {
+
+enum class DeviceType {
+    KEYBOARD,
+    MOUSE,
+    TOUCHSCREEN,
+    DPAD,
+    STYLUS,
+    ROTARY_ENCODER,
+};
+
+android::base::unique_fd openUinput(const char* readableName, int32_t vendorId, int32_t productId,
+                                    const char* phys, DeviceType deviceType,
+                                    std::optional<ui::Size> screenSize);
 
 enum class UinputAction {
     RELEASE = 0,
     PRESS = 1,
     MOVE = 2,
     CANCEL = 3,
+    ftl_last = CANCEL,
 };
 
 class VirtualInputDevice {
@@ -77,6 +94,8 @@ public:
 
 private:
     static const std::map<int, int> BUTTON_CODE_MAPPING;
+    int32_t mAccumulatedHighResScrollX;
+    int32_t mAccumulatedHighResScrollY;
 };
 
 class VirtualTouchscreen : public VirtualInputDevice {
@@ -120,6 +139,16 @@ private:
     bool mIsStylusDown;
     bool handleStylusDown(uint16_t tool, std::chrono::nanoseconds eventTime);
     bool handleStylusUp(uint16_t tool, std::chrono::nanoseconds eventTime);
+};
+
+class VirtualRotaryEncoder : public VirtualInputDevice {
+public:
+    VirtualRotaryEncoder(android::base::unique_fd fd);
+    virtual ~VirtualRotaryEncoder() override;
+    bool writeScrollEvent(float scrollAmount, std::chrono::nanoseconds eventTime);
+
+private:
+    int32_t mAccumulatedHighResScrollAmount;
 };
 
 } // namespace android

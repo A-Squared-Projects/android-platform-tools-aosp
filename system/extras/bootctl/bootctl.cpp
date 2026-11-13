@@ -29,7 +29,7 @@ using android::hal::BootControlClient;
 using android::hal::BootControlVersion;
 using android::hal::CommandResult;
 
-static void usage(FILE* where, BootControlVersion bootVersion, int /* argc */, char* argv[]) {
+static void usage(FILE* where, int /* argc */, char* argv[]) {
     fprintf(where,
             "%s - command-line wrapper for the boot HAL.\n"
             "\n"
@@ -46,16 +46,13 @@ static void usage(FILE* where, BootControlVersion bootVersion, int /* argc */, c
             "  set-slot-as-unbootable SLOT    - Mark SLOT as invalid.\n"
             "  is-slot-bootable SLOT          - Returns 0 only if SLOT is bootable.\n"
             "  is-slot-marked-successful SLOT - Returns 0 only if SLOT is marked GOOD.\n"
-            "  get-suffix SLOT                - Prints suffix for SLOT.\n",
+            "  get-suffix SLOT                - Prints suffix for SLOT.\n"
+            "  set-snapshot-merge-status STAT - Sets whether a snapshot-merge of any dynamic\n"
+            "                                   partition is in progress. Valid STAT values\n"
+            "                                   are: none, unknown, snapshotted, merging,\n"
+            "                                   or cancelled.\n"
+            "  get-snapshot-merge-status      - Prints the current snapshot-merge status.\n",
             argv[0], argv[0]);
-    if (bootVersion >= BootControlVersion::BOOTCTL_V1_1) {
-        fprintf(where,
-                "  set-snapshot-merge-status STAT - Sets whether a snapshot-merge of any dynamic\n"
-                "                                   partition is in progress. Valid STAT values\n"
-                "                                   are: none, unknown, snapshotted, merging,\n"
-                "                                   or cancelled.\n"
-                "  get-snapshot-merge-status      - Prints the current snapshot-merge status.\n");
-    }
     fprintf(where,
             "\n"
             "SLOT parameter is the zero-based slot-number.\n");
@@ -63,10 +60,6 @@ static void usage(FILE* where, BootControlVersion bootVersion, int /* argc */, c
 
 static constexpr auto ToString(BootControlVersion ver) {
     switch (ver) {
-        case BootControlVersion::BOOTCTL_V1_0:
-            return "android.hardware.boot@1.0::IBootControl";
-        case BootControlVersion::BOOTCTL_V1_1:
-            return "android.hardware.boot@1.1::IBootControl";
         case BootControlVersion::BOOTCTL_V1_2:
             return "android.hardware.boot@1.2::IBootControl";
         case BootControlVersion::BOOTCTL_AIDL:
@@ -155,17 +148,16 @@ std::optional<MergeStatus> stringToMergeStatus(const std::string& status) {
     return {};
 }
 
-static int do_set_snapshot_merge_status(BootControlClient* module, BootControlVersion bootVersion,
-                                        int argc, char* argv[]) {
+static int do_set_snapshot_merge_status(BootControlClient* module, int argc, char* argv[]) {
     if (argc != 3) {
-        usage(stderr, bootVersion, argc, argv);
+        usage(stderr, argc, argv);
         exit(EX_USAGE);
         return -1;
     }
 
     auto status = stringToMergeStatus(argv[2]);
     if (!status.has_value()) {
-        usage(stderr, bootVersion, argc, argv);
+        usage(stderr, argc, argv);
         exit(EX_USAGE);
         return -1;
     }
@@ -209,16 +201,16 @@ static int do_get_suffix(BootControlClient* module, int32_t slot_number) {
     return EX_OK;
 }
 
-static uint32_t parse_slot(BootControlVersion bootVersion, int pos, int argc, char* argv[]) {
+static uint32_t parse_slot(int pos, int argc, char* argv[]) {
     if (pos > argc - 1) {
-        usage(stderr, bootVersion, argc, argv);
+        usage(stderr, argc, argv);
         exit(EX_USAGE);
         return -1;
     }
     errno = 0;
     uint64_t ret = strtoul(argv[pos], NULL, 10);
     if (errno != 0 || ret > UINT_MAX) {
-        usage(stderr, bootVersion, argc, argv);
+        usage(stderr, argc, argv);
         exit(EX_USAGE);
         return -1;
     }
@@ -231,10 +223,9 @@ int main(int argc, char* argv[]) {
         fprintf(stderr, "Failed to get bootctl module.\n");
         return EX_SOFTWARE;
     }
-    const auto bootVersion = client->GetVersion();
 
     if (argc < 2) {
-        usage(stderr, bootVersion, argc, argv);
+        usage(stderr, argc, argv);
         return EX_USAGE;
     }
 
@@ -248,41 +239,24 @@ int main(int argc, char* argv[]) {
     } else if (strcmp(argv[1], "mark-boot-successful") == 0) {
         return do_mark_boot_successful(client.get());
     } else if (strcmp(argv[1], "set-active-boot-slot") == 0) {
-        return do_set_active_boot_slot(client.get(), parse_slot(bootVersion, 2, argc, argv));
+        return do_set_active_boot_slot(client.get(), parse_slot(2, argc, argv));
     } else if (strcmp(argv[1], "set-slot-as-unbootable") == 0) {
-        return do_set_slot_as_unbootable(client.get(), parse_slot(bootVersion, 2, argc, argv));
+        return do_set_slot_as_unbootable(client.get(), parse_slot(2, argc, argv));
     } else if (strcmp(argv[1], "is-slot-bootable") == 0) {
-        return do_is_slot_bootable(client.get(), parse_slot(bootVersion, 2, argc, argv));
+        return do_is_slot_bootable(client.get(), parse_slot(2, argc, argv));
     } else if (strcmp(argv[1], "is-slot-marked-successful") == 0) {
-        return do_is_slot_marked_successful(client.get(), parse_slot(bootVersion, 2, argc, argv));
+        return do_is_slot_marked_successful(client.get(), parse_slot(2, argc, argv));
     } else if (strcmp(argv[1], "get-suffix") == 0) {
-        return do_get_suffix(client.get(), parse_slot(bootVersion, 2, argc, argv));
-    }
-
-    // Functions present from version 1.1
-    if (strcmp(argv[1], "set-snapshot-merge-status") == 0 ||
-        strcmp(argv[1], "get-snapshot-merge-status") == 0) {
-        if (bootVersion < BootControlVersion::BOOTCTL_V1_1) {
-            fprintf(stderr, "Error getting bootctrl v1.1 module.\n");
-            return EX_SOFTWARE;
-        }
-        if (strcmp(argv[1], "set-snapshot-merge-status") == 0) {
-            return do_set_snapshot_merge_status(client.get(), bootVersion, argc, argv);
-        } else if (strcmp(argv[1], "get-snapshot-merge-status") == 0) {
-            return do_get_snapshot_merge_status(client.get());
-        }
-    }
-
-    if (strcmp(argv[1], "get-active-boot-slot") == 0) {
-        if (bootVersion < BootControlVersion::BOOTCTL_V1_2) {
-            fprintf(stderr, "Error getting bootctrl v1.2 module.\n");
-            return EX_SOFTWARE;
-        }
-
+        return do_get_suffix(client.get(), parse_slot(2, argc, argv));
+    } else if (strcmp(argv[1], "set-snapshot-merge-status") == 0) {
+        return do_set_snapshot_merge_status(client.get(), argc, argv);
+    } else if (strcmp(argv[1], "get-snapshot-merge-status") == 0) {
+        return do_get_snapshot_merge_status(client.get());
+    } else if (strcmp(argv[1], "get-active-boot-slot") == 0) {
         return do_get_active_boot_slot(client.get());
     }
 
     // Parameter not matched, print usage
-    usage(stderr, bootVersion, argc, argv);
+    usage(stderr, argc, argv);
     return EX_USAGE;
 }

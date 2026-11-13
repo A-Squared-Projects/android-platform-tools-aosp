@@ -291,7 +291,7 @@ int main(int argc, char *argv[])
     }
 
     fflush(stdout);
-    switch (pid_t pid = fork()) {
+    switch (fork()) {
     case 0: // Child
         ::benchmark::RunSpecifiedBenchmarks();
         return 0;

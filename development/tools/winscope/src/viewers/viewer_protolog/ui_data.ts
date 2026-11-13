@@ -14,26 +14,36 @@
  * limitations under the License.
  */
 
-import {PropertyTreeNode} from 'trace/tree_node/property_tree_node';
+import {TraceEntry} from 'trace_api/trace';
+import {HierarchyTreeNode} from 'tree_node/hierarchy_tree_node';
+import {
+  LogEntry,
+  LogField,
+  LogHeader,
+  UiDataLog,
+} from 'viewers/common/ui_data_log';
 
-export interface UiDataMessage {
-  readonly originalIndex: number;
-  readonly text: string;
-  readonly time: PropertyTreeNode;
-  readonly tag: string;
-  readonly level: string;
-  readonly at: string;
-}
-
-export class UiData {
+export class UiData implements UiDataLog {
   constructor(
-    public allLogLevels: string[],
-    public allTags: string[],
-    public allSourceFiles: string[],
-    public messages: UiDataMessage[],
-    public currentMessageIndex: undefined | number,
-    public selectedMessageIndex: undefined | number,
+    public headers: LogHeader[],
+    public entries: ProtologEntry[],
+    public currentIndex: undefined | number,
+    public selectedIndex: undefined | number,
+    public scrollToIndex: undefined | number,
   ) {}
 
-  static EMPTY = new UiData([], [], [], [], undefined, undefined);
+  isFetchingData = false;
+  checkScrollViewport = false;
+
+  static createEmpty(): UiData {
+    return new UiData([], [], undefined, undefined, undefined);
+  }
+}
+
+export class ProtologEntry implements LogEntry {
+  readonly getPropertiesTree = undefined;
+  constructor(
+    public traceEntry: TraceEntry<HierarchyTreeNode>,
+    public fields: LogField[],
+  ) {}
 }

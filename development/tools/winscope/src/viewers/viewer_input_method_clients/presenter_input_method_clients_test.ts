@@ -15,14 +15,20 @@
  */
 
 import {HierarchyTreeBuilder} from 'test/unit/hierarchy_tree_builder';
-import {TraceType} from 'trace/trace_type';
-import {PropertySource} from 'trace/tree_node/property_tree_node';
-import {executePresenterInputMethodTests} from 'viewers/common/presenter_input_method_test_utils';
+import {TraceType} from 'trace_api/trace_type';
+import {HierarchyTreeNode} from 'tree_node/hierarchy_tree_node';
+import {PropertySource} from 'tree_node/property_tree_node';
+import {AbstractPresenterInputMethodTest} from 'viewers/common/abstract_presenter_input_method_test';
 import {PresenterInputMethodClients} from './presenter_input_method_clients';
 
-describe('PresenterInputMethodClients', () => {
-  describe('PresenterInputMethod tests:', () => {
-    const selectedTree = new HierarchyTreeBuilder()
+class PresenterInputMethodClientsTest extends AbstractPresenterInputMethodTest {
+  protected override readonly PresenterInputMethod =
+    PresenterInputMethodClients;
+  protected override readonly imeTraceType = TraceType.INPUT_METHOD_CLIENTS;
+  protected override readonly numberOfNestedChildren = 2;
+
+  override getSelectedNode(): HierarchyTreeNode {
+    return new HierarchyTreeBuilder()
       .setId('InputMethodClients')
       .setName('entry')
       .setProperties({where: 'location', elapsedNanos: 0})
@@ -32,14 +38,9 @@ describe('PresenterInputMethodClients', () => {
         source: PropertySource.DEFAULT,
       })
       .build();
+  }
+}
 
-    executePresenterInputMethodTests(
-      selectedTree,
-      'where',
-      [2, 1, 3],
-      true,
-      PresenterInputMethodClients,
-      TraceType.INPUT_METHOD_CLIENTS,
-    );
-  });
+describe('PresenterInputMethodClients', () => {
+  new PresenterInputMethodClientsTest().execute();
 });

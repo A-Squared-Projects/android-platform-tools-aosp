@@ -17,8 +17,11 @@
 #pragma once
 
 #include <input/InputDevice.h>
+#include <input/KeyboardClassifier.h>
 #include "NotifyArgs.h"
 
+#include <list>
+#include <string>
 #include <vector>
 
 namespace android {
@@ -28,7 +31,6 @@ class InputDevice;
 class InputListenerInterface;
 class InputMapper;
 class InputReaderPolicyInterface;
-class PointerControllerInterface;
 struct StylusState;
 
 /* Internal interface used by individual input devices to access global input device state
@@ -39,14 +41,13 @@ public:
     InputReaderContext() {}
     virtual ~InputReaderContext() {}
 
+    virtual std::string dump() = 0;
+
     virtual void updateGlobalMetaState() = 0;
     virtual int32_t getGlobalMetaState() = 0;
 
     virtual void disableVirtualKeysUntil(nsecs_t time) = 0;
     virtual bool shouldDropVirtualKey(nsecs_t now, int32_t keyCode, int32_t scanCode) = 0;
-
-    virtual void fadePointer() = 0;
-    virtual std::shared_ptr<PointerControllerInterface> getPointerController(int32_t deviceId) = 0;
 
     virtual void requestTimeoutAtTime(nsecs_t when) = 0;
     virtual int32_t bumpGeneration() = 0;
@@ -58,7 +59,7 @@ public:
     virtual InputReaderPolicyInterface* getPolicy() = 0;
     virtual EventHubInterface* getEventHub() = 0;
 
-    virtual int32_t getNextId() = 0;
+    virtual int32_t getNextId() const = 0;
 
     virtual void updateLedMetaState(int32_t metaState) = 0;
     virtual int32_t getLedMetaState() = 0;
@@ -68,6 +69,8 @@ public:
 
     virtual void setLastKeyDownTimestamp(nsecs_t when) = 0;
     virtual nsecs_t getLastKeyDownTimestamp() = 0;
+
+    virtual KeyboardClassifier& getKeyboardClassifier() = 0;
 };
 
 } // namespace android

@@ -21,6 +21,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <android/input.h>
@@ -40,7 +41,7 @@ public:
     explicit CapturedTouchpadEventConverter(InputReaderContext& readerContext,
                                             const InputDeviceContext& deviceContext,
                                             MultiTouchMotionAccumulator& motionAccumulator,
-                                            int32_t deviceId);
+                                            DeviceId deviceId);
     std::string dump() const;
     void populateMotionRanges(InputDeviceInfo& info) const;
     void reset();
@@ -49,16 +50,18 @@ public:
 private:
     void tryAddRawMotionRange(InputDeviceInfo& deviceInfo, int32_t androidAxis,
                               int32_t evdevAxis) const;
+    void tryAddRawMotionRangeWithRelative(InputDeviceInfo& deviceInfo, int32_t androidAxis,
+                                          int32_t androidRelativeAxis, int32_t evdevAxis) const;
     [[nodiscard]] std::list<NotifyArgs> sync(nsecs_t when, nsecs_t readTime);
     [[nodiscard]] NotifyMotionArgs makeMotionArgs(nsecs_t when, nsecs_t readTime, int32_t action,
                                                   const std::vector<PointerCoords>& coords,
                                                   const std::vector<PointerProperties>& properties,
                                                   int32_t actionButton = 0, int32_t flags = 0);
-    PointerCoords makePointerCoordsForSlot(const MultiTouchMotionAccumulator::Slot& slot) const;
+    PointerCoords makePointerCoordsForSlot(size_t slotNumber);
     int32_t allocatePointerIdToSlot(size_t slotNumber);
     void freePointerIdForSlot(size_t slotNumber);
 
-    const int32_t mDeviceId;
+    const DeviceId mDeviceId;
     InputReaderContext& mReaderContext;
     const InputDeviceContext& mDeviceContext;
     CursorButtonAccumulator mCursorButtonAccumulator;
@@ -76,8 +79,7 @@ private:
 
     std::bitset<MAX_POINTER_ID + 1> mPointerIdsInUse;
     std::map<size_t, int32_t> mPointerIdForSlotNumber;
-
-    static constexpr uint32_t SOURCE = AINPUT_SOURCE_TOUCHPAD;
+    std::map<size_t, std::pair<float, float>> mPreviousCoordsForSlotNumber;
 };
 
 } // namespace android

@@ -19,18 +19,19 @@ package {
 
 python_defaults {
     name: "torq_defaults",
-    srcs: [
-        "torq.py",
-        "command.py",
-        "command_executor.py",
-        "validation_error.py",
-    ],
+    srcs: ["src/**/*.py"],
 }
 
 python_binary_host {
     name: "torq",
-    main: "torq.py",
+    main: "main.py",
+    srcs: ["main.py"],
     defaults: ["torq_defaults"],
+}
+
+python_library_host {
+    name: "torq_test_lib",
+    srcs: ["tests/test_utils.py"],
 }
 
 python_test_host {
@@ -38,16 +39,100 @@ python_test_host {
     main: "tests/torq_unit_test.py",
     srcs: ["tests/torq_unit_test.py"],
     defaults: ["torq_defaults"],
-    version: {
-        py2: {
-            enabled: false,
-            embedded_launcher: false,
-        },
-        py3: {
-            enabled: true,
-            embedded_launcher: false,
-        },
+    libs: ["torq_test_lib"],
+    embedded_launcher: false,
+    test_options: {
+        unit_test: true,
     },
+}
+
+python_test_host {
+    name: "device_unit_test",
+    main: "tests/device_unit_test.py",
+    srcs: ["tests/device_unit_test.py"],
+    defaults: ["torq_defaults"],
+    embedded_launcher: false,
+    test_options: {
+        unit_test: true,
+    },
+}
+
+python_test_host {
+    name: "config_builder_unit_test",
+    main: "tests/config_builder_unit_test.py",
+    srcs: ["tests/config_builder_unit_test.py"],
+    defaults: ["torq_defaults"],
+    embedded_launcher: false,
+    test_options: {
+        unit_test: true,
+    },
+}
+
+python_test_host {
+    name: "profiler_command_executor_unit_test",
+    main: "tests/profiler_command_executor_unit_test.py",
+    srcs: ["tests/profiler_command_executor_unit_test.py"],
+    defaults: ["torq_defaults"],
+    libs: ["torq_test_lib"],
+    embedded_launcher: false,
+    test_options: {
+        unit_test: true,
+    },
+}
+
+python_test_host {
+    name: "config_command_executor_unit_test",
+    main: "tests/config_command_executor_unit_test.py",
+    srcs: ["tests/config_command_executor_unit_test.py"],
+    defaults: ["torq_defaults"],
+    libs: ["torq_test_lib"],
+    embedded_launcher: false,
+    test_options: {
+        unit_test: true,
+    },
+}
+
+python_test_host {
+    name: "validate_simpleperf_unit_test",
+    main: "tests/validate_simpleperf_unit_test.py",
+    srcs: ["tests/validate_simpleperf_unit_test.py"],
+    defaults: ["torq_defaults"],
+    libs: ["torq_test_lib"],
+    embedded_launcher: false,
+    test_options: {
+        unit_test: true,
+    },
+}
+
+python_test_host {
+    name: "utils_unit_test",
+    main: "tests/utils_unit_test.py",
+    srcs: ["tests/utils_unit_test.py"],
+    defaults: ["torq_defaults"],
+    embedded_launcher: false,
+    test_options: {
+        unit_test: true,
+    },
+}
+
+python_test_host {
+    name: "open_ui_unit_test",
+    main: "tests/open_ui_unit_test.py",
+    srcs: ["tests/open_ui_unit_test.py"],
+    defaults: ["torq_defaults"],
+    embedded_launcher: false,
+    test_options: {
+        unit_test: true,
+    },
+}
+
+python_test_host {
+    name: "vm_unit_test",
+    main: "tests/vm_unit_test.py",
+    srcs: ["tests/vm_unit_test.py"],
+    defaults: ["torq_defaults"],
+    libs: ["torq_test_lib"],
+    embedded_launcher: false,
     test_options: {
         unit_test: true,
     },

@@ -83,26 +83,30 @@ cc_defaults {
         "aconfig_lib_cc_static_link.defaults",
         "dumpstate_cflag_defaults",
     ],
+    // See README.md: "Dumpstate philosophy: exec not link"
+    // Do not add things here - keep dumpstate as simple as possible and exec where possible.
     shared_libs: [
         "android.hardware.dumpstate@1.0",
         "android.hardware.dumpstate@1.1",
         "android.hardware.dumpstate-V1-ndk",
+        "android.os.flags-aconfig-cc-host",
         "libziparchive",
         "libbase",
-        "libbinder",
-        "libbinder_ndk",
+        "libbinder", // BAD: dumpstate should not link code directly, should only exec binaries
+        "libbinder_ndk", // BAD: dumpstate should not link code directly, should only exec binaries
         "libcrypto",
         "libcutils",
         "libdebuggerd_client",
         "libdumpstateaidl",
         "libdumpstateutil",
         "libdumputils",
+        "libgui",
         "libhardware_legacy",
-        "libhidlbase",
+        "libhidlbase", // BAD: dumpstate should not link code directly, should only exec binaries
         "liblog",
         "libutils",
-        "libvintf",
-        "libbinderdebug",
+        "libvintf", // BAD: dumpstate should not link code directly, should only exec binaries
+        "libbinderdebug", // BAD: dumpstate should not link code directly, should only exec binaries
         "packagemanager_aidl-cpp",
         "server_configurable_flags",
         "device_policy_aconfig_flags_c_lib",
@@ -115,7 +119,14 @@ cc_defaults {
         "libdumpsys",
         "libserviceutils",
         "android.tracing.flags_c_lib",
+        "perfetto_flags_c_lib",
     ],
+}
+
+prebuilt_etc {
+    name: "default_screenshot",
+    src: "res/default_screenshot.png",
+    filename_from_src: true,
 }
 
 cc_binary {
@@ -128,8 +139,10 @@ cc_binary {
         "main.cpp",
     ],
     required: [
+        "alloctop",
         "atrace",
         "bugreport_procdump",
+        "default_screenshot",
         "dmabuf_dump",
         "ip",
         "iptables",

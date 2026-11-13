@@ -28,6 +28,8 @@ Flags:
 -a : Uses "adb reboot" (instead of "adb shell su root svc power reboot") command to reboot
 -b : If set grabs bootchart
 -w : If set grabs carwatchdog perf stats
+-s : Set the device serial for adb
+-l : Perform login flow and capture login stats too
 '
     exit
 }
@@ -53,20 +55,30 @@ fi
 echo "RESULTS_DIR=$RESULTS_DIR"
 mkdir -p $RESULTS_DIR
 
-ADB_REBOOT_FLAG=""
+REBOOT_FLAG=""
 BOOTCHART_FLAG=""
 CARWATCHDOG_FLAG=""
+PY_SERIAL_FLAG=""
+ADB_SERIAL_FLAG=""
+LOGIN_FLAG=""
 
-while getopts 'abw' OPTION; do
+while getopts 'abws:l' OPTION; do
   case "$OPTION" in
     a)
-      ADB_REBOOT_FLAG="-a"
+      REBOOT_FLAG="-a"
       ;;
     b)
       BOOTCHART_FLAG="-b"
       ;;
     w)
       CARWATCHDOG_FLAG="-W"
+      ;;
+    s)
+      PY_SERIAL_FLAG="--serial ${OPTARG}"
+      ADB_SERIAL_FLAG="-s ${OPTARG}"
+      ;;
+    l)
+      LOGIN_FLAG="--login"
       ;;
     ?)
       echo 'Error: Invalid flag set'
@@ -77,7 +89,7 @@ done
 shift "$(($OPTIND -1))"
 
 
-adb shell 'touch /data/bootchart/enabled'
+adb $ADB_SERIAL_FLAG shell 'touch /data/bootchart/enabled'
 
 if [[ -z $LOOPS ]]; then
 	LOOPS=1
@@ -92,8 +104,8 @@ for (( l=$START; l<=$LOOPS; l++ )); do
     SECONDS=0
     mkdir $RESULTS_DIR/$l
     $SCRIPT_DIR/bootanalyze.py -c $CONFIG_YMAL -G 4M -r \
-        $ADB_REBOOT_FLAG $BOOTCHART_FLAG $CARWATCHDOG_FLAG \
-        -o "$RESULTS_DIR/$l" 1> "$RESULTS_DIR/$l/boot.txt"
+        $PY_SERIAL_FLAG $REBOOT_FLAG $BOOTCHART_FLAG $CARWATCHDOG_FLAG \
+        $LOGIN_FLAG -o "$RESULTS_DIR/$l" 1> "$RESULTS_DIR/$l/boot.txt"
     if [[ $? -ne 0 ]]; then
         echo "bootanalyze.py failed"
         exit 1

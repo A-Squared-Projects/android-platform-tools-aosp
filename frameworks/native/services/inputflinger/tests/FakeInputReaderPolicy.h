@@ -25,12 +25,17 @@
 
 #include <InputDevice.h>
 #include <InputReaderBase.h>
+#include <android/os/PointerCaptureMode.h>
 
-#include "FakePointerController.h"
 #include "input/DisplayViewport.h"
+#include "input/Input.h"
 #include "input/InputDevice.h"
 
 namespace android {
+
+DisplayViewport createViewport(ui::LogicalDisplayId displayId, int32_t width, int32_t height,
+                               ui::Rotation orientation, bool isActive, const std::string& uniqueId,
+                               std::optional<uint8_t> physicalPort, ViewportType type);
 
 class FakeInputReaderPolicy : public InputReaderPolicyInterface {
 protected:
@@ -41,63 +46,64 @@ public:
 
     void assertInputDevicesChanged();
     void assertInputDevicesNotChanged();
-    void assertStylusGestureNotified(int32_t deviceId);
+    void assertStylusGestureNotified(DeviceId deviceId);
     void assertStylusGestureNotNotified();
+    void assertTouchpadHardwareStateNotified();
+    void assertTouchpadThreeFingerTapNotified();
 
     virtual void clearViewports();
     std::optional<DisplayViewport> getDisplayViewportByUniqueId(const std::string& uniqueId) const;
     std::optional<DisplayViewport> getDisplayViewportByType(ViewportType type) const;
     std::optional<DisplayViewport> getDisplayViewportByPort(uint8_t displayPort) const;
     void addDisplayViewport(DisplayViewport viewport);
-    void addDisplayViewport(int32_t displayId, int32_t width, int32_t height,
-                            ui::Rotation orientation, bool isActive, const std::string& uniqueId,
-                            std::optional<uint8_t> physicalPort, ViewportType type);
     bool updateViewport(const DisplayViewport& viewport);
     void addExcludedDeviceName(const std::string& deviceName);
     void addInputPortAssociation(const std::string& inputPort, uint8_t displayPort);
     void addDeviceTypeAssociation(const std::string& inputPort, const std::string& type);
     void addInputUniqueIdAssociation(const std::string& inputUniqueId,
                                      const std::string& displayUniqueId);
-    void addKeyboardLayoutAssociation(const std::string& inputUniqueId,
+    void addDeviceDescriptorToDisplayUniqueIdAssociation(const std::string& inputDeviceDescriptor,
+                                                         const std::string& displayUniqueId);
+    void addKeyboardLayoutAssociation(const std::string& inputPort,
                                       const KeyboardLayoutInfo& layoutInfo);
-    void addDisabledDevice(int32_t deviceId);
-    void removeDisabledDevice(int32_t deviceId);
-    void setPointerController(std::shared_ptr<FakePointerController> controller);
+    void addVirtualDevice(const std::string& inputPort);
+    void removeVirtualDevice(const std::string& inputPort);
+    void addDisabledDevice(DeviceId deviceId);
+    void removeDisabledDevice(DeviceId deviceId);
     const InputReaderConfiguration& getReaderConfiguration() const;
     const std::vector<InputDeviceInfo> getInputDevices() const;
     TouchAffineTransformation getTouchAffineTransformation(const std::string& inputDeviceDescriptor,
                                                            ui::Rotation surfaceRotation);
     void setTouchAffineTransformation(const TouchAffineTransformation t);
-    PointerCaptureRequest setPointerCapture(bool enabled);
-    void setShowTouches(bool enabled);
-    void setDefaultPointerDisplayId(int32_t pointerDisplayId);
+    PointerCaptureRequest setPointerCapture(PointerCaptureMode mode, const sp<IBinder>& window);
+    void setDefaultPointerDisplayId(ui::LogicalDisplayId pointerDisplayId);
     void setPointerGestureEnabled(bool enabled);
-    float getPointerGestureMovementSpeedRatio();
-    float getPointerGestureZoomSpeedRatio();
     void setVelocityControlParams(const VelocityControlParameters& params);
     void setStylusButtonMotionEventsEnabled(bool enabled);
     void setStylusPointerIconEnabled(bool enabled);
     void setIsInputMethodConnectionActive(bool active);
     bool isInputMethodConnectionActive() override;
     std::optional<DisplayViewport> getPointerViewportForAssociatedDisplay(
-            int32_t associatedDisplayId) override;
+            ui::LogicalDisplayId associatedDisplayId) override;
 
 private:
     void getReaderConfiguration(InputReaderConfiguration* outConfig) override;
-    std::shared_ptr<PointerControllerInterface> obtainPointerController(
-            int32_t /*deviceId*/) override;
     void notifyInputDevicesChanged(const std::vector<InputDeviceInfo>& inputDevices) override;
+    void notifyTouchpadHardwareState(const SelfContainedHardwareState& schs,
+                                     DeviceId deviceId) override;
+    void notifyTouchpadGestureInfo(GestureType type, DeviceId deviceId) override;
+    void notifyTouchpadThreeFingerTap() override;
     std::shared_ptr<KeyCharacterMap> getKeyboardLayoutOverlay(
             const InputDeviceIdentifier&, const std::optional<KeyboardLayoutInfo>) override;
     std::string getDeviceAlias(const InputDeviceIdentifier&) override;
-    void waitForInputDevices(std::function<void(bool)> processDevicesChanged);
-    void notifyStylusGestureStarted(int32_t deviceId, nsecs_t eventTime) override;
+    void waitForInputDevices(std::function<void(bool)> processDevicesChanged,
+                             std::chrono::milliseconds timeout);
+    void notifyStylusGestureStarted(DeviceId deviceId, nsecs_t eventTime) override;
 
     mutable std::mutex mLock;
     std::condition_variable mDevicesChangedCondition;
 
     InputReaderConfiguration mConfig;
-    std::shared_ptr<FakePointerController> mPointerController;
     std::vector<InputDeviceInfo> mInputDevices GUARDED_BY(mLock);
     bool mInputDevicesChanged GUARDED_BY(mLock){false};
     std::vector<DisplayViewport> mViewports;
@@ -106,6 +112,12 @@ private:
 
     std::condition_variable mStylusGestureNotifiedCondition;
     std::optional<DeviceId> mDeviceIdOfNotifiedStylusGesture GUARDED_BY(mLock){};
+
+    std::condition_variable mTouchpadHardwareStateNotified;
+    std::optional<SelfContainedHardwareState> mTouchpadHardwareState GUARDED_BY(mLock){};
+
+    std::condition_variable mTouchpadThreeFingerTapNotified;
+    bool mTouchpadThreeFingerTapHasBeenReported{false};
 
     uint32_t mNextPointerCaptureSequenceNumber{0};
 };

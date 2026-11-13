@@ -142,35 +142,37 @@ static inline AChoreographer* Choreographer_to_AChoreographer(Choreographer* cho
 }
 
 AChoreographer* AChoreographer_getInstance() {
-    return Choreographer_to_AChoreographer(Choreographer::getForThread());
+    return Choreographer_to_AChoreographer(Choreographer::getForThread().get());
 }
 
 void AChoreographer_postFrameCallback(AChoreographer* choreographer,
                                       AChoreographer_frameCallback callback, void* data) {
     AChoreographer_to_Choreographer(choreographer)
-            ->postFrameCallbackDelayed(callback, nullptr, nullptr, data, 0);
+            ->postFrameCallbackDelayed(callback, nullptr, nullptr, data, 0, CALLBACK_ANIMATION);
 }
 void AChoreographer_postFrameCallbackDelayed(AChoreographer* choreographer,
                                              AChoreographer_frameCallback callback, void* data,
                                              long delayMillis) {
     AChoreographer_to_Choreographer(choreographer)
-            ->postFrameCallbackDelayed(callback, nullptr, nullptr, data, ms2ns(delayMillis));
+            ->postFrameCallbackDelayed(callback, nullptr, nullptr, data, ms2ns(delayMillis),
+                                       CALLBACK_ANIMATION);
 }
 void AChoreographer_postVsyncCallback(AChoreographer* choreographer,
                                       AChoreographer_vsyncCallback callback, void* data) {
     AChoreographer_to_Choreographer(choreographer)
-            ->postFrameCallbackDelayed(nullptr, nullptr, callback, data, 0);
+            ->postFrameCallbackDelayed(nullptr, nullptr, callback, data, 0, CALLBACK_ANIMATION);
 }
 void AChoreographer_postFrameCallback64(AChoreographer* choreographer,
                                         AChoreographer_frameCallback64 callback, void* data) {
     AChoreographer_to_Choreographer(choreographer)
-            ->postFrameCallbackDelayed(nullptr, callback, nullptr, data, 0);
+            ->postFrameCallbackDelayed(nullptr, callback, nullptr, data, 0, CALLBACK_ANIMATION);
 }
 void AChoreographer_postFrameCallbackDelayed64(AChoreographer* choreographer,
                                                AChoreographer_frameCallback64 callback, void* data,
                                                uint32_t delayMillis) {
     AChoreographer_to_Choreographer(choreographer)
-            ->postFrameCallbackDelayed(nullptr, callback, nullptr, data, ms2ns(delayMillis));
+            ->postFrameCallbackDelayed(nullptr, callback, nullptr, data, ms2ns(delayMillis),
+                                       CALLBACK_ANIMATION);
 }
 void AChoreographer_registerRefreshRateCallback(AChoreographer* choreographer,
                                                 AChoreographer_refreshRateCallback callback,
@@ -236,13 +238,17 @@ int64_t AChoreographerFrameCallbackData_getFrameTimelineDeadlineNanos(
 }
 
 AChoreographer* AChoreographer_create() {
-    Choreographer* choreographer = new Choreographer(nullptr);
+    // Increments default strongRef count on construction, will be decremented on
+    // function exit.
+    auto choreographer = sp<Choreographer>::make(nullptr);
     status_t result = choreographer->initialize();
     if (result != OK) {
         ALOGW("Failed to initialize");
         return nullptr;
     }
-    return Choreographer_to_AChoreographer(choreographer);
+    // Will be decremented and destroyed by AChoreographer_destroy
+    choreographer->incStrong((void*)AChoreographer_create);
+    return Choreographer_to_AChoreographer(choreographer.get());
 }
 
 void AChoreographer_destroy(AChoreographer* choreographer) {
@@ -250,7 +256,7 @@ void AChoreographer_destroy(AChoreographer* choreographer) {
         return;
     }
 
-    delete AChoreographer_to_Choreographer(choreographer);
+    AChoreographer_to_Choreographer(choreographer)->decStrong((void*)AChoreographer_create);
 }
 
 int AChoreographer_getFd(const AChoreographer* choreographer) {

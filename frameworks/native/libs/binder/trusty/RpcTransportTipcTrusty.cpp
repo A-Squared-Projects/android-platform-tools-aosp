@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "RpcTransportTipcTrusty"
+#define LOG_TAG "libbinder.RpcTransportTipcTrusty"
 
 #include <inttypes.h>
 #include <trusty_ipc.h>
@@ -25,7 +25,10 @@
 
 #include "../FdTrigger.h"
 #include "../RpcState.h"
+#include "../RpcTransportUtils.h"
 #include "TrustyStatus.h"
+
+constexpr size_t kWaitTimeoutMsec = 10'000;
 
 namespace android {
 
@@ -47,73 +50,143 @@ public:
         return mHaveMessage ? OK : WOULD_BLOCK;
     }
 
+    void moveMsgStart(ipc_msg_t* msg, size_t msg_size, size_t offset) {
+        LOG_ALWAYS_FATAL_IF(offset > msg_size, "tried to move message past its end %zd>%zd", offset,
+                            msg_size);
+        while (true) {
+            if (offset == 0) {
+                break;
+            }
+            if (offset >= msg->iov[0].iov_len) {
+                // Move to the next iov, this one was sent already
+                offset -= msg->iov[0].iov_len;
+                msg->iov++;
+                msg->num_iov -= 1;
+            } else {
+                // We need to move the base of the current iov
+                msg->iov[0].iov_len -= offset;
+                msg->iov[0].iov_base = static_cast<char*>(msg->iov[0].iov_base) + offset;
+                offset = 0;
+            }
+        }
+        // We only send handles on the first message. This can be changed in the future if we want
+        // to send more handles than the maximum per message limit (which would require sending
+        // multiple messages). The current code makes sure that we send less handles than the
+        // maximum trusty allows.
+        msg->num_handles = 0;
+    }
+
+    status_t sendTrustyMsg(ipc_msg_t* msg, size_t msg_size) {
+        do {
+            ssize_t rc = send_msg(mSocket.fd.get(), msg);
+            if (rc == ERR_NOT_ENOUGH_BUFFER) {
+                // Peer is blocked, wait until it unblocks.
+                // TODO: when tipc supports a send-unblocked handler,
+                // save the message here in a queue and retry it asynchronously
+                // when the handler gets called by the library
+                uevent uevt;
+                do {
+                    rc = ::wait(mSocket.fd.get(), &uevt, kWaitTimeoutMsec);
+                    if (rc < 0) {
+                        return statusFromTrusty(rc);
+                    }
+                    if (uevt.event & IPC_HANDLE_POLL_HUP) {
+                        return DEAD_OBJECT;
+                    }
+                } while (!(uevt.event & IPC_HANDLE_POLL_SEND_UNBLOCKED));
+
+                // Retry the send, it should go through this time because
+                // sending is now unblocked
+                rc = send_msg(mSocket.fd.get(), msg);
+            }
+            if (rc < 0) {
+                return statusFromTrusty(rc);
+            }
+            size_t sent_bytes = static_cast<size_t>(rc);
+            if (sent_bytes < msg_size) {
+                moveMsgStart(msg, msg_size, static_cast<size_t>(sent_bytes));
+                msg_size -= sent_bytes;
+            } else {
+                LOG_ALWAYS_FATAL_IF(static_cast<size_t>(rc) != msg_size,
+                                    "Sent the wrong number of bytes %zd!=%zu", rc, msg_size);
+                break;
+            }
+        } while (true);
+        return OK;
+    }
+
     status_t interruptableWriteFully(
-            FdTrigger* /*fdTrigger*/, iovec* iovs, int niovs,
-            const std::optional<SmallFunction<status_t()>>& /*altPoll*/,
+            FdTrigger* fdTrigger, iovec* iovs, int niovs,
+            const std::optional<SmallFunction<status_t()>>& /* altPoll */,
             const std::vector<std::variant<unique_fd, borrowed_fd>>* ancillaryFds) override {
         if (niovs < 0) {
             return BAD_VALUE;
         }
 
-        size_t size = 0;
-        for (int i = 0; i < niovs; i++) {
-            size += iovs[i].iov_len;
-        }
+        auto writeFn = [&](iovec* iovs, size_t niovs) -> ssize_t {
+            // Collect the ancillary FDs.
+            handle_t msgHandles[IPC_MAX_MSG_HANDLES];
+            ipc_msg_t msg{
+                    .num_iov = 0,
+                    .iov = iovs,
+                    .num_handles = 0,
+                    .handles = nullptr,
+            };
 
-        handle_t msgHandles[IPC_MAX_MSG_HANDLES];
-        ipc_msg_t msg{
-                .num_iov = static_cast<uint32_t>(niovs),
-                .iov = iovs,
-                .num_handles = 0,
-                .handles = nullptr,
+            if (ancillaryFds != nullptr && !ancillaryFds->empty()) {
+                if (ancillaryFds->size() > IPC_MAX_MSG_HANDLES) {
+                    // This shouldn't happen because we check the FD count in RpcState.
+                    ALOGE("Saw too many file descriptors in RpcTransportCtxTipcTrusty: "
+                          "%zu (max is %u). Aborting session.",
+                          ancillaryFds->size(), IPC_MAX_MSG_HANDLES);
+                    return BAD_VALUE;
+                }
+
+                for (size_t i = 0; i < ancillaryFds->size(); i++) {
+                    msgHandles[i] = std::visit([](const auto& fd) { return fd.get(); },
+                                               ancillaryFds->at(i));
+                }
+
+                msg.num_handles = ancillaryFds->size();
+                msg.handles = msgHandles;
+            }
+
+            // Trusty currently has a message size limit, which will go away once we
+            // switch to vsock. The message is reassembled on the receiving side.
+            static const size_t maxMsgSize = VIRTIO_VSOCK_MSG_SIZE_LIMIT;
+            size_t niovsMsg;
+            size_t currSize = 0;
+            size_t cutSize = 0;
+            for (niovsMsg = 0; niovsMsg < (size_t)niovs; niovsMsg++) {
+                if (__builtin_add_overflow(currSize, iovs[niovsMsg].iov_len, &currSize)) {
+                    ALOGE("%s: iov_len add_overflow", __FUNCTION__);
+                    return NO_MEMORY;
+                }
+                if (currSize >= maxMsgSize) {
+                    // Truncate the last iov but restore it at the end
+                    // so the caller can continue where we left off.
+                    cutSize = currSize - maxMsgSize;
+                    iovs[niovsMsg].iov_len -= cutSize;
+                    niovsMsg++;
+                    break;
+                }
+            }
+            msg.num_iov = static_cast<uint32_t>(niovsMsg);
+
+            auto rc = sendTrustyMsg(&msg, currSize - cutSize);
+            if (niovsMsg > 0) {
+                iovs[niovsMsg - 1].iov_len += cutSize;
+            }
+            if (rc == NO_ERROR) {
+                return currSize - cutSize;
+            } else {
+                return rc;
+            }
         };
 
-        if (ancillaryFds != nullptr && !ancillaryFds->empty()) {
-            if (ancillaryFds->size() > IPC_MAX_MSG_HANDLES) {
-                // This shouldn't happen because we check the FD count in RpcState.
-                ALOGE("Saw too many file descriptors in RpcTransportCtxTipcTrusty: "
-                      "%zu (max is %u). Aborting session.",
-                      ancillaryFds->size(), IPC_MAX_MSG_HANDLES);
-                return BAD_VALUE;
-            }
-
-            for (size_t i = 0; i < ancillaryFds->size(); i++) {
-                msgHandles[i] =
-                        std::visit([](const auto& fd) { return fd.get(); }, ancillaryFds->at(i));
-            }
-
-            msg.num_handles = ancillaryFds->size();
-            msg.handles = msgHandles;
-        }
-
-        ssize_t rc = send_msg(mSocket.fd.get(), &msg);
-        if (rc == ERR_NOT_ENOUGH_BUFFER) {
-            // Peer is blocked, wait until it unblocks.
-            // TODO: when tipc supports a send-unblocked handler,
-            // save the message here in a queue and retry it asynchronously
-            // when the handler gets called by the library
-            uevent uevt;
-            do {
-                rc = ::wait(mSocket.fd.get(), &uevt, INFINITE_TIME);
-                if (rc < 0) {
-                    return statusFromTrusty(rc);
-                }
-                if (uevt.event & IPC_HANDLE_POLL_HUP) {
-                    return DEAD_OBJECT;
-                }
-            } while (!(uevt.event & IPC_HANDLE_POLL_SEND_UNBLOCKED));
-
-            // Retry the send, it should go through this time because
-            // sending is now unblocked
-            rc = send_msg(mSocket.fd.get(), &msg);
-        }
-        if (rc < 0) {
-            return statusFromTrusty(rc);
-        }
-        LOG_ALWAYS_FATAL_IF(static_cast<size_t>(rc) != size,
-                            "Sent the wrong number of bytes %zd!=%zu", rc, size);
-
-        return OK;
+        auto altPoll = []() -> status_t { return NO_ERROR; };
+        return interruptableReadOrWrite(mSocket, fdTrigger, iovs, niovs, writeFn, "tipc_send",
+                                        0 /* poll event, should never be used */, altPoll);
     }
 
     status_t interruptableReadFully(
@@ -154,7 +227,7 @@ public:
                     .num_iov = static_cast<uint32_t>(niovs),
                     .iov = iovs,
                     .num_handles = mMessageInfo.num_handles,
-                    .handles = haveHandles ? msgHandles : 0,
+                    .handles = haveHandles ? msgHandles : nullptr,
             };
             ssize_t rc = read_msg(mSocket.fd.get(), mMessageInfo.id, mMessageOffset, &msg);
             if (rc < 0) {
@@ -228,9 +301,9 @@ private:
             return OK;
         }
 
-        /* TODO: interruptible wait, maybe with a timeout??? */
+        /* TODO: interruptible wait? */
         uevent uevt;
-        rc = ::wait(mSocket.fd.get(), &uevt, wait ? INFINITE_TIME : 0);
+        rc = ::wait(mSocket.fd.get(), &uevt, wait ? kWaitTimeoutMsec : 0);
         if (rc < 0) {
             if (rc == ERR_TIMED_OUT && !wait) {
                 // If we timed out with wait==false, then there's no message

@@ -14,7 +14,12 @@
  * limitations under the License.
  */
 
+/**
+ * An interface for a segment on the timeline.
+ */
 export interface Segment {
   from: number;
   to: number;
+  unknownStart?: boolean;
+  unknownEnd?: boolean;
 }

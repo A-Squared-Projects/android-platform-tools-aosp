@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-import {ObjectUtils} from 'common/object_utils';
-import {StringUtils} from 'common/string_utils';
+import {setProperty} from 'common/object_utils';
+import {convertSnakeToCamelCase} from 'common/string_helpers';
 
 export type FakeProto = any;
 
@@ -32,11 +32,11 @@ export class FakeProtoBuilder {
     const keyCamelCase = key
       .split('.')
       .map((token) => {
-        return StringUtils.convertSnakeToCamelCase(token);
+        return convertSnakeToCamelCase(token);
       })
       .join('.');
     const value = this.makeValue(valueType, intValue, realValue, stringValue);
-    ObjectUtils.setProperty(this.proto, keyCamelCase, value);
+    setProperty(this.proto, keyCamelCase, value);
     return this;
   }
 

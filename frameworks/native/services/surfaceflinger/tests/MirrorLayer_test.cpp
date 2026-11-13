@@ -19,6 +19,8 @@
 #pragma clang diagnostic ignored "-Wconversion"
 
 #include <android-base/properties.h>
+#include <common/FlagManager.h>
+#include <gui/AidlUtil.h>
 #include <private/android_filesystem_config.h>
 #include "LayerTransactionTest.h"
 #include "utils/TransactionUtils.h"
@@ -77,6 +79,8 @@ TEST_F(MirrorLayerTest, MirrorColorLayer) {
             .setPosition(mirrorLayer, 500, 500)
             .show(mirrorLayer)
             .apply();
+
+    Transaction().setPosition(mirrorLayer, 550, 550).apply();
 
     {
         SCOPED_TRACE("Initial Mirror");
@@ -172,6 +176,7 @@ TEST_F(MirrorLayerTest, MirrorBufferLayer) {
             .show(mirrorLayer)
             .apply();
 
+    Transaction().setPosition(mirrorLayer, 550, 550).apply();
     {
         SCOPED_TRACE("Initial Mirror BufferQueueLayer");
         auto shot = screenshot();
@@ -263,6 +268,7 @@ TEST_F(MirrorLayerTest, InitialMirrorState) {
             .setLayer(mirrorLayer, INT32_MAX - 1)
             .apply();
 
+    Transaction().setPosition(mirrorLayer, 550, 550).apply();
     {
         SCOPED_TRACE("Offscreen Mirror");
         auto shot = screenshot();
@@ -313,8 +319,13 @@ TEST_F(MirrorLayerTest, OffscreenMirrorScreenshot) {
         ASSERT_NE(mirrorLayer, nullptr);
     }
 
+    sp<SurfaceControl> mirrorParent =
+            createLayer("Grandchild layer", 50, 50, ISurfaceComposerClient::eFXSurfaceBufferState);
+
     // Show the mirror layer, but don't reparent to a layer on screen.
-    Transaction().show(mirrorLayer).apply();
+    Transaction().reparent(mirrorLayer, mirrorParent).show(mirrorLayer).apply();
+
+    Transaction().setPosition(mirrorLayer, 50, 50).apply();
 
     {
         SCOPED_TRACE("Offscreen Mirror");
@@ -331,14 +342,43 @@ TEST_F(MirrorLayerTest, OffscreenMirrorScreenshot) {
         SCOPED_TRACE("Capture Mirror");
         // Capture just the mirror layer and child.
         LayerCaptureArgs captureArgs;
-        captureArgs.layerHandle = mirrorLayer->getHandle();
-        captureArgs.sourceCrop = childBounds;
+        captureArgs.layerHandle = mirrorParent->getHandle();
+        captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(childBounds);
         std::unique_ptr<ScreenCapture> shot;
         ScreenCapture::captureLayers(&shot, captureArgs);
         shot->expectSize(childBounds.width(), childBounds.height());
         shot->expectColor(Rect(0, 0, 50, 50), Color::BLUE);
         shot->expectColor(Rect(50, 50, 400, 400), Color::GREEN);
     }
+}
+
+TEST_F(MirrorLayerTest, MirrorLayerWithStopLayer) {
+    if (!FlagManager::getInstance().stop_layer()) {
+        GTEST_SKIP() << "skipping test - stop_layer feature flag disabled";
+    }
+
+    sp<SurfaceControl> grandchild =
+            createColorLayer("Grandchild layer", Color::BLUE, mChildLayer.get());
+    Transaction()
+            .setFlags(grandchild, layer_state_t::eLayerOpaque, layer_state_t::eLayerOpaque)
+            .setCrop(grandchild, Rect(0, 0, 200, 200))
+            .show(grandchild)
+            .apply();
+
+    // Mirror child with stop layer set to grandchild.
+    sp<SurfaceControl> mirrorLayer = mClient->mirrorSurface(mChildLayer.get(), grandchild.get());
+    ASSERT_NE(mirrorLayer, nullptr);
+
+    // Add mirrorLayer as child of mParentLayer so it's shown on the display
+    Transaction()
+            .reparent(mirrorLayer, mParentLayer)
+            .setPosition(mirrorLayer, 500, 500)
+            .show(mirrorLayer)
+            .apply();
+
+    auto shot = screenshot();
+    // Assert that we see the child's color and not the grandchild's color
+    shot->expectColor(Rect(550, 550, 600, 600), Color::GREEN);
 }
 
 } // namespace android

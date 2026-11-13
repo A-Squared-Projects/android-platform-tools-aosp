@@ -26,6 +26,7 @@
 #include <errno.h>
 #include <jni.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -64,8 +65,23 @@ static struct JniInvocationImpl g_impl;
 
 #define UNUSED(x) (x) = (x)
 
+static bool RunningOnVM() {
+  const char* on_vm = getenv("ART_TEST_ON_VM");
+  return on_vm != NULL && strcmp("true", on_vm) == 0;
+}
+
+static bool RunningOnSBC() {
+  const char* on_sbc = getenv("ART_TEST_ON_SBC");
+  return on_sbc != NULL && strcmp("true", on_sbc) == 0;
+}
+
 static bool IsDebuggable() {
 #ifdef __ANDROID__
+  if (RunningOnVM() || RunningOnSBC()) {
+    // VM/SBC environment is always treated as debuggable, as it has no system properties to query.
+    return true;
+  }
+
   char debuggable[PROP_VALUE_MAX] = {0};
   __system_property_get("ro.debuggable", debuggable);
   return strcmp(debuggable, "1") == 0;
@@ -130,20 +146,18 @@ const char* JniInvocationGetLibraryWith(const char* library,
       return library;
     }
 
-    // If the debug library is installed, use it.
-    // TODO(b/216099383): Do this in the test harness instead.
+    // Choose the system_preferred_library (if provided).
+    if (system_preferred_library != NULL && system_preferred_library[0] != '\0') {
+      return system_preferred_library;
+    }
+
+    // Try to use the debug library.
     struct stat st;
     if (stat(kDebugJniInvocationLibraryPath, &st) == 0) {
       return kDebugJniInvocationLibrary;
     } else if (errno != ENOENT) {
       ALOGW("Failed to stat %s: %s", kDebugJniInvocationLibraryPath, strerror(errno));
     }
-
-    // Choose the system_preferred_library (if provided).
-    if (system_preferred_library != NULL) {
-      return system_preferred_library;
-    }
-
   }
   return kDefaultJniInvocationLibrary;
 }

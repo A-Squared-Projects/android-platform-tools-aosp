@@ -19,8 +19,9 @@
 
 #include <system/window.h>
 
-#include <gui/ConsumerBase.h>
+#include <com_android_graphics_libgui_flags.h>
 #include <gui/BufferQueue.h>
+#include <gui/ConsumerBase.h>
 
 #include <utils/Vector.h>
 
@@ -30,6 +31,7 @@ namespace android {
 class BufferQueue;
 class GraphicBuffer;
 class String8;
+class Surface;
 
 /**
  * CpuConsumer is a BufferQueue consumer endpoint that allows direct CPU
@@ -91,8 +93,12 @@ class CpuConsumer : public ConsumerBase
 
     // Create a new CPU consumer. The maxLockedBuffers parameter specifies
     // how many buffers can be locked for user access at the same time.
-    CpuConsumer(const sp<IGraphicBufferConsumer>& bq,
-            size_t maxLockedBuffers, bool controlledByApp = false);
+    static std::tuple<sp<CpuConsumer>, sp<Surface>> create(size_t maxLockedBuffers,
+                                                           bool controlledByApp = false,
+                                                           bool isConsumerSurfaceFlinger = false);
+    static sp<CpuConsumer> create(const sp<IGraphicBufferConsumer>& bq, size_t maxLockedBuffers,
+                                  bool controlledByApp = false)
+            __attribute((deprecated("Prefer ctors that create their own surface and consumer.")));
 
     // Gets the next graphics buffer from the producer and locks it for CPU use,
     // filling out the passed-in locked buffer structure with the native pointer
@@ -112,6 +118,19 @@ class CpuConsumer : public ConsumerBase
     status_t unlockBuffer(const LockedBuffer &nativeBuffer);
 
   private:
+    friend class sp<CpuConsumer>;
+
+    CpuConsumer(size_t maxLockedBuffers, bool controlledByApp = false,
+                bool isConsumerSurfaceFlinger = false);
+
+    CpuConsumer(const sp<IGraphicBufferConsumer>& bq, size_t maxLockedBuffers,
+                bool controlledByApp = false)
+            __attribute((deprecated("Prefer ctors that create their own surface and consumer.")));
+
+    void initializeConsumer();
+
+    void onFirstRef() override;
+
     // Maximum number of buffers that can be locked at a time
     const size_t mMaxLockedBuffers;
 
@@ -126,10 +145,7 @@ class CpuConsumer : public ConsumerBase
         sp<GraphicBuffer> mGraphicBuffer;
         uintptr_t mLockedBufferId;
 
-        AcquiredBuffer() :
-                mSlot(BufferQueue::INVALID_BUFFER_SLOT),
-                mLockedBufferId(kUnusedId) {
-        }
+        AcquiredBuffer() : mSlot(BufferQueue::INVALID_BUFFER_SLOT), mLockedBufferId(kUnusedId) {}
 
         void reset() {
             mSlot = BufferQueue::INVALID_BUFFER_SLOT;

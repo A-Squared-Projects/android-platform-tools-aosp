@@ -34,7 +34,7 @@ use crate::report::{get_report_ts, pack_report};
 use crate::scheduler::Scheduler;
 
 pub fn err_to_binder_status(msg: Error) -> Status {
-    let msg = format!("{:#?}", msg);
+    let msg = format!("{msg:#?}");
     let msg = CString::new(msg).expect("Failed to convert to CString");
     Status::new_service_specific_error(1, Some(&msg))
 }
@@ -51,31 +51,17 @@ struct Lock {
 impl binder::Interface for ProfcollectdBinderService {}
 
 impl IProfCollectd for ProfcollectdBinderService {
-    fn schedule(&self) -> BinderResult<()> {
+    fn trace_system(&self, tag: &str, duration_ms: i32) -> BinderResult<()> {
         let lock = &mut *self.lock();
         lock.scheduler
-            .schedule_periodic(&lock.config)
-            .context("Failed to schedule collection.")
-            .map_err(err_to_binder_status)
-    }
-    fn terminate(&self) -> BinderResult<()> {
-        self.lock()
-            .scheduler
-            .terminate_periodic()
-            .context("Failed to terminate collection.")
-            .map_err(err_to_binder_status)
-    }
-    fn trace_system(&self, tag: &str) -> BinderResult<()> {
-        let lock = &mut *self.lock();
-        lock.scheduler
-            .trace_system(&lock.config, tag)
+            .trace_system(&lock.config, tag, duration_ms)
             .context("Failed to perform system-wide trace.")
             .map_err(err_to_binder_status)
     }
-    fn trace_process(&self, tag: &str, process: &str, duration: f32) -> BinderResult<()> {
+    fn trace_process(&self, tag: &str, process: &str, duration_ms: i32) -> BinderResult<()> {
         let lock = &mut *self.lock();
         lock.scheduler
-            .trace_process(&lock.config, tag, process, duration)
+            .trace_process(&lock.config, tag, process, duration_ms)
             .context("Failed to perform process trace.")
             .map_err(err_to_binder_status)
     }
@@ -104,7 +90,7 @@ impl IProfCollectd for ProfcollectdBinderService {
     ) -> BinderResult<()> {
         if self.lock().scheduler.is_provider_ready() {
             if let Err(e) = cb.onProviderReady() {
-                log::error!("Failed to call ProviderStatusCallback {:?}", e);
+                log::error!("Failed to call ProviderStatusCallback {e:?}");
             }
             return Ok(());
         }
@@ -113,7 +99,7 @@ impl IProfCollectd for ProfcollectdBinderService {
         self.lock().scheduler.register_provider_ready_callback(Box::new(move || {
             if let Ok(cb) = cb_binder.into_interface::<dyn IProviderStatusCallback>() {
                 if let Err(e) = cb.onProviderReady() {
-                    log::error!("Failed to call ProviderStatusCallback {:?}", e)
+                    log::error!("Failed to call ProviderStatusCallback {e:?}")
                 }
             } else {
                 log::error!("SpIBinder is not a IProviderStatusCallback.");
@@ -142,7 +128,7 @@ impl ProfcollectdBinderService {
             new_scheduler.clear_trace_log()?;
         }
 
-        // Clear profile reports out of rentention period.
+        // Clear profile reports out of retention period.
         for report in read_dir(*REPORT_OUTPUT_DIR)? {
             let report = report?.path();
             let report_name = report
@@ -152,16 +138,14 @@ impl ProfcollectdBinderService {
             let report_ts = get_report_ts(report_name);
             if let Err(e) = report_ts {
                 log::error!(
-                    "Cannot decode creation timestamp for report {}, caused by {}, deleting",
-                    report_name,
-                    e
+                    "Cannot decode creation timestamp for report {report_name}, caused by {e}, deleting"
                 );
                 remove_file(report)?;
                 continue;
             }
             let report_age = report_ts.unwrap().elapsed()?;
             if report_age > Duration::from_secs(REPORT_RETENTION_SECS) {
-                log::info!("Report {} past rentention period, deleting", report_name);
+                log::info!("Report {report_name} past retention period, deleting");
                 remove_file(report)?;
             }
         }

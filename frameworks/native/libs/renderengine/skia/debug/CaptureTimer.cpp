@@ -16,8 +16,6 @@
 
 #include "CaptureTimer.h"
 
-#undef LOG_TAG
-#define LOG_TAG "RenderEngine"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include "CommonPool.h"
@@ -30,7 +28,7 @@ namespace skia {
 
 void CaptureTimer::setTimeout(TimeoutCallback function, std::chrono::milliseconds delay) {
     this->clear = false;
-    CommonPool::post([=]() {
+    CommonPool::post([=,this]() {
         if (this->clear) return;
         std::this_thread::sleep_for(delay);
         if (this->clear) return;

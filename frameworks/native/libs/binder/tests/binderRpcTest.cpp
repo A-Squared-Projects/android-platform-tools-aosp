@@ -42,9 +42,18 @@
 #include <trusty/tipc.h>
 #endif // BINDER_RPC_TO_TRUSTY_TEST
 
+#include "../OS.h"
+#include "../RpcWireFormat.h"
 #include "../Utils.h"
 #include "binderRpcTestCommon.h"
 #include "binderRpcTestFixture.h"
+
+// TODO need to add IServiceManager.cpp/.h to libbinder_no_kernel
+#ifdef BINDER_WITH_KERNEL_IPC
+#include "android-base/logging.h"
+#include "android/binder_manager.h"
+#include "android/binder_rpc.h"
+#endif // BINDER_WITH_KERNEL_IPC
 
 using namespace std::chrono_literals;
 using namespace std::placeholders;
@@ -58,6 +67,9 @@ using testing::AssertionSuccess;
 
 namespace android {
 
+// TODO(b/428744319) - if we have a static version of libbinder_ndk, we should
+// be able to get rid of most of the uses of kEnableSharedLibs as it will use
+// the static libbinder sysmbols and not cause ODR violations
 #ifdef BINDER_TEST_NO_SHARED_LIBS
 constexpr bool kEnableSharedLibs = false;
 #else
@@ -67,6 +79,8 @@ constexpr bool kEnableSharedLibs = true;
 #ifdef BINDER_RPC_TO_TRUSTY_TEST
 constexpr char kTrustyIpcDevice[] = "/dev/trusty-ipc-dev0";
 #endif
+
+constexpr char kKnownAidlService[] = "activity";
 
 static std::string WaitStatusToString(int wstatus) {
     if (WIFEXITED(wstatus)) {
@@ -298,7 +312,8 @@ std::unique_ptr<ProcessSession> BinderRpc::createRpcTestSocketServerProcessEtc(
             }));
 
     BinderRpcTestServerConfig serverConfig;
-    serverConfig.numThreads = options.numThreads;
+    serverConfig.numMaxThreads = options.numMaxThreads;
+    serverConfig.numMinThreadsPerBinder = options.numMinThreadsPerBinder;
     serverConfig.socketType = static_cast<int32_t>(socketType);
     serverConfig.rpcSecurity = static_cast<int32_t>(rpcSecurity);
     serverConfig.serverVersion = serverVersion;
@@ -365,26 +380,57 @@ std::unique_ptr<ProcessSession> BinderRpc::createRpcTestSocketServerProcessEtc(
         session->setMaxOutgoingConnections(options.numOutgoingConnections);
         session->setFileDescriptorTransportMode(options.clientFileDescriptorTransportMode);
 
+        sockaddr_storage addr{};
+        socklen_t addrLen = 0;
+
         switch (socketType) {
-            case SocketType::PRECONNECTED:
+            case SocketType::PRECONNECTED: {
+                sockaddr_un addr_un{};
+                addr_un.sun_family = AF_UNIX;
+                strcpy(addr_un.sun_path, serverConfig.addr.c_str());
+                std::memcpy(&addr, &addr_un, sizeof(sockaddr_un));
+                addrLen = sizeof(sockaddr_un);
+
                 status = session->setupPreconnectedClient({}, [=]() {
                     return connectTo(UnixSocketAddress(serverConfig.addr.c_str()));
                 });
-                break;
+            } break;
             case SocketType::UNIX_RAW:
-            case SocketType::UNIX:
+            case SocketType::UNIX: {
+                sockaddr_un addr_un{};
+                addr_un.sun_family = AF_UNIX;
+                strcpy(addr_un.sun_path, serverConfig.addr.c_str());
+                std::memcpy(&addr, &addr_un, sizeof(sockaddr_un));
+                addrLen = sizeof(sockaddr_un);
+
                 status = session->setupUnixDomainClient(serverConfig.addr.c_str());
-                break;
+            } break;
             case SocketType::UNIX_BOOTSTRAP:
                 status = session->setupUnixDomainSocketBootstrapClient(
                         unique_fd(dup(bootstrapClientFd.get())));
                 break;
-            case SocketType::VSOCK:
+            case SocketType::VSOCK: {
+                sockaddr_vm addr_vm{
+                        .svm_family = AF_VSOCK,
+                        .svm_port = static_cast<unsigned int>(serverInfo.port),
+                        .svm_cid = VMADDR_CID_LOCAL,
+                };
+                std::memcpy(&addr, &addr_vm, sizeof(sockaddr_vm));
+                addrLen = sizeof(sockaddr_vm);
+
                 status = session->setupVsockClient(VMADDR_CID_LOCAL, serverInfo.port);
-                break;
-            case SocketType::INET:
-                status = session->setupInetClient("127.0.0.1", serverInfo.port);
-                break;
+            } break;
+            case SocketType::INET: {
+                const std::string ip_addr = "127.0.0.1";
+                sockaddr_in addr_in{};
+                addr_in.sin_family = AF_INET;
+                addr_in.sin_port = htons(serverInfo.port);
+                inet_aton(ip_addr.c_str(), &addr_in.sin_addr);
+                std::memcpy(&addr, &addr_in, sizeof(sockaddr_in));
+                addrLen = sizeof(sockaddr_in);
+
+                status = session->setupInetClient(ip_addr.c_str(), serverInfo.port);
+            } break;
             case SocketType::TIPC:
                 status = session->setupPreconnectedClient({}, [=]() {
 #ifdef BINDER_RPC_TO_TRUSTY_TEST
@@ -413,7 +459,7 @@ std::unique_ptr<ProcessSession> BinderRpc::createRpcTestSocketServerProcessEtc(
             break;
         }
         LOG_ALWAYS_FATAL_IF(status != OK, "Could not connect: %s", statusToString(status).c_str());
-        ret->sessions.push_back({session, session->getRootObject()});
+        ret->sessions.push_back({session, session->getRootObject(), addr, addrLen});
     }
     return ret;
 }
@@ -423,9 +469,9 @@ TEST_P(BinderRpc, ThreadPoolGreaterThanEqualRequested) {
         GTEST_SKIP() << "This test requires multiple threads";
     }
 
-    constexpr size_t kNumThreads = 10;
+    constexpr size_t kNumThreads = 5;
 
-    auto proc = createRpcTestSocketServerProcess({.numThreads = kNumThreads});
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = kNumThreads});
 
     EXPECT_OK(proc.rootIface->lock());
 
@@ -468,11 +514,11 @@ static void testThreadPoolOverSaturated(sp<IBinderRpcTest> iface, size_t numCall
 
     EXPECT_GE(epochMsAfter, epochMsBefore + 2 * sleepMs);
 
-    // Potential flake, but make sure calls are handled in parallel. Due
-    // to past flakes, this only checks that the amount of time taken has
-    // some parallelism. Other tests such as ThreadPoolGreaterThanEqualRequested
-    // check this more exactly.
-    EXPECT_LE(epochMsAfter, epochMsBefore + (numCalls - 1) * sleepMs);
+    // b/272429574, b/365294257
+    // This flakes too much to test. Parallelization is tested
+    // in ThreadPoolGreaterThanEqualRequested and other tests.
+    // Test to make sure calls are handled in parallel.
+    // EXPECT_LE(epochMsAfter, epochMsBefore + (numCalls - 1) * sleepMs);
 }
 
 TEST_P(BinderRpc, ThreadPoolOverSaturated) {
@@ -482,10 +528,9 @@ TEST_P(BinderRpc, ThreadPoolOverSaturated) {
 
     constexpr size_t kNumThreads = 10;
     constexpr size_t kNumCalls = kNumThreads + 3;
-    auto proc = createRpcTestSocketServerProcess({.numThreads = kNumThreads});
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = kNumThreads});
 
-    // b/272429574 - below 500ms, the test fails
-    testThreadPoolOverSaturated(proc.rootIface, kNumCalls, 500 /*ms*/);
+    testThreadPoolOverSaturated(proc.rootIface, kNumCalls, 200 /*ms*/);
 }
 
 TEST_P(BinderRpc, ThreadPoolLimitOutgoing) {
@@ -497,10 +542,9 @@ TEST_P(BinderRpc, ThreadPoolLimitOutgoing) {
     constexpr size_t kNumOutgoingConnections = 10;
     constexpr size_t kNumCalls = kNumOutgoingConnections + 3;
     auto proc = createRpcTestSocketServerProcess(
-            {.numThreads = kNumThreads, .numOutgoingConnections = kNumOutgoingConnections});
+            {.numMaxThreads = kNumThreads, .numOutgoingConnections = kNumOutgoingConnections});
 
-    // b/272429574 - below 500ms, the test fails
-    testThreadPoolOverSaturated(proc.rootIface, kNumCalls, 500 /*ms*/);
+    testThreadPoolOverSaturated(proc.rootIface, kNumCalls, 200 /*ms*/);
 }
 
 TEST_P(BinderRpc, ThreadingStressTest) {
@@ -512,7 +556,7 @@ TEST_P(BinderRpc, ThreadingStressTest) {
     constexpr size_t kNumServerThreads = 5;
     constexpr size_t kNumCalls = 50;
 
-    auto proc = createRpcTestSocketServerProcess({.numThreads = kNumServerThreads});
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = kNumServerThreads});
 
     std::vector<std::thread> threads;
     for (size_t i = 0; i < kNumClientThreads; i++) {
@@ -545,7 +589,7 @@ TEST_P(BinderRpc, OnewayStressTest) {
     constexpr size_t kNumServerThreads = 10;
     constexpr size_t kNumCalls = 1000;
 
-    auto proc = createRpcTestSocketServerProcess({.numThreads = kNumServerThreads});
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = kNumServerThreads});
 
     std::vector<std::thread> threads;
     for (size_t i = 0; i < kNumClientThreads; i++) {
@@ -559,6 +603,35 @@ TEST_P(BinderRpc, OnewayStressTest) {
     for (auto& t : threads) t.join();
 
     saturateThreadPool(kNumServerThreads, proc.rootIface);
+}
+
+TEST_P(BinderRpc, OnewayStressTestWithIncomingThread) {
+    if (clientOrServerSingleThreaded()) {
+        GTEST_SKIP() << "This test requires multiple threads";
+    }
+
+    constexpr size_t kNumClientThreads = 10;
+    constexpr size_t kNumServerThreads = 10;
+    constexpr size_t kNumCalls = 1000;
+
+    auto proc = createRpcTestSocketServerProcess(
+            {.numMaxThreads = kNumServerThreads, .numIncomingConnectionsBySession = {1}});
+
+    std::vector<std::thread> threads;
+    for (size_t i = 0; i < kNumClientThreads; i++) {
+        threads.push_back(std::thread([&] {
+            for (size_t j = 0; j < kNumCalls; j++) {
+                EXPECT_OK(proc.rootIface->sendString("a"));
+            }
+        }));
+    }
+
+    for (auto& t : threads) t.join();
+
+    saturateThreadPool(kNumServerThreads, proc.rootIface);
+    // There is a race with a leaked binder and session when
+    // .numIncomingConnectionsBySession > 0, so force the shutdown
+    proc.forceShutdown();
 }
 
 TEST_P(BinderRpc, OnewayCallQueueingWithFds) {
@@ -579,7 +652,7 @@ TEST_P(BinderRpc, OnewayCallQueueingWithFds) {
     // https://developer.android.com/reference/android/os/IBinder#FLAG_ONEWAY
 
     auto proc = createRpcTestSocketServerProcess({
-            .numThreads = kNumServerThreads,
+            .numMaxThreads = kNumServerThreads,
             .clientFileDescriptorTransportMode = RpcSession::FileDescriptorTransportMode::UNIX,
             .serverSupportedFileDescriptorTransportModes =
                     {RpcSession::FileDescriptorTransportMode::UNIX},
@@ -613,7 +686,7 @@ TEST_P(BinderRpc, OnewayCallQueueing) {
     constexpr size_t kNumExtraServerThreads = 4;
 
     // make sure calls to the same object happen on the same thread
-    auto proc = createRpcTestSocketServerProcess({.numThreads = 1 + kNumExtraServerThreads});
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = 1 + kNumExtraServerThreads});
 
     // all these *Oneway commands should be queued on the server sequentially,
     // even though there are multiple threads.
@@ -637,7 +710,7 @@ TEST_P(BinderRpc, OnewayCallExhaustion) {
     constexpr size_t kNumClients = 2;
     constexpr size_t kTooLongMs = 1000;
 
-    auto proc = createRpcTestSocketServerProcess({.numThreads = kNumClients, .numSessions = 2});
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = kNumClients, .numSessions = 2});
 
     // Build up oneway calls on the second session to make sure it terminates
     // and shuts down. The first session should be unaffected (proc destructor
@@ -673,6 +746,30 @@ TEST_P(BinderRpc, OnewayCallExhaustion) {
     proc.proc->sessions.erase(proc.proc->sessions.begin() + 1);
 }
 
+// TODO(b/392717039): move to universal tests
+TEST_P(BinderRpc, SendTooLargeVector) {
+    if (GetParam().singleThreaded) {
+        GTEST_SKIP() << "Requires multi-threaded server to test one of the sessions crashing.";
+    }
+
+    auto proc = createRpcTestSocketServerProcess({});
+
+    // works before
+    EXPECT_EQ(OK, proc.rootBinder->pingBinder());
+
+    // see libbinder internal Constants.h
+    const size_t kTooLargeSize = 650 * 1024;
+    const std::vector<uint8_t> kTestValue(kTooLargeSize / sizeof(uint8_t), 42);
+
+    std::vector<uint8_t> result;
+    status_t res = proc.rootIface->repeatBytes(kTestValue, &result).transactionError();
+
+    EXPECT_EQ(res, FAILED_TRANSACTION) << statusToString(res);
+
+    // works after
+    EXPECT_EQ(OK, proc.rootBinder->pingBinder());
+}
+
 TEST_P(BinderRpc, SessionWithIncomingThreadpoolDoesntLeak) {
     if (clientOrServerSingleThreaded()) {
         GTEST_SKIP() << "This test requires multiple threads";
@@ -681,7 +778,7 @@ TEST_P(BinderRpc, SessionWithIncomingThreadpoolDoesntLeak) {
     // session 0 - will check for leaks in destrutor of proc
     // session 1 - we want to make sure it gets deleted when we drop all references to it
     auto proc = createRpcTestSocketServerProcess(
-            {.numThreads = 1, .numSessions = 2, .numIncomingConnectionsBySession = {0, 1}});
+            {.numMaxThreads = 1, .numSessions = 2, .numIncomingConnectionsBySession = {0, 1}});
 
     wp<RpcSession> session = proc.proc->sessions.at(1).session;
 
@@ -722,7 +819,7 @@ TEST_P(BinderRpc, SingleDeathRecipient) {
 
     // Death recipient needs to have an incoming connection to be called
     auto proc = createRpcTestSocketServerProcess(
-            {.numThreads = 1, .numSessions = 1, .numIncomingConnectionsBySession = {1}});
+            {.numMaxThreads = 1, .numSessions = 1, .numIncomingConnectionsBySession = {1}});
 
     auto dr = sp<MyDeathRec>::make();
     ASSERT_EQ(OK, proc.rootBinder->linkToDeath(dr, (void*)1, 0));
@@ -760,7 +857,7 @@ TEST_P(BinderRpc, SingleDeathRecipientOnShutdown) {
 
     // Death recipient needs to have an incoming connection to be called
     auto proc = createRpcTestSocketServerProcess(
-            {.numThreads = 1, .numSessions = 1, .numIncomingConnectionsBySession = {1}});
+            {.numMaxThreads = 1, .numSessions = 1, .numIncomingConnectionsBySession = {1}});
 
     auto dr = sp<MyDeathRec>::make();
     EXPECT_EQ(OK, proc.rootBinder->linkToDeath(dr, (void*)1, 0));
@@ -793,7 +890,7 @@ TEST_P(BinderRpc, DeathRecipientFailsWithoutIncoming) {
         void binderDied(const wp<IBinder>& /* who */) override {}
     };
 
-    auto proc = createRpcTestSocketServerProcess({.numThreads = 1, .numSessions = 1});
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = 1, .numSessions = 1});
 
     auto dr = sp<MyDeathRec>::make();
     EXPECT_EQ(INVALID_OPERATION, proc.rootBinder->linkToDeath(dr, (void*)1, 0));
@@ -812,7 +909,7 @@ TEST_P(BinderRpc, UnlinkDeathRecipient) {
 
     // Death recipient needs to have an incoming connection to be called
     auto proc = createRpcTestSocketServerProcess(
-            {.numThreads = 1, .numSessions = 1, .numIncomingConnectionsBySession = {1}});
+            {.numMaxThreads = 1, .numSessions = 1, .numIncomingConnectionsBySession = {1}});
 
     auto dr = sp<MyDeathRec>::make();
     ASSERT_EQ(OK, proc.rootBinder->linkToDeath(dr, (void*)1, 0));
@@ -994,14 +1091,15 @@ TEST_P(BinderRpc, SendMaxFiles) {
         GTEST_SKIP() << "Would fail trivially (which is tested by BinderRpc::SendFiles)";
     }
 
+    auto transportMode = RpcSession::FileDescriptorTransportMode::UNIX;
     auto proc = createRpcTestSocketServerProcess({
-            .clientFileDescriptorTransportMode = RpcSession::FileDescriptorTransportMode::UNIX,
-            .serverSupportedFileDescriptorTransportModes =
-                    {RpcSession::FileDescriptorTransportMode::UNIX},
+            .clientFileDescriptorTransportMode = transportMode,
+            .serverSupportedFileDescriptorTransportModes = {transportMode},
     });
 
+    size_t maxFds = getRpcTransportModeMaxFds(transportMode);
     std::vector<android::os::ParcelFileDescriptor> files;
-    for (int i = 0; i < 253; i++) {
+    for (size_t i = 0; i < maxFds; i++) {
         files.emplace_back(android::os::ParcelFileDescriptor(mockFileDescriptor("a")));
     }
 
@@ -1011,7 +1109,7 @@ TEST_P(BinderRpc, SendMaxFiles) {
 
     std::string result;
     EXPECT_TRUE(ReadFdToString(out.get(), &result));
-    EXPECT_EQ(result, std::string(253, 'a'));
+    EXPECT_EQ(result, std::string(maxFds, 'a'));
 }
 
 TEST_P(BinderRpc, SendTooManyFiles) {
@@ -1019,14 +1117,15 @@ TEST_P(BinderRpc, SendTooManyFiles) {
         GTEST_SKIP() << "Would fail trivially (which is tested by BinderRpc::SendFiles)";
     }
 
+    auto transportMode = RpcSession::FileDescriptorTransportMode::UNIX;
     auto proc = createRpcTestSocketServerProcess({
-            .clientFileDescriptorTransportMode = RpcSession::FileDescriptorTransportMode::UNIX,
-            .serverSupportedFileDescriptorTransportModes =
-                    {RpcSession::FileDescriptorTransportMode::UNIX},
+            .clientFileDescriptorTransportMode = transportMode,
+            .serverSupportedFileDescriptorTransportModes = {transportMode},
     });
 
+    size_t maxFds = getRpcTransportModeMaxFds(transportMode);
     std::vector<android::os::ParcelFileDescriptor> files;
-    for (int i = 0; i < 254; i++) {
+    for (size_t i = 0; i < maxFds + 1; i++) {
         files.emplace_back(android::os::ParcelFileDescriptor(mockFileDescriptor("a")));
     }
 
@@ -1046,7 +1145,8 @@ TEST_P(BinderRpc, AppendInvalidFd) {
                     {RpcSession::FileDescriptorTransportMode::UNIX},
     });
 
-    int badFd = fcntl(STDERR_FILENO, F_DUPFD_CLOEXEC, 0);
+    int badFd;
+    ASSERT_EQ(OK, binder::os::dupFileDescriptor(STDERR_FILENO, &badFd));
     ASSERT_NE(badFd, -1);
 
     // Close the file descriptor so it becomes invalid for dup
@@ -1121,11 +1221,690 @@ TEST_P(BinderRpc, Fds) {
     ssize_t beforeFds = countFds();
     ASSERT_GE(beforeFds, 0);
     {
-        auto proc = createRpcTestSocketServerProcess({.numThreads = 10});
+        auto proc = createRpcTestSocketServerProcess({.numMaxThreads = 10});
         ASSERT_EQ(OK, proc.rootBinder->pingBinder());
     }
     ASSERT_EQ(beforeFds, countFds()) << (system("ls -l /proc/self/fd/"), "fd leak?");
 }
+
+// TODO need to add IServiceManager.cpp/.h to libbinder_no_kernel
+#ifdef BINDER_WITH_KERNEL_IPC
+
+class BinderRpcAccessor : public BinderRpc {
+    void SetUp() override {
+        if (serverSingleThreaded()) {
+            // This blocks on android::FdTrigger::triggerablePoll when attempting to set
+            // up the client RpcSession
+            GTEST_SKIP() << "Accessors are not supported for single threaded libbinder";
+        }
+        if (rpcSecurity() == RpcSecurity::TLS) {
+            GTEST_SKIP() << "Accessors are not supported with TLS";
+            // ... for now
+        }
+
+        if (socketType() == SocketType::UNIX_BOOTSTRAP) {
+            GTEST_SKIP() << "Accessors do not support UNIX_BOOTSTRAP because no connection "
+                            "information is known";
+        }
+        if (socketType() == SocketType::TIPC) {
+            GTEST_SKIP() << "Accessors do not support TIPC because the socket transport is not "
+                            "known in libbinder";
+        }
+        BinderRpc::SetUp();
+    }
+};
+
+inline void waitForExtraSessionCleanup(const BinderRpcTestProcessSession& proc) {
+    // Need to give the server some time to delete its RpcSession after our last
+    // reference is dropped, closing the connection. Check for up to 1 second,
+    // every 10 ms.
+    for (size_t i = 0; i < 100; i++) {
+        std::vector<int32_t> remoteCounts;
+        EXPECT_OK(proc.rootIface->countBinders(&remoteCounts));
+        // We exect the original binder to still be alive, we just want to wait
+        // for this extra session to be cleaned up.
+        if (remoteCounts.size() == proc.proc->sessions.size()) break;
+        usleep(10000);
+    }
+}
+
+TEST_P(BinderRpcAccessor, InjectAndGetServiceHappyPath) {
+    constexpr size_t kNumThreads = 10;
+    const String16 kInstanceName("super.cool.service/better_than_default");
+
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = kNumThreads});
+    EXPECT_EQ(OK, proc.rootBinder->pingBinder());
+
+    auto receipt = addAccessorProvider(
+            {String8(kInstanceName).c_str()}, [&](const String16& name) -> sp<IBinder> {
+                return createAccessor(name,
+                                      [&](const String16& name, sockaddr* outAddr,
+                                          socklen_t addrSize) -> status_t {
+                                          if (outAddr == nullptr ||
+                                              addrSize < proc.proc->sessions[0].addrLen) {
+                                              return BAD_VALUE;
+                                          }
+                                          if (name == kInstanceName) {
+                                              if (proc.proc->sessions[0].addr.ss_family ==
+                                                  AF_UNIX) {
+                                                  sockaddr_un* un = reinterpret_cast<sockaddr_un*>(
+                                                          &proc.proc->sessions[0].addr);
+                                                  ALOGE("inside callback: %s", un->sun_path);
+                                              }
+                                              std::memcpy(outAddr, &proc.proc->sessions[0].addr,
+                                                          proc.proc->sessions[0].addrLen);
+                                              return OK;
+                                          }
+                                          return NAME_NOT_FOUND;
+                                      });
+            });
+
+    EXPECT_FALSE(receipt.expired());
+
+    sp<IBinder> binder = defaultServiceManager()->checkService(kInstanceName);
+    sp<IBinderRpcTest> service = checked_interface_cast<IBinderRpcTest>(binder);
+    EXPECT_NE(service, nullptr);
+
+    sp<IBinder> out;
+    EXPECT_OK(service->repeatBinder(binder, &out));
+    EXPECT_EQ(binder, out);
+
+    out.clear();
+    binder.clear();
+    service.clear();
+
+    status_t status = removeAccessorProvider(receipt);
+    EXPECT_EQ(status, OK);
+
+    waitForExtraSessionCleanup(proc);
+}
+
+TEST_P(BinderRpcAccessor, InjectNoAccessorProvided) {
+    const String16 kInstanceName("doesnt_matter_nothing_checks");
+
+    bool isProviderDeleted = false;
+
+    auto receipt = addAccessorProvider({String8(kInstanceName).c_str()},
+                                       [&](const String16&) -> sp<IBinder> { return nullptr; });
+    EXPECT_FALSE(receipt.expired());
+
+    sp<IBinder> binder = defaultServiceManager()->checkService(kInstanceName);
+    EXPECT_EQ(binder, nullptr);
+
+    status_t status = removeAccessorProvider(receipt);
+    EXPECT_EQ(status, OK);
+}
+
+TEST_P(BinderRpcAccessor, InjectDuplicateAccessorProvider) {
+    const String16 kInstanceName("super.cool.service/better_than_default");
+    const String16 kInstanceName2("super.cool.service/better_than_default2");
+
+    auto receipt =
+            addAccessorProvider({String8(kInstanceName).c_str(), String8(kInstanceName2).c_str()},
+                                [&](const String16&) -> sp<IBinder> { return nullptr; });
+    EXPECT_FALSE(receipt.expired());
+    // reject this because it's associated with an already used instance name
+    auto receipt2 = addAccessorProvider({String8(kInstanceName).c_str()},
+                                        [&](const String16&) -> sp<IBinder> { return nullptr; });
+    EXPECT_TRUE(receipt2.expired());
+
+    // the first provider should still be usable
+    sp<IBinder> binder = defaultServiceManager()->checkService(kInstanceName);
+    EXPECT_EQ(binder, nullptr);
+
+    status_t status = removeAccessorProvider(receipt);
+    EXPECT_EQ(status, OK);
+}
+
+TEST_P(BinderRpcAccessor, InjectAccessorProviderNoInstance) {
+    auto receipt = addAccessorProvider({}, [&](const String16&) -> sp<IBinder> { return nullptr; });
+    EXPECT_TRUE(receipt.expired());
+}
+
+TEST_P(BinderRpcAccessor, InjectNoSockaddrProvided) {
+    constexpr size_t kNumThreads = 10;
+    const String16 kInstanceName("super.cool.service/better_than_default");
+
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = kNumThreads});
+    EXPECT_EQ(OK, proc.rootBinder->pingBinder());
+
+    bool isProviderDeleted = false;
+    bool isAccessorDeleted = false;
+
+    auto receipt = addAccessorProvider({String8(kInstanceName).c_str()},
+                                       [&](const String16& name) -> sp<IBinder> {
+                                           return createAccessor(name,
+                                                                 [&](const String16&, sockaddr*,
+                                                                     socklen_t) -> status_t {
+                                                                     // don't fill in outAddr
+                                                                     return NAME_NOT_FOUND;
+                                                                 });
+                                       });
+
+    EXPECT_FALSE(receipt.expired());
+
+    sp<IBinder> binder = defaultServiceManager()->checkService(kInstanceName);
+    EXPECT_EQ(binder, nullptr);
+
+    status_t status = removeAccessorProvider(receipt);
+    EXPECT_EQ(status, OK);
+}
+
+class BinderRpcAccessorNoConnection : public ::testing::Test {};
+
+TEST_F(BinderRpcAccessorNoConnection, listServices) {
+    const String16 kInstanceName("super.cool.service/better_than_default");
+    const String16 kInstanceName2("super.cool.service/better_than_default2");
+
+    auto receipt =
+            addAccessorProvider({String8(kInstanceName).c_str(), String8(kInstanceName2).c_str()},
+                                [&](const String16&) -> sp<IBinder> { return nullptr; });
+    EXPECT_FALSE(receipt.expired());
+    Vector<String16> list =
+            defaultServiceManager()->listServices(IServiceManager::DUMP_FLAG_PRIORITY_ALL);
+    bool name1 = false;
+    bool name2 = false;
+    for (auto name : list) {
+        if (name == kInstanceName) name1 = true;
+        if (name == kInstanceName2) name2 = true;
+    }
+    EXPECT_TRUE(name1);
+    EXPECT_TRUE(name2);
+    status_t status = removeAccessorProvider(receipt);
+    EXPECT_EQ(status, OK);
+}
+
+TEST_F(BinderRpcAccessorNoConnection, isDeclared) {
+    const String16 kInstanceName("super.cool.service/default");
+    const String16 kInstanceName2("still_counts_as_declared");
+
+    auto receipt =
+            addAccessorProvider({String8(kInstanceName).c_str(), String8(kInstanceName2).c_str()},
+                                [&](const String16&) -> sp<IBinder> { return nullptr; });
+    EXPECT_FALSE(receipt.expired());
+    EXPECT_TRUE(defaultServiceManager()->isDeclared(kInstanceName));
+    EXPECT_TRUE(defaultServiceManager()->isDeclared(kInstanceName2));
+    EXPECT_FALSE(defaultServiceManager()->isDeclared(String16("doesnt_exist")));
+    status_t status = removeAccessorProvider(receipt);
+    EXPECT_EQ(status, OK);
+}
+
+TEST_F(BinderRpcAccessorNoConnection, getDeclaredInstances) {
+    const String16 kInstanceName("super.cool.service.IFoo/default");
+    const String16 kInstanceName2("super.cool.service.IFoo/extra/default");
+    const String16 kInstanceName3("super.cool.service.IFoo");
+
+    auto receipt =
+            addAccessorProvider({String8(kInstanceName).c_str(), String8(kInstanceName2).c_str(),
+                                 String8(kInstanceName3).c_str()},
+                                [&](const String16&) -> sp<IBinder> { return nullptr; });
+    EXPECT_FALSE(receipt.expired());
+    Vector<String16> list =
+            defaultServiceManager()->getDeclaredInstances(String16("super.cool.service.IFoo"));
+    // We would prefer ASSERT_EQ here, but we must call removeAccessorProvider
+    EXPECT_EQ(list.size(), 3u);
+    if (list.size() == 3) {
+        bool name1 = false;
+        bool name2 = false;
+        bool name3 = false;
+        for (auto name : list) {
+            if (name == String16("default")) name1 = true;
+            if (name == String16("extra/default")) name2 = true;
+            if (name == String16()) name3 = true;
+        }
+        EXPECT_TRUE(name1) << String8(list[0]);
+        EXPECT_TRUE(name2) << String8(list[1]);
+        EXPECT_TRUE(name3) << String8(list[2]);
+    }
+
+    status_t status = removeAccessorProvider(receipt);
+    EXPECT_EQ(status, OK);
+}
+
+TEST_F(BinderRpcAccessorNoConnection, getDeclaredWrongInstances) {
+    const String16 kInstanceName("super.cool.service.IFoo");
+
+    auto receipt = addAccessorProvider({String8(kInstanceName).c_str()},
+                                       [&](const String16&) -> sp<IBinder> { return nullptr; });
+    EXPECT_FALSE(receipt.expired());
+    Vector<String16> list = defaultServiceManager()->getDeclaredInstances(String16("unknown"));
+    EXPECT_TRUE(list.empty());
+
+    status_t status = removeAccessorProvider(receipt);
+    EXPECT_EQ(status, OK);
+}
+
+TEST_F(BinderRpcAccessorNoConnection, getDeclaredInstancesSlash) {
+    // This is treated as if there were no '/' and the declared instance is ""
+    const String16 kInstanceName("super.cool.service.IFoo/");
+
+    auto receipt = addAccessorProvider({String8(kInstanceName).c_str()},
+                                       [&](const String16&) -> sp<IBinder> { return nullptr; });
+    EXPECT_FALSE(receipt.expired());
+    Vector<String16> list =
+            defaultServiceManager()->getDeclaredInstances(String16("super.cool.service.IFoo"));
+    bool name1 = false;
+    for (auto name : list) {
+        if (name == String16("")) name1 = true;
+    }
+    EXPECT_TRUE(name1);
+
+    status_t status = removeAccessorProvider(receipt);
+    EXPECT_EQ(status, OK);
+}
+
+constexpr const char* kARpcInstance = "some.instance.name.IFoo/default";
+const char* kARpcSupportedServices[] = {
+        kARpcInstance,
+};
+const uint32_t kARpcNumSupportedServices = 1;
+
+struct ConnectionInfoData {
+    sockaddr_storage addr;
+    socklen_t len;
+    bool* isDeleted;
+    ~ConnectionInfoData() {
+        if (isDeleted) *isDeleted = true;
+    }
+};
+
+struct AccessorProviderData {
+    sockaddr_storage addr;
+    socklen_t len;
+    bool* isDeleted;
+    ~AccessorProviderData() {
+        if (isDeleted) *isDeleted = true;
+    }
+};
+
+void accessorProviderDataOnDelete(void* data) {
+    delete reinterpret_cast<AccessorProviderData*>(data);
+}
+void infoProviderDataOnDelete(void* data) {
+    delete reinterpret_cast<ConnectionInfoData*>(data);
+}
+
+ABinderRpc_ConnectionInfo* infoProvider(const char* instance, void* cookie) {
+    if constexpr (!kEnableSharedLibs) {
+        return nullptr;
+    }
+    if (instance == nullptr || cookie == nullptr) return nullptr;
+    ConnectionInfoData* data = reinterpret_cast<ConnectionInfoData*>(cookie);
+    return ABinderRpc_ConnectionInfo_new(reinterpret_cast<const sockaddr*>(&data->addr), data->len);
+}
+
+ABinderRpc_Accessor* getAccessor(const char* instance, void* cookie) {
+    if constexpr (!kEnableSharedLibs) {
+        return nullptr;
+    }
+    if (instance == nullptr || cookie == nullptr) return nullptr;
+    if (0 != strcmp(instance, kARpcInstance)) return nullptr;
+
+    AccessorProviderData* data = reinterpret_cast<AccessorProviderData*>(cookie);
+
+    ConnectionInfoData* info = new ConnectionInfoData{
+            .addr = data->addr,
+            .len = data->len,
+            .isDeleted = nullptr,
+    };
+
+    return ABinderRpc_Accessor_new(instance, infoProvider, info, infoProviderDataOnDelete);
+}
+
+class BinderARpcNdk : public ::testing::Test {};
+
+TEST_F(BinderARpcNdk, ARpcProviderNewDelete) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+    bool isDeleted = false;
+
+    AccessorProviderData* data = new AccessorProviderData{{}, 0, &isDeleted};
+
+    ABinderRpc_AccessorProvider* provider =
+            ABinderRpc_registerAccessorProvider(getAccessor, kARpcSupportedServices,
+                                                kARpcNumSupportedServices, data,
+                                                accessorProviderDataOnDelete);
+
+    ASSERT_NE(provider, nullptr);
+    EXPECT_FALSE(isDeleted);
+
+    ABinderRpc_unregisterAccessorProvider(provider);
+
+    EXPECT_TRUE(isDeleted);
+}
+
+TEST_F(BinderARpcNdk, ARpcProviderDeleteOnError) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+    bool isDeleted = false;
+    AccessorProviderData* data = new AccessorProviderData{{}, 0, &isDeleted};
+
+    ABinderRpc_AccessorProvider* provider =
+            ABinderRpc_registerAccessorProvider(getAccessor, kARpcSupportedServices, 0, data,
+                                                accessorProviderDataOnDelete);
+
+    ASSERT_EQ(provider, nullptr);
+    EXPECT_TRUE(isDeleted);
+}
+
+TEST_F(BinderARpcNdk, ARpcProvideOnErrorNoDeleteCbNoCrash) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+    ABinderRpc_AccessorProvider* provider =
+            ABinderRpc_registerAccessorProvider(getAccessor, kARpcSupportedServices, 0, nullptr,
+                                                nullptr);
+
+    ASSERT_EQ(provider, nullptr);
+}
+
+TEST_F(BinderARpcNdk, ARpcProviderDuplicateInstance) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+    const char* instance = "some.instance.name.IFoo/default";
+    const uint32_t numInstances = 2;
+    const char* instances[numInstances] = {
+            instance,
+            "some.other.instance/default",
+    };
+
+    bool isDeleted = false;
+
+    AccessorProviderData* data = new AccessorProviderData{{}, 0, &isDeleted};
+
+    ABinderRpc_AccessorProvider* provider =
+            ABinderRpc_registerAccessorProvider(getAccessor, instances, numInstances, data,
+                                                accessorProviderDataOnDelete);
+
+    ASSERT_NE(provider, nullptr);
+    EXPECT_FALSE(isDeleted);
+
+    const uint32_t numInstances2 = 1;
+    const char* instances2[numInstances2] = {
+            instance,
+    };
+    bool isDeleted2 = false;
+    AccessorProviderData* data2 = new AccessorProviderData{{}, 0, &isDeleted2};
+    ABinderRpc_AccessorProvider* provider2 =
+            ABinderRpc_registerAccessorProvider(getAccessor, instances2, numInstances2, data2,
+                                                accessorProviderDataOnDelete);
+
+    EXPECT_EQ(provider2, nullptr);
+    // If it fails to be registered, the data is still cleaned up with
+    // accessorProviderDataOnDelete
+    EXPECT_TRUE(isDeleted2);
+
+    ABinderRpc_unregisterAccessorProvider(provider);
+
+    EXPECT_TRUE(isDeleted);
+}
+
+TEST_F(BinderARpcNdk, ARpcProviderRegisterNoInstance) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+    const uint32_t numInstances = 0;
+    const char* instances[numInstances] = {};
+
+    bool isDeleted = false;
+    AccessorProviderData* data = new AccessorProviderData{{}, 0, &isDeleted};
+
+    ABinderRpc_AccessorProvider* provider =
+            ABinderRpc_registerAccessorProvider(getAccessor, instances, numInstances, data,
+                                                accessorProviderDataOnDelete);
+    ASSERT_EQ(provider, nullptr);
+}
+
+TEST_F(BinderARpcNdk, ARpcAccessorNewDelete) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+    bool isDeleted = false;
+
+    ConnectionInfoData* data = new ConnectionInfoData{{}, 0, &isDeleted};
+
+    ABinderRpc_Accessor* accessor =
+            ABinderRpc_Accessor_new("gshoe_service", infoProvider, data, infoProviderDataOnDelete);
+    ASSERT_NE(accessor, nullptr);
+    EXPECT_FALSE(isDeleted);
+
+    ABinderRpc_Accessor_delete(accessor);
+    EXPECT_TRUE(isDeleted);
+}
+
+TEST_F(BinderARpcNdk, ARpcConnectionInfoNewDelete) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+    sockaddr_vm addr{
+            .svm_family = AF_VSOCK,
+            .svm_port = VMADDR_PORT_ANY,
+            .svm_cid = VMADDR_CID_ANY,
+    };
+
+    ABinderRpc_ConnectionInfo* info =
+            ABinderRpc_ConnectionInfo_new(reinterpret_cast<sockaddr*>(&addr), sizeof(sockaddr_vm));
+    EXPECT_NE(info, nullptr);
+
+    ABinderRpc_ConnectionInfo_delete(info);
+}
+
+TEST_F(BinderARpcNdk, ARpcAsFromBinderAsBinder) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+    bool isDeleted = false;
+
+    ConnectionInfoData* data = new ConnectionInfoData{{}, 0, &isDeleted};
+
+    ABinderRpc_Accessor* accessor =
+            ABinderRpc_Accessor_new("gshoe_service", infoProvider, data, infoProviderDataOnDelete);
+    ASSERT_NE(accessor, nullptr);
+    EXPECT_FALSE(isDeleted);
+
+    {
+        ndk::SpAIBinder binder = ndk::SpAIBinder(ABinderRpc_Accessor_asBinder(accessor));
+        EXPECT_NE(binder.get(), nullptr);
+
+        ABinderRpc_Accessor* accessor2 =
+                ABinderRpc_Accessor_fromBinder("wrong_service_name", binder.get());
+        // The API checks for the expected service name that is associated with
+        // the accessor!
+        EXPECT_EQ(accessor2, nullptr);
+
+        accessor2 = ABinderRpc_Accessor_fromBinder("gshoe_service", binder.get());
+        EXPECT_NE(accessor2, nullptr);
+
+        // this is a new ABinderRpc_Accessor object that wraps the underlying
+        // libbinder object.
+        EXPECT_NE(accessor, accessor2);
+
+        ndk::SpAIBinder binder2 = ndk::SpAIBinder(ABinderRpc_Accessor_asBinder(accessor2));
+        EXPECT_EQ(binder.get(), binder2.get());
+
+        ABinderRpc_Accessor_delete(accessor2);
+    }
+
+    EXPECT_FALSE(isDeleted);
+    ABinderRpc_Accessor_delete(accessor);
+    EXPECT_TRUE(isDeleted);
+}
+
+TEST_F(BinderARpcNdk, ARpcRequireProviderOnDeleteCallback) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+    EXPECT_EQ(nullptr,
+              ABinderRpc_registerAccessorProvider(getAccessor, kARpcSupportedServices,
+                                                  kARpcNumSupportedServices,
+                                                  reinterpret_cast<void*>(1), nullptr));
+}
+
+TEST_F(BinderARpcNdk, ARpcRequireInfoOnDeleteCallback) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+    EXPECT_EQ(nullptr,
+              ABinderRpc_Accessor_new("the_best_service_name", infoProvider,
+                                      reinterpret_cast<void*>(1), nullptr));
+}
+
+TEST_F(BinderARpcNdk, ARpcNoDataNoProviderOnDeleteCallback) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+    ABinderRpc_AccessorProvider* provider =
+            ABinderRpc_registerAccessorProvider(getAccessor, kARpcSupportedServices,
+                                                kARpcNumSupportedServices, nullptr, nullptr);
+    ASSERT_NE(nullptr, provider);
+    ABinderRpc_unregisterAccessorProvider(provider);
+}
+
+TEST_F(BinderARpcNdk, ARpcNoDataNoInfoOnDeleteCallback) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+    ABinderRpc_Accessor* accessor =
+            ABinderRpc_Accessor_new("the_best_service_name", infoProvider, nullptr, nullptr);
+    ASSERT_NE(nullptr, accessor);
+    ABinderRpc_Accessor_delete(accessor);
+}
+
+TEST_F(BinderARpcNdk, ARpcNullArgs_ConnectionInfo_new) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+    sockaddr_storage addr;
+    EXPECT_EQ(nullptr, ABinderRpc_ConnectionInfo_new(reinterpret_cast<const sockaddr*>(&addr), 0));
+}
+
+TEST_F(BinderARpcNdk, ARpcDelegateAccessorWrongInstance) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+
+    AccessorProviderData* data = new AccessorProviderData();
+    ABinderRpc_Accessor* accessor = getAccessor(kARpcInstance, data);
+    ASSERT_NE(accessor, nullptr);
+    AIBinder* localAccessorBinder = ABinderRpc_Accessor_asBinder(accessor);
+    EXPECT_NE(localAccessorBinder, nullptr);
+
+    AIBinder* delegatorBinder = nullptr;
+    binder_status_t status =
+            ABinderRpc_Accessor_delegateAccessor("bar", localAccessorBinder, &delegatorBinder);
+    EXPECT_EQ(status, NAME_NOT_FOUND);
+
+    AIBinder_decStrong(localAccessorBinder);
+    ABinderRpc_Accessor_delete(accessor);
+    delete data;
+}
+
+TEST_F(BinderARpcNdk, ARpcDelegateNonAccessor) {
+    // TODO: test in environments we can get a proxied service?
+#ifndef __BIONIC__
+    GTEST_SKIP() << "Can only get AIDL services on device.";
+#endif
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+
+    auto service = defaultServiceManager()->checkService(String16(kKnownAidlService));
+    ASSERT_NE(nullptr, service);
+    ndk::SpAIBinder binder = ndk::SpAIBinder(AIBinder_fromPlatformBinder(service));
+
+    AIBinder* delegatorBinder = nullptr;
+    binder_status_t status =
+            ABinderRpc_Accessor_delegateAccessor("bar", binder.get(), &delegatorBinder);
+
+    EXPECT_EQ(status, BAD_TYPE);
+}
+
+inline void getServiceTest(BinderRpcTestProcessSession& proc,
+                           ABinderRpc_AccessorProvider_getAccessorCallback getAccessor) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+
+    constexpr size_t kNumThreads = 10;
+    bool isDeleted = false;
+
+    AccessorProviderData* data =
+            new AccessorProviderData{proc.proc->sessions[0].addr, proc.proc->sessions[0].addrLen,
+                                     &isDeleted};
+    ABinderRpc_AccessorProvider* provider =
+            ABinderRpc_registerAccessorProvider(getAccessor, kARpcSupportedServices,
+                                                kARpcNumSupportedServices, data,
+                                                accessorProviderDataOnDelete);
+    EXPECT_NE(provider, nullptr);
+    EXPECT_FALSE(isDeleted);
+
+    {
+        ndk::SpAIBinder binder = ndk::SpAIBinder(AServiceManager_checkService(kARpcInstance));
+        ASSERT_NE(binder.get(), nullptr);
+        EXPECT_EQ(STATUS_OK, AIBinder_ping(binder.get()));
+    }
+
+    ABinderRpc_unregisterAccessorProvider(provider);
+    EXPECT_TRUE(isDeleted);
+
+    waitForExtraSessionCleanup(proc);
+}
+
+TEST_P(BinderRpcAccessor, ARpcGetService) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+
+    constexpr size_t kNumThreads = 10;
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = kNumThreads});
+    EXPECT_EQ(OK, proc.rootBinder->pingBinder());
+
+    getServiceTest(proc, getAccessor);
+}
+
+// Create accessors and wrap each of the accessors in a delegator
+ABinderRpc_Accessor* getDelegatedAccessor(const char* instance, void* cookie) {
+    if constexpr (!kEnableSharedLibs) {
+        return nullptr;
+    }
+
+    ABinderRpc_Accessor* accessor = getAccessor(instance, cookie);
+    AIBinder* accessorBinder = ABinderRpc_Accessor_asBinder(accessor);
+    // Once we have a handle to the AIBinder which holds a reference to the
+    // underlying accessor IBinder, we can get rid of the ABinderRpc_Accessor
+    ABinderRpc_Accessor_delete(accessor);
+
+    AIBinder* delegatorBinder = nullptr;
+    binder_status_t status =
+            ABinderRpc_Accessor_delegateAccessor(instance, accessorBinder, &delegatorBinder);
+    // No longer need this AIBinder. The delegator has a reference to the
+    // underlying IBinder on success, and on failure we are done here.
+    AIBinder_decStrong(accessorBinder);
+    if (status != OK || delegatorBinder == nullptr) {
+        ALOGE("Unexpected behavior. Status: %s, delegator ptr: %p", statusToString(status).c_str(),
+              delegatorBinder);
+        return nullptr;
+    }
+
+    return ABinderRpc_Accessor_fromBinder(instance, delegatorBinder);
+}
+
+TEST_P(BinderRpcAccessor, ARpcGetServiceWithDelegator) {
+    if constexpr (!kEnableSharedLibs) {
+        GTEST_SKIP() << "Test disabled because Binder was built as a static library";
+    }
+
+    constexpr size_t kNumThreads = 10;
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = kNumThreads});
+    EXPECT_EQ(OK, proc.rootBinder->pingBinder());
+
+    getServiceTest(proc, getDelegatedAccessor);
+}
+
+#endif // BINDER_WITH_KERNEL_IPC
 
 #ifdef BINDER_RPC_TO_TRUSTY_TEST
 
@@ -1275,6 +2054,8 @@ static std::vector<SocketType> testSocketTypes(bool hasPreconnected = true) {
 static std::vector<BinderRpc::ParamType> getBinderRpcParams() {
     std::vector<BinderRpc::ParamType> ret;
 
+    // IF YOU ARE MAKING MAJOR CHANGES TO RPC BINDER, SET THIS TO 'true' TO RUN ALL COMBINATIONS OF
+    // TESTS
     constexpr bool full = false;
 
     for (const auto& type : testSocketTypes()) {
@@ -1284,6 +2065,14 @@ static std::vector<BinderRpc::ParamType> getBinderRpcParams() {
                     for (const auto& serverVersion : testVersions()) {
                         for (bool singleThreaded : {false, true}) {
                             for (bool noKernel : noKernelValues()) {
+                                // SKIP combinatorial testing of old versions, since otherwise this
+                                // test takes way too long
+                                if (!full &&
+                                    (clientVersion != RPC_WIRE_PROTOCOL_VERSION &&
+                                     serverVersion != RPC_WIRE_PROTOCOL_VERSION) &&
+                                    security != RpcSecurity::RAW)
+                                    continue;
+
                                 ret.push_back(BinderRpc::ParamType{
                                         .type = type,
                                         .security = security,
@@ -1314,6 +2103,11 @@ static std::vector<BinderRpc::ParamType> getBinderRpcParams() {
 
 INSTANTIATE_TEST_SUITE_P(PerSocket, BinderRpc, ::testing::ValuesIn(getBinderRpcParams()),
                          BinderRpc::PrintParamInfo);
+
+#ifdef BINDER_WITH_KERNEL_IPC
+INSTANTIATE_TEST_SUITE_P(PerSocket, BinderRpcAccessor, ::testing::ValuesIn(getBinderRpcParams()),
+                         BinderRpc::PrintParamInfo);
+#endif // BINDER_WITH_KERNEL_IPC
 
 class BinderRpcServerRootObject
       : public ::testing::TestWithParam<std::tuple<bool, bool, RpcSecurity>> {};
@@ -1384,8 +2178,8 @@ TEST(BinderRpc, Java) {
     sp<IServiceManager> sm = defaultServiceManager();
     ASSERT_NE(nullptr, sm);
     // Any Java service with non-empty getInterfaceDescriptor() would do.
-    // Let's pick batteryproperties.
-    auto binder = sm->checkService(String16("batteryproperties"));
+    // Let's pick activity.
+    auto binder = sm->checkService(String16(kKnownAidlService));
     ASSERT_NE(nullptr, binder);
     auto descriptor = binder->getInterfaceDescriptor();
     ASSERT_GE(descriptor.size(), 0u);
@@ -1419,6 +2213,48 @@ TEST(BinderRpc, Java) {
     ASSERT_EQ(descriptor, rpcBinder->getInterfaceDescriptor())
             << "getInterfaceDescriptor should not crash system_server";
     ASSERT_EQ(OK, rpcBinder->pingBinder());
+}
+
+TEST(BinderRpcNoSetup, OverrideServerMaxThreadsRootObj) {
+    sp<RpcServer> server = RpcServer::make();
+    ASSERT_EQ(server->getMaxThreads(), 1u);
+
+    sp<BBinder> binder = sp<BBinder>::make();
+
+    binder->setMinRpcThreads(15u);
+    server->setRootObject(binder);
+    EXPECT_EQ(server->getMaxThreads(), 15u);
+}
+
+TEST(BinderRpcNoSetup, OverrideServerMaxThreadsWeakRootObj) {
+    sp<RpcServer> server = RpcServer::make();
+    ASSERT_EQ(server->getMaxThreads(), 1u);
+
+    sp<BBinder> binder = sp<BBinder>::make();
+
+    binder->setMinRpcThreads(15u);
+    server->setRootObjectWeak(binder);
+    EXPECT_EQ(server->getMaxThreads(), 15u);
+}
+
+TEST_P(BinderRpc, MinThreadsPerBinderSaturation) {
+    if (clientOrServerSingleThreaded()) {
+        GTEST_SKIP() << "This test requires multiple threads";
+    }
+    constexpr uint16_t kMinThreadsPerBinder = 7;
+    auto proc = createRpcTestSocketServerProcess(
+            {.numMaxThreads = 1, .numMinThreadsPerBinder = kMinThreadsPerBinder});
+
+    // The thread handling this will block until another
+    // thread handles the blockingRecvInt call. This will only work
+    // with more than one thread
+    EXPECT_OK(proc.rootIface->blockingSendIntOneway(1));
+    int n;
+    EXPECT_OK(proc.rootIface->blockingRecvInt(&n));
+    EXPECT_EQ(n, 1);
+
+    // force the decref
+    saturateThreadPool(kMinThreadsPerBinder, proc.rootIface);
 }
 
 class BinderRpcServerOnly : public ::testing::TestWithParam<std::tuple<RpcSecurity, uint32_t>> {
@@ -2093,7 +2929,9 @@ INSTANTIATE_TEST_SUITE_P(
 
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
+#ifndef __ANDROID__
     __android_log_set_logger(__android_log_stderr_logger);
+#endif
 
     return RUN_ALL_TESTS();
 }

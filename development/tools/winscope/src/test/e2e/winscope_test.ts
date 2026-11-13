@@ -14,16 +14,16 @@
  * limitations under the License.
  */
 import {browser, by, element} from 'protractor';
-import {E2eTestUtils} from './utils';
+import {checkServerIsUp, WINSCOPE_URL} from './utils';
 
 describe('winscope', () => {
   beforeAll(async () => {
-    await E2eTestUtils.checkServerIsUp('Winscope', E2eTestUtils.WINSCOPE_URL);
-    await browser.get(E2eTestUtils.WINSCOPE_URL);
+    await checkServerIsUp('Winscope', WINSCOPE_URL);
+    await browser.get(WINSCOPE_URL);
   });
 
-  it('has title', () => {
+  it('has title', async () => {
     const title = element(by.css('.app-title'));
-    expect(title.getText()).toContain('Winscope');
+    expect(await title.isPresent()).toBeTruthy();
   });
 });

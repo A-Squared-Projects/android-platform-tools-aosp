@@ -28,12 +28,18 @@
 namespace android {
 using gui::VsyncEventData;
 
+enum CallbackType : int8_t {
+    CALLBACK_INPUT,
+    CALLBACK_ANIMATION,
+};
+
 struct FrameCallback {
     AChoreographer_frameCallback callback;
     AChoreographer_frameCallback64 callback64;
     AChoreographer_vsyncCallback vsyncCallback;
     void* data;
     nsecs_t dueTime;
+    CallbackType callbackType;
 
     inline bool operator<(const FrameCallback& rhs) const {
         // Note that this is intentionally flipped because we want callbacks due sooner to be at
@@ -73,12 +79,10 @@ public:
     };
     static Context gChoreographers;
 
-    explicit Choreographer(const sp<Looper>& looper, const sp<IBinder>& layerHandle = nullptr)
-            EXCLUDES(gChoreographers.lock);
     void postFrameCallbackDelayed(AChoreographer_frameCallback cb,
                                   AChoreographer_frameCallback64 cb64,
                                   AChoreographer_vsyncCallback vsyncCallback, void* data,
-                                  nsecs_t delay);
+                                  nsecs_t delay, CallbackType callbackType);
     void registerRefreshRateCallback(AChoreographer_refreshRateCallback cb, void* data)
             EXCLUDES(gChoreographers.lock);
     void unregisterRefreshRateCallback(AChoreographer_refreshRateCallback cb, void* data);
@@ -97,27 +101,35 @@ public:
     virtual void handleMessage(const Message& message) override;
 
     static void initJVM(JNIEnv* env);
-    static Choreographer* getForThread();
+    static sp<Choreographer> getForThread();
     static void signalRefreshRateCallbacks(nsecs_t vsyncPeriod) EXCLUDES(gChoreographers.lock);
     static int64_t getStartTimeNanosForVsyncId(AVsyncId vsyncId) EXCLUDES(gChoreographers.lock);
     virtual ~Choreographer() override EXCLUDES(gChoreographers.lock);
     int64_t getFrameInterval() const;
     bool inCallback() const;
+    const sp<Looper> getLooper();
 
 private:
     Choreographer(const Choreographer&) = delete;
+    explicit Choreographer(const sp<Looper>& looper, const sp<IBinder>& layerHandle = nullptr)
+            EXCLUDES(gChoreographers.lock);
+    friend class sp<Choreographer>;
 
     void dispatchVsync(nsecs_t timestamp, PhysicalDisplayId displayId, uint32_t count,
                        VsyncEventData vsyncEventData) override;
+    void dispatchCallbacks(const std::vector<FrameCallback>&, VsyncEventData vsyncEventData,
+                           nsecs_t timestamp);
     void dispatchHotplug(nsecs_t timestamp, PhysicalDisplayId displayId, bool connected) override;
     void dispatchHotplugConnectionError(nsecs_t timestamp, int32_t connectionError) override;
-    void dispatchModeChanged(nsecs_t timestamp, PhysicalDisplayId displayId, int32_t modeId,
-                             nsecs_t vsyncPeriod) override;
+    void dispatchModeChangedWithFrameRateOverrides(
+            nsecs_t timestamp, PhysicalDisplayId displayId, int32_t modeId, nsecs_t vsyncPeriod,
+            nsecs_t appVsyncOffset, nsecs_t presentationDeadline,
+            std::vector<FrameRateOverride> overrides,
+            std::vector<SupportedRefreshRate> supportedRefreshRates) override;
     void dispatchNullEvent(nsecs_t, PhysicalDisplayId) override;
-    void dispatchFrameRateOverrides(nsecs_t timestamp, PhysicalDisplayId displayId,
-                                    std::vector<FrameRateOverride> overrides) override;
     void dispatchHdcpLevelsChanged(PhysicalDisplayId displayId, int32_t connectedLevel,
                                    int32_t maxLevel) override;
+    void dispatchModeRejected(PhysicalDisplayId displayId, int32_t modeId) override;
 
     void scheduleCallbacks();
 

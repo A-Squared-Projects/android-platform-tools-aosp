@@ -15,16 +15,14 @@
  */
 
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
-#undef LOG_TAG
-#define LOG_TAG "VSyncReactor"
+
 //#define LOG_NDEBUG 0
 
 #include <assert.h>
+#include <common/trace.h>
 #include <cutils/properties.h>
 #include <ftl/concat.h>
-#include <gui/TraceUtils.h>
 #include <log/log.h>
-#include <utils/Trace.h>
 
 #include "../TracedOrdinal.h"
 #include "VSyncDispatch.h"
@@ -52,8 +50,27 @@ VSyncReactor::VSyncReactor(PhysicalDisplayId id, std::unique_ptr<Clock> clock,
 
 VSyncReactor::~VSyncReactor() = default;
 
+bool VSyncReactor::updateTrackerWithSignaledFences() {
+    bool timestampAccepted = true;
+    for (auto it = mUnfiredFences.begin(); it != mUnfiredFences.end();) {
+        auto const time = FlagManager::getInstance().reset_model_flushes_fence()
+                ? (*it)->getSignalTime()
+                : (*it)->getCachedSignalTime();
+        if (time == Fence::SIGNAL_TIME_PENDING) {
+            it++;
+        } else if (time == Fence::SIGNAL_TIME_INVALID) {
+            it = mUnfiredFences.erase(it);
+        } else {
+            timestampAccepted &= mTracker.addVsyncTimestamp(time);
+
+            it = mUnfiredFences.erase(it);
+        }
+    }
+    return timestampAccepted;
+}
+
 bool VSyncReactor::addPresentFence(std::shared_ptr<FenceTime> fence) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
 
     if (!fence) {
         return false;
@@ -66,25 +83,12 @@ bool VSyncReactor::addPresentFence(std::shared_ptr<FenceTime> fence) {
 
     std::lock_guard lock(mMutex);
     if (mExternalIgnoreFences || mInternalIgnoreFences) {
-        ATRACE_FORMAT_INSTANT("mExternalIgnoreFences=%d mInternalIgnoreFences=%d",
-            mExternalIgnoreFences, mInternalIgnoreFences);
+        SFTRACE_FORMAT_INSTANT("mExternalIgnoreFences=%d mInternalIgnoreFences=%d",
+                               mExternalIgnoreFences, mInternalIgnoreFences);
         return true;
     }
 
-    bool timestampAccepted = true;
-    for (auto it = mUnfiredFences.begin(); it != mUnfiredFences.end();) {
-        auto const time = (*it)->getCachedSignalTime();
-        if (time == Fence::SIGNAL_TIME_PENDING) {
-            it++;
-        } else if (time == Fence::SIGNAL_TIME_INVALID) {
-            it = mUnfiredFences.erase(it);
-        } else {
-            timestampAccepted &= mTracker.addVsyncTimestamp(time);
-
-            it = mUnfiredFences.erase(it);
-        }
-    }
-
+    bool timestampAccepted = updateTrackerWithSignaledFences();
     if (signalTime == Fence::SIGNAL_TIME_PENDING) {
         if (mPendingLimit == mUnfiredFences.size()) {
             mUnfiredFences.erase(mUnfiredFences.begin());
@@ -116,12 +120,15 @@ void VSyncReactor::setIgnorePresentFencesInternal(bool ignore) {
 
 void VSyncReactor::updateIgnorePresentFencesInternal() {
     if (mExternalIgnoreFences || mInternalIgnoreFences) {
+        if (FlagManager::getInstance().reset_model_flushes_fence()) {
+            updateTrackerWithSignaledFences();
+        }
         mUnfiredFences.clear();
     }
 }
 
 void VSyncReactor::startPeriodTransitionInternal(ftl::NonNull<DisplayModePtr> modePtr) {
-    ATRACE_FORMAT("%s %" PRIu64, __func__, mId.value);
+    SFTRACE_FORMAT("%s %" PRIu64, __func__, mId.value);
     mPeriodConfirmationInProgress = true;
     mModePtrTransitioningTo = modePtr.get();
     mMoreSamplesNeeded = true;
@@ -129,20 +136,21 @@ void VSyncReactor::startPeriodTransitionInternal(ftl::NonNull<DisplayModePtr> mo
 }
 
 void VSyncReactor::endPeriodTransition() {
-    ATRACE_FORMAT("%s %" PRIu64, __func__, mId.value);
+    SFTRACE_FORMAT("%s %" PRIu64, __func__, mId.value);
     mModePtrTransitioningTo.reset();
     mPeriodConfirmationInProgress = false;
     mLastHwVsync.reset();
 }
 
 void VSyncReactor::onDisplayModeChanged(ftl::NonNull<DisplayModePtr> modePtr, bool force) {
-    ATRACE_INT64(ftl::Concat("VSR-", __func__, " ", mId.value).c_str(),
-                 modePtr->getVsyncRate().getPeriodNsecs());
+    SFTRACE_INT64(ftl::Concat("VSR-", __func__, " ", mId.value).c_str(),
+                  modePtr->getVsyncRate().getPeriodNsecs());
     std::lock_guard lock(mMutex);
     mLastHwVsync.reset();
 
-    if (!mSupportKernelIdleTimer &&
-        modePtr->getVsyncRate().getPeriodNsecs() == mTracker.currentPeriod() && !force) {
+    // kernel idle timer is not applicable for VRR
+    const bool supportKernelIdleTimer = mSupportKernelIdleTimer && !modePtr->getVrrConfig();
+    if (!supportKernelIdleTimer && mTracker.isCurrentMode(modePtr) && !force) {
         endPeriodTransition();
         setIgnorePresentFencesInternal(false);
         mMoreSamplesNeeded = false;
@@ -161,7 +169,7 @@ bool VSyncReactor::periodConfirmed(nsecs_t vsync_timestamp, std::optional<nsecs_
         return true;
     }
 
-    if (!mLastHwVsync && !HwcVsyncPeriod) {
+    if (!mLastHwVsync.get() && !HwcVsyncPeriod) {
         return false;
     }
 
@@ -182,7 +190,7 @@ bool VSyncReactor::periodConfirmed(nsecs_t vsync_timestamp, std::optional<nsecs_
         return std::abs(*HwcVsyncPeriod - period) < allowance;
     }
 
-    auto const distance = vsync_timestamp - *mLastHwVsync;
+    auto const distance = vsync_timestamp - *mLastHwVsync.get();
     return std::abs(distance - period) < allowance;
 }
 
@@ -192,29 +200,39 @@ bool VSyncReactor::addHwVsyncTimestamp(nsecs_t timestamp, std::optional<nsecs_t>
 
     std::lock_guard lock(mMutex);
     if (periodConfirmed(timestamp, hwcVsyncPeriod)) {
-        ATRACE_FORMAT("VSR %" PRIu64 ": period confirmed", mId.value);
+        SFTRACE_FORMAT("VSR %" PRIu64 ": period confirmed", mId.value);
         if (mModePtrTransitioningTo) {
             mTracker.setDisplayModePtr(ftl::as_non_null(mModePtrTransitioningTo));
             *periodFlushed = true;
         }
 
-        if (mLastHwVsync) {
-            mTracker.addVsyncTimestamp(*mLastHwVsync);
+        if (mLastHwVsync.get() &&
+            (!FlagManager::getInstance().add_first_vsync_to_tracker() || !mLastHwVsync.isFirst())) {
+            mTracker.addVsyncTimestamp(*mLastHwVsync.get());
         }
         mTracker.addVsyncTimestamp(timestamp);
 
         endPeriodTransition();
         mMoreSamplesNeeded = mTracker.needsMoreSamples();
     } else if (mPeriodConfirmationInProgress) {
-        ATRACE_FORMAT("VSR %" PRIu64 ": still confirming period", mId.value);
-        mLastHwVsync = timestamp;
+        SFTRACE_FORMAT("VSR %" PRIu64 ": still confirming period", mId.value);
+        mLastHwVsync.set(timestamp);
+        // Add the first vsync callback to the tracker to be based on a fresh vsync
+        if (FlagManager::getInstance().add_first_vsync_to_tracker() && mLastHwVsync.isFirst()) {
+            mTracker.addVsyncTimestamp(*mLastHwVsync.get());
+        }
         mMoreSamplesNeeded = true;
         *periodFlushed = false;
     } else {
-        ATRACE_FORMAT("VSR %" PRIu64 ": adding sample", mId.value);
+        SFTRACE_FORMAT("VSR %" PRIu64 ": adding sample", mId.value);
         *periodFlushed = false;
         mTracker.addVsyncTimestamp(timestamp);
         mMoreSamplesNeeded = mTracker.needsMoreSamples();
+    }
+
+    if (mExternalIgnoreFences) {
+      // keep HWVSync on as long as we ignore present fences.
+      mMoreSamplesNeeded = true;
     }
 
     if (!mMoreSamplesNeeded) {
@@ -226,6 +244,12 @@ bool VSyncReactor::addHwVsyncTimestamp(nsecs_t timestamp, std::optional<nsecs_t>
 void VSyncReactor::setDisplayPowerMode(hal::PowerMode powerMode) {
     std::scoped_lock lock(mMutex);
     mDisplayPowerMode = powerMode;
+}
+
+void VSyncReactor::resetModel() {
+    std::lock_guard lock(mMutex);
+    updateTrackerWithSignaledFences();
+    mTracker.resetModel();
 }
 
 void VSyncReactor::dump(std::string& result) const {
@@ -243,9 +267,9 @@ void VSyncReactor::dump(std::string& result) const {
         StringAppendF(&result, "mModePtrTransitioningTo=nullptr\n");
     }
 
-    if (mLastHwVsync) {
+    if (mLastHwVsync.get()) {
         StringAppendF(&result, "Last HW vsync was %.2fms ago\n",
-                      (mClock->now() - *mLastHwVsync) / 1e6f);
+                      (mClock->now() - *mLastHwVsync.get()) / 1e6f);
     } else {
         StringAppendF(&result, "No Last HW vsync\n");
     }

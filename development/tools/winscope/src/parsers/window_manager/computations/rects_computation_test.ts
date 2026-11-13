@@ -14,16 +14,24 @@
  * limitations under the License.
  */
 
-import {assertDefined} from 'common/assert_utils';
-import {com} from 'protos/windowmanager/latest/static';
+import {assertDefined} from 'common/assert';
+import {perfetto} from 'protos/perfetto/trace/static';
+import {com} from 'protos/windowmanager/udc/static';
 import {HierarchyTreeBuilder} from 'test/unit/hierarchy_tree_builder';
-import {TreeNodeUtils} from 'test/unit/tree_node_utils';
-import {TraceRect} from 'trace/trace_rect';
-import {TraceRectBuilder} from 'trace/trace_rect_builder';
-import {HierarchyTreeNode} from 'trace/tree_node/hierarchy_tree_node';
+import {makeHierarchyNode} from 'test/unit/tree_node_test_helpers';
+import {HierarchyTreeNode} from 'tree_node/hierarchy_tree_node';
+import {TraceRect} from 'tree_node/trace_rect';
+import {TraceRectBuilder} from 'tree_node/trace_rect_builder';
 import {RectsComputation} from './rects_computation';
 
-describe('RectsComputation', () => {
+type DisplayContentProto =
+  | com.android.server.wm.IDisplayContentProto
+  | perfetto.protos.IDisplayContentProto;
+type WindowStateProto =
+  | com.android.server.wm.IWindowStateProto
+  | perfetto.protos.IWindowStateProto;
+
+describe('WindowManager RectsComputation', () => {
   let hierarchyRoot: HierarchyTreeNode;
   let computation: RectsComputation;
   let displayContent: HierarchyTreeNode;
@@ -32,6 +40,7 @@ describe('RectsComputation', () => {
     hierarchyRoot = new HierarchyTreeBuilder()
       .setId('WindowManagerState')
       .setName('root')
+      .setProperties({focusedApp: 'testApp'})
       .setChildren([
         {
           id: 1,
@@ -43,7 +52,20 @@ describe('RectsComputation', () => {
               logicalWidth: 5,
               logicalHeight: 5,
             },
-          } as com.android.server.wm.IDisplayContentProto,
+          } as DisplayContentProto,
+        },
+        {
+          id: 2,
+          name: 'Focused Display',
+          properties: {
+            id: 2,
+            name: 'Focused Display',
+            displayInfo: {
+              logicalWidth: 5,
+              logicalHeight: 5,
+            },
+            focusedApp: 'testApp',
+          } as DisplayContentProto,
         },
       ])
       .build();
@@ -62,21 +84,45 @@ describe('RectsComputation', () => {
         .setHeight(5)
         .setId('1 Test Display')
         .setName('Display - Test Display')
-        .setCornerRadius(0)
         .setDepth(0)
         .setGroupId(1)
         .setIsVisible(false)
         .setIsDisplay(true)
-        .setIsVirtual(false)
+        .setIsActiveDisplay(false)
+        .setIsSpy(false)
+        .build(),
+
+      new TraceRectBuilder()
+        .setX(0)
+        .setY(0)
+        .setWidth(5)
+        .setHeight(5)
+        .setId('2 Focused Display')
+        .setName('Display - Focused Display')
+        .setDepth(0)
+        .setGroupId(2)
+        .setIsVisible(false)
+        .setIsDisplay(true)
+        .setIsActiveDisplay(true)
+        .setIsSpy(false)
         .build(),
     ];
 
     computation.setRoot(hierarchyRoot).executeInPlace();
-    expect(displayContent.getRects()).toEqual(expectedDisplayRects);
+
+    const displayRects = displayContent
+      .getRects()
+      ?.concat(
+        assertDefined(
+          hierarchyRoot.getChildByName('Focused Display')?.getRects(),
+        ),
+      );
+
+    expect(displayRects).toEqual(expectedDisplayRects);
   });
 
   it('makes window state rects', () => {
-    const state1Node = TreeNodeUtils.makeHierarchyNode({
+    const state1Node = makeHierarchyNode({
       id: 'WindowState',
       name: 'state1',
       displayId: 1,
@@ -84,10 +130,13 @@ describe('RectsComputation', () => {
       windowFrames: {
         frame: {left: 0, top: 0, right: 1, bottom: 1},
       },
-    } as com.android.server.wm.IWindowStateProto);
+      attributes: {
+        alpha: 0.5,
+      },
+    } as WindowStateProto);
 
     state1Node.addOrReplaceChild(
-      TreeNodeUtils.makeHierarchyNode({
+      makeHierarchyNode({
         id: 'WindowState',
         name: 'state2',
         displayId: 1,
@@ -95,7 +144,10 @@ describe('RectsComputation', () => {
         windowFrames: {
           frame: {left: 0, top: 0, right: 2, bottom: 2},
         },
-      } as com.android.server.wm.IWindowStateProto),
+        attributes: {
+          alpha: 0.5,
+        },
+      } as WindowStateProto),
     );
     displayContent.addOrReplaceChild(state1Node);
 
@@ -107,12 +159,12 @@ describe('RectsComputation', () => {
         .setHeight(1)
         .setId('WindowState state1')
         .setName('state1')
-        .setCornerRadius(0)
         .setDepth(1)
         .setGroupId(1)
         .setIsVisible(true)
         .setIsDisplay(false)
-        .setIsVirtual(false)
+        .setOpacity(0.5)
+        .setIsSpy(false)
         .build(),
 
       new TraceRectBuilder()
@@ -122,12 +174,12 @@ describe('RectsComputation', () => {
         .setHeight(2)
         .setId('WindowState state2')
         .setName('state2')
-        .setCornerRadius(0)
         .setDepth(2)
         .setGroupId(1)
         .setIsVisible(false)
         .setIsDisplay(false)
-        .setIsVirtual(false)
+        .setOpacity(0.5)
+        .setIsSpy(false)
         .build(),
     ];
 

@@ -24,27 +24,22 @@ namespace android::mock {
 
 class EventThread : public android::EventThread {
 public:
-    static constexpr auto kCallingUid = static_cast<uid_t>(0);
-
     EventThread();
     ~EventThread() override;
 
-    // TODO(b/302035909): workaround otherwise gtest complains about
-    //  error: no viable conversion from
-    //  'tuple<android::ftl::Flags<android::gui::ISurfaceComposer::EventRegistration> &&>' to 'const
-    //  tuple<android::ftl::Flags<android::gui::ISurfaceComposer::EventRegistration>>'
-    sp<EventThreadConnection> createEventConnection(EventRegistrationFlags flags) const override {
-        return createEventConnection(false, flags);
-    }
-    MOCK_METHOD(sp<EventThreadConnection>, createEventConnection, (bool, EventRegistrationFlags),
-                (const));
-
+    MOCK_METHOD(sp<EventThreadConnection>, createEventConnection, (EventRegistrationFlags),
+                (const, override));
     MOCK_METHOD(void, enableSyntheticVsync, (bool), (override));
+    MOCK_METHOD(void, omitVsyncDispatching, (bool), (override));
     MOCK_METHOD(void, onHotplugReceived, (PhysicalDisplayId, bool), (override));
     MOCK_METHOD(void, onHotplugConnectionError, (int32_t), (override));
-    MOCK_METHOD(void, onModeChanged, (const scheduler::FrameRateMode&), (override));
-    MOCK_METHOD(void, onFrameRateOverridesChanged,
-                (PhysicalDisplayId, std::vector<FrameRateOverride>), (override));
+    MOCK_METHOD(void, onModeRejected, (PhysicalDisplayId displayId, DisplayModeId modeId),
+                (override));
+    MOCK_METHOD(void, onModeAndFrameRateOverridesChanged,
+                (PhysicalDisplayId, const scheduler::FrameRateMode&,
+                 std::vector<FrameRateOverride> overrides, std::vector<float> supportedRefreshRates,
+                 scheduler::VsyncConfigSet),
+                (override));
     MOCK_METHOD(void, dump, (std::string&), (const, override));
     MOCK_METHOD(void, setDuration,
                 (std::chrono::nanoseconds workDuration, std::chrono::nanoseconds readyDuration),
@@ -55,7 +50,7 @@ public:
                 (override));
     MOCK_METHOD(void, requestNextVsync, (const sp<android::EventThreadConnection>&), (override));
     MOCK_METHOD(VsyncEventData, getLatestVsyncEventData,
-                (const sp<android::EventThreadConnection>&), (const, override));
+                (const sp<android::EventThreadConnection>&, nsecs_t), (const, override));
     MOCK_METHOD(void, requestLatestConfig, (const sp<android::EventThreadConnection>&));
     MOCK_METHOD(void, pauseVsyncCallback, (bool));
     MOCK_METHOD(void, onNewVsyncSchedule, (std::shared_ptr<scheduler::VsyncSchedule>), (override));

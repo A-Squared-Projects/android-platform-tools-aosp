@@ -291,6 +291,7 @@ static AvbSlotVerifyResult load_and_verify_hash_partition(
   bool image_preloaded = false;
   uint8_t* digest;
   size_t digest_len;
+  AvbDigestType digest_type;
   const char* found;
   uint64_t image_size;
   size_t expected_digest_len = 0;
@@ -400,12 +401,14 @@ static AvbSlotVerifyResult load_and_verify_hash_partition(
     avb_sha256_update(&sha256_ctx, image_buf, image_size_to_hash);
     digest = avb_sha256_final(&sha256_ctx);
     digest_len = AVB_SHA256_DIGEST_SIZE;
+    digest_type = AVB_DIGEST_TYPE_SHA256;
   } else if (avb_strcmp((const char*)hash_desc.hash_algorithm, "sha512") == 0) {
     avb_sha512_init(&sha512_ctx);
     avb_sha512_update(&sha512_ctx, desc_salt, hash_desc.salt_len);
     avb_sha512_update(&sha512_ctx, image_buf, image_size_to_hash);
     digest = avb_sha512_final(&sha512_ctx);
     digest_len = AVB_SHA512_DIGEST_SIZE;
+    digest_type = AVB_DIGEST_TYPE_SHA512;
   } else {
     avb_error(part_name, ": Unsupported hash algorithm.\n");
     ret = AVB_SLOT_VERIFY_RESULT_ERROR_INVALID_METADATA;
@@ -460,6 +463,14 @@ out:
     }
     loaded_partition =
         &slot_data->loaded_partitions[slot_data->num_loaded_partitions++];
+    loaded_partition->digest = avb_calloc(digest_len);
+    if (loaded_partition->digest == NULL) {
+      ret = AVB_SLOT_VERIFY_RESULT_ERROR_OOM;
+      goto fail;
+    }
+    avb_memcpy(loaded_partition->digest, digest, digest_len);
+    loaded_partition->digest_size = digest_len;
+    loaded_partition->digest_type = digest_type;
     loaded_partition->partition_name = avb_strdup(found);
     loaded_partition->data_size = image_size;
     loaded_partition->data = image_buf;
@@ -565,6 +576,8 @@ static AvbSlotVerifyResult load_and_verify_vbmeta(
     size_t expected_public_key_length,
     AvbSlotVerifyData* slot_data,
     AvbAlgorithmType* out_algorithm_type,
+    uint8_t** out_toplevel_vbmeta_public_key_data,
+    size_t* out_toplevel_vbmeta_public_key_length,
     AvbCmdlineSubstList* out_additional_cmdline_subst,
     bool use_ab_suffix) {
   char full_partition_name[AVB_PART_NAME_MAX_SIZE];
@@ -753,6 +766,8 @@ static AvbSlotVerifyResult load_and_verify_vbmeta(
                                    0 /* expected_public_key_length */,
                                    slot_data,
                                    out_algorithm_type,
+                                   out_toplevel_vbmeta_public_key_data,
+                                   out_toplevel_vbmeta_public_key_length,
                                    out_additional_cmdline_subst,
                                    use_ab_suffix);
       goto out;
@@ -772,6 +787,22 @@ static AvbSlotVerifyResult load_and_verify_vbmeta(
   switch (vbmeta_ret) {
     case AVB_VBMETA_VERIFY_RESULT_OK:
       avb_assert(pk_data != NULL && pk_len > 0);
+      if (is_main_vbmeta) {
+        if (out_toplevel_vbmeta_public_key_data != NULL) {
+          *out_toplevel_vbmeta_public_key_data = avb_malloc(pk_len);
+          if (*out_toplevel_vbmeta_public_key_data == NULL) {
+            ret = AVB_SLOT_VERIFY_RESULT_ERROR_OOM;
+            goto out;
+          }
+          // Copy the public key data into the output parameter since pk_data
+          // is a pointer to data in vbmeta_buf, whose memory gets deallocated
+          // at the end of this function.
+          avb_memcpy(*out_toplevel_vbmeta_public_key_data, pk_data, pk_len);
+        }
+        if (out_toplevel_vbmeta_public_key_length != NULL) {
+          *out_toplevel_vbmeta_public_key_length = pk_len;
+        }
+      }
       break;
 
     case AVB_VBMETA_VERIFY_RESULT_OK_NOT_SIGNED:
@@ -1052,6 +1083,8 @@ static AvbSlotVerifyResult load_and_verify_vbmeta(
                                    chain_desc.public_key_len,
                                    slot_data,
                                    NULL, /* out_algorithm_type */
+                                   out_toplevel_vbmeta_public_key_data,
+                                   out_toplevel_vbmeta_public_key_length,
                                    NULL, /* out_additional_cmdline_subst */
                                    use_ab_suffix);
         if (sub_ret != AVB_SLOT_VERIFY_RESULT_OK) {
@@ -1393,6 +1426,8 @@ AvbSlotVerifyResult avb_slot_verify(AvbOps* ops,
   AvbAlgorithmType algorithm_type = AVB_ALGORITHM_TYPE_NONE;
   bool using_boot_for_vbmeta = false;
   AvbVBMetaImageHeader toplevel_vbmeta;
+  uint8_t* toplevel_vbmeta_public_key_data = NULL;
+  size_t toplevel_vbmeta_public_key_length = 0;
   bool allow_verification_error =
       (flags & AVB_SLOT_VERIFY_FLAGS_ALLOW_VERIFICATION_ERROR);
   AvbCmdlineSubstList* additional_cmdline_subst = NULL;
@@ -1483,21 +1518,24 @@ AvbSlotVerifyResult avb_slot_verify(AvbOps* ops,
 
     /* No vbmeta partition, go through each of the requested partitions... */
     for (size_t n = 0; requested_partitions[n] != NULL; n++) {
-      ret = load_and_verify_vbmeta(ops,
-                                   requested_partitions,
-                                   ab_suffix,
-                                   flags,
-                                   allow_verification_error,
-                                   0 /* toplevel_vbmeta_flags */,
-                                   0 /* rollback_index_location */,
-                                   requested_partitions[n],
-                                   avb_strlen(requested_partitions[n]),
-                                   NULL /* expected_public_key */,
-                                   0 /* expected_public_key_length */,
-                                   slot_data,
-                                   &algorithm_type,
-                                   additional_cmdline_subst,
-                                   true /*use_ab_suffix*/);
+      ret = load_and_verify_vbmeta(
+          ops,
+          requested_partitions,
+          ab_suffix,
+          flags,
+          allow_verification_error,
+          0 /* toplevel_vbmeta_flags */,
+          0 /* rollback_index_location */,
+          requested_partitions[n],
+          avb_strlen(requested_partitions[n]),
+          NULL /* expected_public_key */,
+          0 /* expected_public_key_length */,
+          slot_data,
+          &algorithm_type,
+          NULL /* out_toplevel_vbmeta_public_key_data */,
+          NULL /* out_toplevel_vbmeta_public_key_length */,
+          additional_cmdline_subst,
+          true /*use_ab_suffix*/);
       if (!allow_verification_error && ret != AVB_SLOT_VERIFY_RESULT_OK) {
         goto fail;
       }
@@ -1518,6 +1556,8 @@ AvbSlotVerifyResult avb_slot_verify(AvbOps* ops,
                                  0 /* expected_public_key_length */,
                                  slot_data,
                                  &algorithm_type,
+                                 &toplevel_vbmeta_public_key_data,
+                                 &toplevel_vbmeta_public_key_length,
                                  additional_cmdline_subst,
                                  true /*use_ab_suffix*/);
     if (!allow_verification_error && ret != AVB_SLOT_VERIFY_RESULT_OK) {
@@ -1598,6 +1638,8 @@ AvbSlotVerifyResult avb_slot_verify(AvbOps* ops,
                                  flags,
                                  slot_data,
                                  &toplevel_vbmeta,
+                                 toplevel_vbmeta_public_key_data,
+                                 toplevel_vbmeta_public_key_length,
                                  algorithm_type,
                                  hashtree_error_mode,
                                  resolved_hashtree_error_mode);
@@ -1631,6 +1673,10 @@ AvbSlotVerifyResult avb_slot_verify(AvbOps* ops,
     avb_slot_verify_data_free(slot_data);
   }
 
+  if (toplevel_vbmeta_public_key_data != NULL) {
+    avb_free(toplevel_vbmeta_public_key_data);
+  }
+
   avb_free_cmdline_subst_list(additional_cmdline_subst);
   additional_cmdline_subst = NULL;
 
@@ -1643,6 +1689,9 @@ AvbSlotVerifyResult avb_slot_verify(AvbOps* ops,
 fail:
   if (slot_data != NULL) {
     avb_slot_verify_data_free(slot_data);
+  }
+  if (toplevel_vbmeta_public_key_data != NULL) {
+    avb_free(toplevel_vbmeta_public_key_data);
   }
   if (additional_cmdline_subst != NULL) {
     avb_free_cmdline_subst_list(additional_cmdline_subst);
@@ -1679,6 +1728,9 @@ void avb_slot_verify_data_free(AvbSlotVerifyData* data) {
       }
       if (loaded_partition->data != NULL && !loaded_partition->preloaded) {
         avb_free(loaded_partition->data);
+      }
+      if (loaded_partition->digest != NULL) {
+        avb_free(loaded_partition->digest);
       }
     }
     avb_free(data->loaded_partitions);

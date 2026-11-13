@@ -40,7 +40,7 @@ public:
                                                     const InputReaderConfiguration& config,
                                                     ConfigurationChanges changes) override;
     [[nodiscard]] std::list<NotifyArgs> reset(nsecs_t when) override;
-    [[nodiscard]] std::list<NotifyArgs> process(const RawEvent* rawEvent) override;
+    [[nodiscard]] std::list<NotifyArgs> process(const RawEvent& rawEvent) override;
     bool enableSensor(InputDeviceSensorType sensorType, std::chrono::microseconds samplingPeriod,
                       std::chrono::microseconds maxBatchReportLatency) override;
     void disableSensor(InputDeviceSensorType sensorType) override;
@@ -101,7 +101,7 @@ private:
         std::array<int32_t, SENSOR_VEC_LEN> dataVec;
         void resetValue() {
             this->enabled = false;
-            this->accuracy = InputDeviceSensorAccuracy::ACCURACY_NONE;
+            this->accuracy = InputDeviceSensorAccuracy::NONE;
             this->samplingPeriod = std::chrono::nanoseconds(0);
             this->maxBatchReportLatency = std::chrono::nanoseconds(0);
             this->lastSampleTimeNs = std::nullopt;

@@ -14,33 +14,40 @@
  * limitations under the License.
  */
 
-import {Timestamp, TimestampType} from 'common/time';
+import {Timestamp} from 'common/time/time';
 import {
+  CustomQueryParamTypeMap,
   CustomQueryParserResultTypeMap,
   CustomQueryType,
-} from 'trace/custom_query';
-import {FrameMap} from 'trace/frame_map';
-import {FrameMapBuilder} from 'trace/frame_map_builder';
+} from 'trace_api/custom_query';
+import {FrameMap} from 'trace_api/frame_map';
+import {FrameMapBuilder} from 'trace_api/frame_map_builder';
 import {
   AbsoluteEntryIndex,
   AbsoluteFrameIndex,
   EntriesRange,
-} from 'trace/index_types';
-import {Parser} from 'trace/parser';
-import {Trace} from 'trace/trace';
-import {TraceType} from 'trace/trace_type';
+} from 'trace_api/index_types';
+import {Parser} from 'trace_api/parser';
+import {Trace} from 'trace_api/trace';
+import {TraceType} from 'trace_api/trace_type';
 import {ParserBuilder} from './parser_builder';
 
 export class TraceBuilder<T> {
   private type = TraceType.SURFACE_FLINGER;
   private parser?: Parser<T>;
-  private parserCustomQueryResult = new Map<CustomQueryType, {}>();
+  private parserCustomQueryResult = new Map<
+    CustomQueryType,
+    Map<
+      CustomQueryParamTypeMap[CustomQueryType],
+      CustomQueryParserResultTypeMap[CustomQueryType]
+    >
+  >();
   private entries?: T[];
   private timestamps?: Timestamp[];
-  private timestampType = TimestampType.REAL;
   private frameMap?: FrameMap;
   private frameMapBuilder?: FrameMapBuilder;
   private descriptors: string[] = [];
+  private isCorrupted = false;
 
   setType(type: TraceType): TraceBuilder<T> {
     this.type = type;
@@ -59,11 +66,6 @@ export class TraceBuilder<T> {
 
   setTimestamps(timestamps: Timestamp[]): TraceBuilder<T> {
     this.timestamps = timestamps;
-    return this;
-  }
-
-  setTimestampType(type: TimestampType): TraceBuilder<T> {
-    this.timestampType = type;
     return this;
   }
 
@@ -86,8 +88,24 @@ export class TraceBuilder<T> {
   setParserCustomQueryResult<Q extends CustomQueryType>(
     type: Q,
     result: CustomQueryParserResultTypeMap[Q],
+    param?: CustomQueryParamTypeMap[Q],
   ): TraceBuilder<T> {
-    this.parserCustomQueryResult.set(type, result);
+    const existingResult = this.parserCustomQueryResult.get(type);
+    if (existingResult) {
+      existingResult.set(param ?? 0, result);
+    } else {
+      this.parserCustomQueryResult.set(type, new Map([[param ?? 0, result]]));
+    }
+    return this;
+  }
+
+  setDescriptors(descriptors: string[]): TraceBuilder<T> {
+    this.descriptors = descriptors;
+    return this;
+  }
+
+  setIsCorrupted(value: boolean): TraceBuilder<T> {
+    this.isCorrupted = value;
     return this;
   }
 
@@ -105,7 +123,6 @@ export class TraceBuilder<T> {
       this.parser,
       this.descriptors,
       undefined,
-      this.timestampType,
       entriesRange,
     );
 
@@ -118,7 +135,9 @@ export class TraceBuilder<T> {
   }
 
   private createParser(): Parser<T> {
-    const builder = new ParserBuilder<T>().setType(this.type);
+    const builder = new ParserBuilder<T>()
+      .setType(this.type)
+      .setIsCorrupted(this.isCorrupted);
 
     if (this.timestamps) {
       builder.setTimestamps(this.timestamps);
@@ -128,9 +147,11 @@ export class TraceBuilder<T> {
       builder.setEntries(this.entries);
     }
 
-    this.parserCustomQueryResult?.forEach((result, queryType) => {
-      builder.setCustomQueryResult(queryType, result as any);
-    });
+    if (this.descriptors.length > 0) {
+      builder.setDescriptors(this.descriptors);
+    }
+
+    builder.setCustomQueryResult(this.parserCustomQueryResult);
 
     return builder.build();
   }

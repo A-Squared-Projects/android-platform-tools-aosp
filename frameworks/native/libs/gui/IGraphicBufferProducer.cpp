@@ -80,6 +80,8 @@ enum {
     QUERY_MULTIPLE,
     GET_LAST_QUEUED_BUFFER2,
     SET_FRAME_RATE,
+    SET_ADDITIONAL_OPTIONS,
+    SET_MAX_BUFER_COUNT_EXTENDED,
 };
 
 class BpGraphicBufferProducer : public BpInterface<IGraphicBufferProducer>
@@ -102,7 +104,7 @@ public:
         }
         bool nonNull = reply.readInt32();
         if (nonNull) {
-            *buf = new GraphicBuffer();
+            *buf = sp<GraphicBuffer>::make();
             result = reply.read(**buf);
             if(result != NO_ERROR) {
                 (*buf).clear();
@@ -148,6 +150,20 @@ public:
         return result;
     }
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+    status_t extendSlotCount(int size) override {
+        Parcel data, reply;
+        data.writeInterfaceToken(IGraphicBufferProducer::getInterfaceDescriptor());
+        data.writeInt32(size);
+        status_t result = remote()->transact(SET_MAX_BUFER_COUNT_EXTENDED, data, &reply);
+        if (result != NO_ERROR) {
+            return result;
+        }
+        result = reply.readInt32();
+        return result;
+    }
+#endif
+
     virtual status_t setAsyncMode(bool async) {
         Parcel data, reply;
         data.writeInterfaceToken(
@@ -181,7 +197,7 @@ public:
         }
 
         *buf = reply.readInt32();
-        *fence = new Fence();
+        *fence = sp<Fence>::make();
         result = reply.read(**fence);
         if (result != NO_ERROR) {
             fence->clear();
@@ -277,7 +293,7 @@ public:
         if (result == NO_ERROR) {
             bool nonNull = reply.readInt32();
             if (nonNull) {
-                *outBuffer = new GraphicBuffer;
+                *outBuffer = sp<GraphicBuffer>::make();
                 result = reply.read(**outBuffer);
                 if (result != NO_ERROR) {
                     outBuffer->clear();
@@ -286,7 +302,7 @@ public:
             }
             nonNull = reply.readInt32();
             if (nonNull) {
-                *outFence = new Fence;
+                *outFence = sp<Fence>::make();
                 result = reply.read(**outFence);
                 if (result != NO_ERROR) {
                     outBuffer->clear();
@@ -624,7 +640,7 @@ public:
         bool hasBuffer = reply.readBool();
         sp<GraphicBuffer> buffer;
         if (hasBuffer) {
-            buffer = new GraphicBuffer();
+            buffer = sp<GraphicBuffer>::make();
             result = reply.read(*buffer);
             if (result == NO_ERROR) {
                 result = reply.read(outTransformMatrix, sizeof(float) * 16);
@@ -634,7 +650,7 @@ public:
             ALOGE("getLastQueuedBuffer failed to read buffer: %d", result);
             return result;
         }
-        sp<Fence> fence(new Fence);
+        sp<Fence> fence = sp<Fence>::make();
         result = reply.read(*fence);
         if (result != NO_ERROR) {
             ALOGE("getLastQueuedBuffer failed to read fence: %d", result);
@@ -671,7 +687,7 @@ public:
         }
         sp<GraphicBuffer> buffer;
         if (hasBuffer) {
-            buffer = new GraphicBuffer();
+            buffer = sp<GraphicBuffer>::make();
             result = reply.read(*buffer);
             if (result == NO_ERROR) {
                 result = reply.read(*outRect);
@@ -684,7 +700,7 @@ public:
             ALOGE("getLastQueuedBuffer failed to read buffer: %d", result);
             return result;
         }
-        sp<Fence> fence(new Fence);
+        sp<Fence> fence = sp<Fence>::make();
         result = reply.read(*fence);
         if (result != NO_ERROR) {
             ALOGE("getLastQueuedBuffer failed to read fence: %d", result);
@@ -763,7 +779,7 @@ public:
         }
         return result;
     }
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_SETFRAMERATE)
+
     virtual status_t setFrameRate(float frameRate, int8_t compatibility,
                                   int8_t changeFrameRateStrategy) override {
         Parcel data, reply;
@@ -772,6 +788,25 @@ public:
         data.writeInt32(compatibility);
         data.writeInt32(changeFrameRateStrategy);
         status_t result = remote()->transact(SET_FRAME_RATE, data, &reply);
+        if (result == NO_ERROR) {
+            result = reply.readInt32();
+        }
+        return result;
+    }
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
+    virtual status_t setAdditionalOptions(const std::vector<gui::AdditionalOptions>& options) {
+        Parcel data, reply;
+        data.writeInterfaceToken(IGraphicBufferProducer::getInterfaceDescriptor());
+        if (options.size() > 100) {
+            return BAD_VALUE;
+        }
+        data.writeInt32(options.size());
+        for (const auto& it : options) {
+            data.writeCString(it.name.c_str());
+            data.writeInt64(it.value);
+        }
+        status_t result = remote()->transact(SET_ADDITIONAL_OPTIONS, data, &reply);
         if (result == NO_ERROR) {
             result = reply.readInt32();
         }
@@ -922,6 +957,8 @@ public:
         return mBase->setDequeueTimeout(timeout);
     }
 
+    status_t extendSlotCount(int size) override { return mBase->extendSlotCount(size); }
+
     status_t setLegacyBufferDrop(bool drop) override {
         return mBase->setLegacyBufferDrop(drop);
     }
@@ -961,6 +998,14 @@ IMPLEMENT_HYBRID_META_INTERFACE(GraphicBufferProducer,
 
 // ----------------------------------------------------------------------
 
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+status_t IGraphicBufferProducer::extendSlotCount(int size) {
+    // No-op for IGBP other than BufferQueue.
+    (void)size;
+    return INVALID_OPERATION;
+}
+#endif
+
 status_t IGraphicBufferProducer::setLegacyBufferDrop(bool drop) {
     // No-op for IGBP other than BufferQueue.
     (void) drop;
@@ -973,9 +1018,14 @@ status_t IGraphicBufferProducer::setAutoPrerotation(bool autoPrerotation) {
     return INVALID_OPERATION;
 }
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_SETFRAMERATE)
 status_t IGraphicBufferProducer::setFrameRate(float /*frameRate*/, int8_t /*compatibility*/,
                                               int8_t /*changeFrameRateStrategy*/) {
+    // No-op for IGBP other than BufferQueue.
+    return INVALID_OPERATION;
+}
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
+status_t IGraphicBufferProducer::setAdditionalOptions(const std::vector<gui::AdditionalOptions>&) {
     // No-op for IGBP other than BufferQueue.
     return INVALID_OPERATION;
 }
@@ -1182,7 +1232,7 @@ status_t BnGraphicBufferProducer::onTransact(
         }
         case ATTACH_BUFFER: {
             CHECK_INTERFACE(IGraphicBufferProducer, data, reply);
-            sp<GraphicBuffer> buffer = new GraphicBuffer();
+            sp<GraphicBuffer> buffer = sp<GraphicBuffer>::make();
             status_t result = data.read(*buffer.get());
             int slot = 0;
             if (result == NO_ERROR) {
@@ -1200,7 +1250,7 @@ status_t BnGraphicBufferProducer::onTransact(
                 return result;
             }
             for (sp<GraphicBuffer>& buffer : buffers) {
-                buffer = new GraphicBuffer();
+                buffer = sp<GraphicBuffer>::make();
                 result = data.read(*buffer.get());
                 if (result != NO_ERROR) {
                     return result;
@@ -1256,7 +1306,7 @@ status_t BnGraphicBufferProducer::onTransact(
         case CANCEL_BUFFER: {
             CHECK_INTERFACE(IGraphicBufferProducer, data, reply);
             int buf = data.readInt32();
-            sp<Fence> fence = new Fence();
+            sp<Fence> fence = sp<Fence>::make();
             status_t result = data.read(*fence.get());
             if (result == NO_ERROR) {
                 result = cancelBuffer(buf, fence);
@@ -1522,13 +1572,42 @@ status_t BnGraphicBufferProducer::onTransact(
             reply->writeInt32(result);
             return NO_ERROR;
         }
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_SETFRAMERATE)
         case SET_FRAME_RATE: {
             CHECK_INTERFACE(IGraphicBuffer, data, reply);
             float frameRate = data.readFloat();
             int8_t compatibility = data.readInt32();
             int8_t changeFrameRateStrategy = data.readInt32();
             status_t result = setFrameRate(frameRate, compatibility, changeFrameRateStrategy);
+            reply->writeInt32(result);
+            return NO_ERROR;
+        }
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
+        case SET_ADDITIONAL_OPTIONS: {
+            CHECK_INTERFACE(IGraphicBuffer, data, reply);
+            int optionCount = data.readInt32();
+            if (optionCount < 0 || optionCount > 100) {
+                return BAD_VALUE;
+            }
+            std::vector<gui::AdditionalOptions> opts;
+            opts.reserve(optionCount);
+            for (int i = 0; i < optionCount; i++) {
+                const char* name = data.readCString();
+                int64_t value = 0;
+                if (name == nullptr || data.readInt64(&value) != NO_ERROR) {
+                    return BAD_VALUE;
+                }
+                opts.emplace_back(name, value);
+            }
+            status_t result = setAdditionalOptions(opts);
+            reply->writeInt32(result);
+            return NO_ERROR;
+        }
+#endif
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+        case SET_MAX_BUFER_COUNT_EXTENDED: {
+            CHECK_INTERFACE(IGraphicBufferProducer, data, reply);
+            int size = data.readInt32();
+            status_t result = extendSlotCount(size);
             reply->writeInt32(result);
             return NO_ERROR;
         }

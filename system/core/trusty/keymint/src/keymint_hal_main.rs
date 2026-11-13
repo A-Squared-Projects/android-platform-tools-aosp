@@ -14,10 +14,12 @@
 // limitations under the License.
 
 //! This module implements the HAL service for Keymint (Rust) in Trusty.
+use clap::Parser;
 use kmr_hal::{
-    extract_rsp, keymint, rpc, secureclock, send_hal_info, sharedsecret, SerializedChannel,
+    extract_rsp, register_binder_services, send_hal_info, HalServiceError, SerializedChannel,
+    ALL_HALS,
 };
-use log::{error, info};
+use log::{error, info, warn};
 use std::{
     ffi::CString,
     ops::DerefMut,
@@ -30,15 +32,6 @@ const TRUSTY_KEYMINT_RUST_SERVICE_NAME: &str = "com.android.trusty.keymint";
 
 static SERVICE_INSTANCE: &str = "default";
 
-static KM_SERVICE_NAME: &str = "android.hardware.security.keymint.IKeyMintDevice";
-static RPC_SERVICE_NAME: &str = "android.hardware.security.keymint.IRemotelyProvisionedComponent";
-static SECURE_CLOCK_SERVICE_NAME: &str = "android.hardware.security.secureclock.ISecureClock";
-static SHARED_SECRET_SERVICE_NAME: &str = "android.hardware.security.sharedsecret.ISharedSecret";
-
-/// Local error type for failures in the HAL service.
-#[derive(Debug, Clone)]
-struct HalServiceError(String);
-
 #[derive(Debug)]
 struct TipcChannel(trusty::TipcChannel);
 
@@ -50,8 +43,7 @@ impl SerializedChannel for TipcChannel {
                 binder::ExceptionCode::TRANSACTION_FAILED,
                 Some(
                     &CString::new(format!(
-                        "Failed to send the request via tipc channel because of {:?}",
-                        e
+                        "Failed to send the request via tipc channel because of {e:?}"
                     ))
                     .unwrap(),
                 ),
@@ -66,8 +58,7 @@ impl SerializedChannel for TipcChannel {
                     binder::ExceptionCode::TRANSACTION_FAILED,
                     Some(
                         &CString::new(format!(
-                            "Failed to receive the response via tipc channel because of {:?}",
-                            e
+                            "Failed to receive the response via tipc channel because of {e:?}"
                         ))
                         .unwrap(),
                     ),
@@ -81,13 +72,21 @@ impl SerializedChannel for TipcChannel {
     }
 }
 
+#[derive(Parser, Debug)]
+struct Args {
+    /// Tipc device path
+    #[arg(short, long, default_value_t = DEFAULT_DEVICE.to_string())]
+    dev: String,
+}
+
 fn main() {
     if let Err(HalServiceError(e)) = inner_main() {
-        panic!("HAL service failed: {:?}", e);
+        panic!("HAL service failed: {e:?}");
     }
 }
 
 fn inner_main() -> Result<(), HalServiceError> {
+    let args = Args::parse();
     // Initialize Android logging.
     android_logger::init_once(
         android_logger::Config::default()
@@ -97,66 +96,39 @@ fn inner_main() -> Result<(), HalServiceError> {
     );
     // Redirect panic messages to logcat.
     panic::set_hook(Box::new(|panic_info| {
-        error!("{}", panic_info);
+        error!("{panic_info}");
     }));
 
-    info!("Trusty KM HAL service is starting.");
+    if cfg!(feature = "nonsecure") {
+        warn!("Non-secure Trusty KM HAL service is starting.");
+    } else {
+        info!("Trusty KM HAL service is starting.");
+    }
 
     info!("Starting thread pool now.");
     binder::ProcessState::start_thread_pool();
 
     // Create connection to the TA
-    let connection = trusty::TipcChannel::connect(DEFAULT_DEVICE, TRUSTY_KEYMINT_RUST_SERVICE_NAME)
-        .map_err(|e| {
-            HalServiceError(format!("Failed to connect to Trusty Keymint TA because of {:?}.", e))
-        })?;
+    let connection =
+        trusty::TipcChannel::connect(args.dev.as_str(), TRUSTY_KEYMINT_RUST_SERVICE_NAME).map_err(
+            |e| {
+                HalServiceError(format!(
+                    "Failed to connect to Trusty Keymint TA at {} because of {:?}.",
+                    args.dev, e
+                ))
+            },
+        )?;
     let tipc_channel = Arc::new(Mutex::new(TipcChannel(connection)));
 
-    // Register the Keymint service
-    let km_service = keymint::Device::new_as_binder(tipc_channel.clone());
-    let km_service_name = format!("{}/{}", KM_SERVICE_NAME, SERVICE_INSTANCE);
-    binder::add_service(&km_service_name, km_service.as_binder()).map_err(|e| {
-        HalServiceError(format!(
-            "Failed to register service {} because of {:?}.",
-            km_service_name, e
-        ))
-    })?;
+    #[cfg(feature = "nonsecure")]
+    kmr_hal_nonsecure::send_boot_info_and_attestation_id_info(&tipc_channel)?;
 
-    // Register the Remotely Provisioned Component service
-    let rpc_service = rpc::Device::new_as_binder(tipc_channel.clone());
-    let rpc_service_name = format!("{}/{}", RPC_SERVICE_NAME, SERVICE_INSTANCE);
-    binder::add_service(&rpc_service_name, rpc_service.as_binder()).map_err(|e| {
-        HalServiceError(format!(
-            "Failed to register service {} because of {:?}.",
-            rpc_service_name, e
-        ))
-    })?;
-
-    // Register the Secure Clock service
-    let sclock_service = secureclock::Device::new_as_binder(tipc_channel.clone());
-    let sclock_service_name = format!("{}/{}", SECURE_CLOCK_SERVICE_NAME, SERVICE_INSTANCE);
-    binder::add_service(&sclock_service_name, sclock_service.as_binder()).map_err(|e| {
-        HalServiceError(format!(
-            "Failed to register service {} because of {:?}.",
-            sclock_service_name, e
-        ))
-    })?;
-
-    // Register the Shared Secret service
-    let ssecret_service = sharedsecret::Device::new_as_binder(tipc_channel.clone());
-    let ssecret_service_name = format!("{}/{}", SHARED_SECRET_SERVICE_NAME, SERVICE_INSTANCE);
-    binder::add_service(&ssecret_service_name, ssecret_service.as_binder()).map_err(|e| {
-        HalServiceError(format!(
-            "Failed to register service {} because of {:?}.",
-            ssecret_service_name, e
-        ))
-    })?;
+    register_binder_services(&tipc_channel, ALL_HALS, SERVICE_INSTANCE)?;
 
     // Send the HAL service information to the TA
     send_hal_info(tipc_channel.lock().unwrap().deref_mut())
-        .map_err(|e| HalServiceError(format!("Failed to populate HAL info: {:?}", e)))?;
+        .map_err(|e| format!("Failed to populate HAL info: {e:?}"))?;
 
-    info!("Successfully registered KeyMint HAL services.");
     info!("Joining thread pool now.");
     binder::ProcessState::join_thread_pool();
     info!("KeyMint HAL service is terminating."); // should not reach here

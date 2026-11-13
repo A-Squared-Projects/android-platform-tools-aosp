@@ -50,10 +50,9 @@ public:
     using AidlDeviceInfo = aidl::com::android::server::inputflinger::DeviceInfo;
 
     explicit InputFilter(InputListenerInterface& listener, IInputFlingerRust& rust,
-                         InputFilterPolicyInterface& policy);
+                         InputFilterPolicyInterface& policy, JNIEnv* env);
     ~InputFilter() override = default;
     void notifyInputDevicesChanged(const NotifyInputDevicesChangedArgs& args) override;
-    void notifyConfigurationChanged(const NotifyConfigurationChangedArgs& args) override;
     void notifyKey(const NotifyKeyArgs& args) override;
     void notifyMotion(const NotifyMotionArgs& args) override;
     void notifySwitch(const NotifySwitchArgs& args) override;

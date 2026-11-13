@@ -24,9 +24,8 @@
 #include <unistd.h>
 
 #include <chrono>
-#include <iostream>
+#include <future>
 #include <memory>
-#include <string_view>
 
 #include <android-base/file.h>
 #include <android-base/properties.h>
@@ -44,7 +43,6 @@
 #include "snapuserd_core.h"
 #include "testing/dm_user_harness.h"
 #include "testing/host_harness.h"
-#include "testing/temp_device.h"
 #include "utility.h"
 
 namespace android {
@@ -64,10 +62,13 @@ using ::testing::TestWithParam;
 struct TestParam {
     bool io_uring;
     bool o_direct;
+    bool ublk;
     std::string compression;
     int block_size;
     int num_threads;
     uint32_t cow_op_merge_size;
+    uint32_t verification_block_size;
+    uint32_t num_verification_threads;
 };
 
 class SnapuserdTestBase : public ::testing::TestWithParam<TestParam> {
@@ -81,6 +82,8 @@ class SnapuserdTestBase : public ::testing::TestWithParam<TestParam> {
     std::unique_ptr<ICowWriter> CreateV3Cow();
 
     unique_fd GetCowFd() { return unique_fd{dup(cow_system_->fd)}; }
+
+    bool ShouldSkipSetUp();
 
     std::unique_ptr<ITestHarness> harness_;
     size_t size_ = 10_MiB;
@@ -97,11 +100,25 @@ class SnapuserdTestBase : public ::testing::TestWithParam<TestParam> {
 };
 
 void SnapuserdTestBase::SetUp() {
+    if (ShouldSkipSetUp()) {
+        GTEST_SKIP() << "snapuserd not supported on this device";
+    }
+
 #if __ANDROID__
     harness_ = std::make_unique<DmUserTestHarness>();
 #else
     harness_ = std::make_unique<HostTestHarness>();
 #endif
+}
+
+bool SnapuserdTestBase::ShouldSkipSetUp() {
+#ifdef __ANDROID__
+    if (!android::snapshot::CanUseUserspaceSnapshots() ||
+        android::snapshot::IsVendorFromAndroid12()) {
+        return true;
+    }
+#endif
+    return false;
 }
 
 void SnapuserdTestBase::TearDown() {
@@ -302,6 +319,9 @@ class SnapuserdTest : public SnapuserdTestBase {
 };
 
 void SnapuserdTest::SetUp() {
+    if (ShouldSkipSetUp()) {
+        GTEST_SKIP() << "snapuserd not supported on this device";
+    }
     ASSERT_NO_FATAL_FAILURE(SnapuserdTestBase::SetUp());
     handlers_ = std::make_unique<SnapshotHandlerManager>();
 }
@@ -312,6 +332,9 @@ void SnapuserdTest::TearDown() {
 }
 
 void SnapuserdTest::Shutdown() {
+    if (!handlers_) {
+        return;
+    }
     if (dmuser_dev_) {
         ASSERT_TRUE(dmuser_dev_->Destroy());
     }
@@ -707,11 +730,19 @@ void SnapuserdTest::CreateCowDeviceOrderedOps() {
 void SnapuserdTest::InitCowDevice() {
     auto factory = harness_->GetBlockServerFactory();
     auto opener = factory->CreateOpener(system_device_ctrl_name_);
-    handlers_->DisableVerification();
     const TestParam params = GetParam();
-    auto handler = handlers_->AddHandler(
-            system_device_ctrl_name_, cow_system_->path, base_dev_->GetPath(), base_dev_->GetPath(),
-            opener, 1, params.io_uring, params.o_direct, params.cow_op_merge_size);
+    HandlerOptions options = {
+            .num_worker_threads = 1,
+            .use_iouring = params.io_uring,
+            .o_direct = params.o_direct,
+            .skip_verification = true,
+            .cow_op_merge_size = params.cow_op_merge_size,
+            .verify_block_size = params.verification_block_size,
+            .num_verification_threads = params.num_verification_threads,
+    };
+    auto handler =
+            handlers_->AddHandler(system_device_ctrl_name_, cow_system_->path, base_dev_->GetPath(),
+                                  base_dev_->GetPath(), opener, options);
     ASSERT_NE(handler, nullptr);
     ASSERT_NE(handler->snapuserd(), nullptr);
 #ifdef __ANDROID__
@@ -907,6 +938,26 @@ TEST_P(SnapuserdTest, Snapshot_MERGE_IO_TEST_1) {
     // Issue I/O in parallel when merge is in-progress
     auto read_future =
             std::async(std::launch::async, &SnapuserdTest::ReadSnapshotDeviceAndValidate, this);
+    CheckMergeCompletion();
+    ValidateMerge();
+    read_future.wait();
+}
+
+TEST_P(SnapuserdTest, Snapshot_MERGE_PAUSE_RESUME) {
+    if (!harness_->HasUserDevice()) {
+        GTEST_SKIP() << "Skipping snapshot read; not supported";
+    }
+    ASSERT_NO_FATAL_FAILURE(SetupDefault());
+    // Start the merge
+    ASSERT_TRUE(StartMerge());
+    std::this_thread::sleep_for(300ms);
+    // Pause merge
+    handlers_->PauseMerge();
+    // Issue I/O after pausing the merge and validate
+    auto read_future =
+            std::async(std::launch::async, &SnapuserdTest::ReadSnapshotDeviceAndValidate, this);
+    // Resume the merge
+    handlers_->ResumeMerge();
     CheckMergeCompletion();
     ValidateMerge();
     read_future.wait();
@@ -1181,6 +1232,9 @@ void SnapuserdVariableBlockSizeTest::ReadSnapshotWithVariableBlockSize() {
 }
 
 void SnapuserdVariableBlockSizeTest::SetUp() {
+    if (ShouldSkipSetUp()) {
+        GTEST_SKIP() << "snapuserd not supported on this device";
+    }
     ASSERT_NO_FATAL_FAILURE(SnapuserdTest::SetUp());
 }
 
@@ -1228,9 +1282,17 @@ void HandlerTest::InitializeDevice() {
     ASSERT_NE(opener_, nullptr);
 
     const TestParam params = GetParam();
-    handler_ = std::make_shared<SnapshotHandler>(
-            system_device_ctrl_name_, cow_system_->path, base_dev_->GetPath(), base_dev_->GetPath(),
-            opener_, 1, false, false, params.o_direct, params.cow_op_merge_size);
+    HandlerOptions options = {
+            .num_worker_threads = 1,
+            .use_iouring = params.io_uring,
+            .o_direct = params.o_direct,
+            .cow_op_merge_size = params.cow_op_merge_size,
+            .verify_block_size = params.verification_block_size,
+            .num_verification_threads = params.num_verification_threads,
+    };
+    handler_ = std::make_shared<SnapshotHandler>(system_device_ctrl_name_, cow_system_->path,
+                                                 base_dev_->GetPath(), base_dev_->GetPath(),
+                                                 opener_, options);
     ASSERT_TRUE(handler_->InitCowDevice());
     ASSERT_TRUE(handler_->InitializeWorkers());
 
@@ -1244,6 +1306,9 @@ void HandlerTest::InitializeDevice() {
 }
 
 void HandlerTest::SetUp() {
+    if (ShouldSkipSetUp()) {
+        GTEST_SKIP() << "snapuserd not supported on this device";
+    }
     ASSERT_NO_FATAL_FAILURE(SnapuserdTestBase::SetUp());
     ASSERT_NO_FATAL_FAILURE(CreateBaseDevice());
     ASSERT_NO_FATAL_FAILURE(SetUpV2Cow());
@@ -1251,6 +1316,9 @@ void HandlerTest::SetUp() {
 }
 
 void HandlerTest::TearDown() {
+    if (ShouldSkipSetUp()) {
+        return;
+    }
     ASSERT_TRUE(factory_.DeleteQueue(system_device_ctrl_name_));
     ASSERT_TRUE(handler_thread_.get());
     SnapuserdTestBase::TearDown();
@@ -1326,6 +1394,9 @@ class HandlerTestV3 : public HandlerTest {
 };
 
 void HandlerTestV3::SetUp() {
+    if (ShouldSkipSetUp()) {
+        GTEST_SKIP() << "snapuserd not supported on this device";
+    }
     ASSERT_NO_FATAL_FAILURE(SnapuserdTestBase::SetUp());
     ASSERT_NO_FATAL_FAILURE(CreateBaseDevice());
     ASSERT_NO_FATAL_FAILURE(SetUpV3Cow());

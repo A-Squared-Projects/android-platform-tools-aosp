@@ -17,9 +17,12 @@
 #include <android-base/logging.h>
 #include <android-base/stringprintf.h>
 #include <gui/WindowInfo.h>
+#include <input/PrintTools.h>
 
 #include "InputTarget.h"
 #include "TouchState.h"
+
+#define INDENT "  "
 
 using namespace android::ftl::flag_operators;
 using android::base::StringPrintf;
@@ -70,14 +73,14 @@ void TouchState::clearWindowsWithoutPointers() {
     });
 }
 
-void TouchState::addOrUpdateWindow(const sp<WindowInfoHandle>& windowHandle,
-                                   InputTarget::DispatchMode dispatchMode,
-                                   ftl::Flags<InputTarget::Flags> targetFlags, DeviceId deviceId,
-                                   const std::vector<PointerProperties>& touchingPointers,
-                                   std::optional<nsecs_t> firstDownTimeInTarget) {
+android::base::Result<void> TouchState::addOrUpdateWindow(
+        const sp<WindowInfoHandle>& windowHandle, InputTarget::DispatchMode dispatchMode,
+        ftl::Flags<InputTarget::Flags> targetFlags, DeviceId deviceId,
+        const std::vector<PointerProperties>& touchingPointers,
+        std::optional<nsecs_t> firstDownTimeInTarget, sp<IBinder> forwardingWindowToken) {
     if (touchingPointers.empty()) {
         LOG(FATAL) << __func__ << "No pointers specified for " << windowHandle->getName();
-        return;
+        return android::base::Error();
     }
     for (TouchedWindow& touchedWindow : windows) {
         // We do not compare windows by token here because two windows that share the same token
@@ -88,39 +91,44 @@ void TouchState::addOrUpdateWindow(const sp<WindowInfoHandle>& windowHandle,
         if (touchedWindow.windowHandle == windowHandle) {
             touchedWindow.dispatchMode = dispatchMode;
             touchedWindow.targetFlags |= targetFlags;
+            touchedWindow.forwardingWindowToken = forwardingWindowToken;
             // For cases like hover enter/exit or DISPATCH_AS_OUTSIDE a touch window might not have
             // downTime set initially. Need to update existing window when a pointer is down for the
             // window.
-            touchedWindow.addTouchingPointers(deviceId, touchingPointers);
+            android::base::Result<void> addResult =
+                    touchedWindow.addTouchingPointers(deviceId, touchingPointers);
             if (firstDownTimeInTarget) {
                 touchedWindow.trySetDownTimeInTarget(deviceId, *firstDownTimeInTarget);
             }
-            return;
+            return addResult;
         }
     }
     TouchedWindow touchedWindow;
     touchedWindow.windowHandle = windowHandle;
     touchedWindow.dispatchMode = dispatchMode;
     touchedWindow.targetFlags = targetFlags;
+    touchedWindow.forwardingWindowToken = forwardingWindowToken;
     touchedWindow.addTouchingPointers(deviceId, touchingPointers);
     if (firstDownTimeInTarget) {
         touchedWindow.trySetDownTimeInTarget(deviceId, *firstDownTimeInTarget);
     }
     windows.push_back(touchedWindow);
+    return {};
 }
 
 void TouchState::addHoveringPointerToWindow(const sp<WindowInfoHandle>& windowHandle,
-                                            DeviceId deviceId, const PointerProperties& pointer) {
+                                            DeviceId deviceId, const PointerProperties& pointer,
+                                            float x, float y) {
     for (TouchedWindow& touchedWindow : windows) {
         if (touchedWindow.windowHandle == windowHandle) {
-            touchedWindow.addHoveringPointer(deviceId, pointer);
+            touchedWindow.addHoveringPointer(deviceId, pointer, x, y);
             return;
         }
     }
 
     TouchedWindow touchedWindow;
     touchedWindow.windowHandle = windowHandle;
-    touchedWindow.addHoveringPointer(deviceId, pointer);
+    touchedWindow.addHoveringPointer(deviceId, pointer, x, y);
     windows.push_back(touchedWindow);
 }
 
@@ -133,11 +141,13 @@ void TouchState::removeWindowByToken(const sp<IBinder>& token) {
     }
 }
 
-void TouchState::cancelPointersForWindowsExcept(DeviceId deviceId,
-                                                std::bitset<MAX_POINTER_ID + 1> pointerIds,
-                                                const sp<IBinder>& token) {
+void TouchState::cancelPointersForPilferingRequest(DeviceId deviceId,
+                                                   std::bitset<MAX_POINTER_ID + 1> pointerIds,
+                                                   const sp<IBinder>& token) {
     std::for_each(windows.begin(), windows.end(), [&](TouchedWindow& w) {
-        if (w.windowHandle->getToken() != token) {
+        if (w.windowHandle->getToken() != token &&
+            !w.windowHandle->getInfo()->inputConfig.test(
+                    gui::WindowInfo::InputConfig::DO_NOT_PILFER)) {
             w.removeTouchingPointers(deviceId, pointerIds);
         }
     });
@@ -169,6 +179,10 @@ void TouchState::cancelPointersForNonPilferingWindows() {
     // limitation here.
     for (const auto& [deviceId, allPilferedPointerIds] : allPilferedPointerIdsByDevice) {
         std::for_each(windows.begin(), windows.end(), [&](TouchedWindow& w) {
+            if (w.windowHandle->getInfo()->inputConfig.test(
+                        gui::WindowInfo::InputConfig::DO_NOT_PILFER)) {
+                return;
+            }
             std::bitset<MAX_POINTER_ID + 1> pilferedByOtherWindows =
                     w.getPilferingPointers(deviceId) ^ allPilferedPointerIds;
             // Remove all pointers pilfered by other windows
@@ -178,9 +192,11 @@ void TouchState::cancelPointersForNonPilferingWindows() {
     clearWindowsWithoutPointers();
 }
 
-sp<WindowInfoHandle> TouchState::getFirstForegroundWindowHandle() const {
-    for (size_t i = 0; i < windows.size(); i++) {
-        const TouchedWindow& window = windows[i];
+sp<WindowInfoHandle> TouchState::getFirstForegroundWindowHandle(DeviceId deviceId) const {
+    for (const auto& window : windows) {
+        if (!window.hasTouchingPointers(deviceId)) {
+            continue;
+        }
         if (window.targetFlags.test(InputTarget::Flags::FOREGROUND)) {
             return window.windowHandle;
         }
@@ -188,10 +204,13 @@ sp<WindowInfoHandle> TouchState::getFirstForegroundWindowHandle() const {
     return nullptr;
 }
 
-bool TouchState::isSlippery() const {
+bool TouchState::isSlippery(DeviceId deviceId) const {
     // Must have exactly one foreground window.
     bool haveSlipperyForegroundWindow = false;
     for (const TouchedWindow& window : windows) {
+        if (!window.hasTouchingPointers(deviceId)) {
+            continue;
+        }
         if (window.targetFlags.test(InputTarget::Flags::FOREGROUND)) {
             if (haveSlipperyForegroundWindow ||
                 !window.windowHandle->getInfo()->inputConfig.test(
@@ -204,9 +223,11 @@ bool TouchState::isSlippery() const {
     return haveSlipperyForegroundWindow;
 }
 
-sp<WindowInfoHandle> TouchState::getWallpaperWindow() const {
-    for (size_t i = 0; i < windows.size(); i++) {
-        const TouchedWindow& window = windows[i];
+sp<WindowInfoHandle> TouchState::getWallpaperWindow(DeviceId deviceId) const {
+    for (const auto& window : windows) {
+        if (!window.hasTouchingPointers(deviceId)) {
+            continue;
+        }
         if (window.windowHandle->getInfo()->inputConfig.test(
                     gui::WindowInfo::InputConfig::IS_WALLPAPER)) {
             return window.windowHandle;
@@ -269,13 +290,13 @@ void TouchState::removeAllPointersForDevice(DeviceId deviceId) {
 std::string TouchState::dump() const {
     std::string out;
     if (!windows.empty()) {
-        out += "  Windows:\n";
+        out += "TouchedWindows:\n";
         for (size_t i = 0; i < windows.size(); i++) {
             const TouchedWindow& touchedWindow = windows[i];
-            out += StringPrintf("    %zu : ", i) + touchedWindow.dump();
+            out += addLinePrefix(StringPrintf("%zu: ", i) + touchedWindow.dump(), INDENT);
         }
     } else {
-        out += "  Windows: <none>\n";
+        out += "TouchedWindows: <none>\n";
     }
     return out;
 }

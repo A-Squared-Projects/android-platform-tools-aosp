@@ -36,7 +36,7 @@ TEST(NotifyMotionArgsTest, TestCopyAssignmentOperator) {
     nsecs_t readTime = downTime++;
     int32_t deviceId = 7;
     uint32_t source = AINPUT_SOURCE_TOUCHSCREEN;
-    int32_t displayId = 42;
+    ui::LogicalDisplayId displayId = ui::LogicalDisplayId{42};
     uint32_t policyFlags = POLICY_FLAG_GESTURE;
     int32_t action = AMOTION_EVENT_ACTION_HOVER_MOVE;
     int32_t actionButton = AMOTION_EVENT_BUTTON_PRIMARY;
@@ -72,8 +72,8 @@ TEST(NotifyMotionArgsTest, TestCopyAssignmentOperator) {
     std::vector<TouchVideoFrame> videoFrames = {frame};
     const NotifyMotionArgs args(id, eventTime, readTime, deviceId, source, displayId, policyFlags,
                                 action, actionButton, flags, metaState, buttonState, classification,
-                                edgeFlags, pointerCount, pointerProperties, pointerCoords,
-                                xPrecision, yPrecision, xCursorPosition, yCursorPosition, downTime,
+                                pointerCount, pointerProperties, pointerCoords, xPrecision,
+                                yPrecision, xCursorPosition, yCursorPosition, downTime,
                                 videoFrames);
 
     NotifyMotionArgs otherArgs{};

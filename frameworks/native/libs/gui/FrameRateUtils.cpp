@@ -42,7 +42,7 @@ bool ValidateFrameRate(float frameRate, int8_t compatibility, int8_t changeFrame
 
     if (compatibility != ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT &&
         compatibility != ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_FIXED_SOURCE &&
-        compatibility != ANATIVEWINDOW_FRAME_RATE_GTE &&
+        compatibility != ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_AT_LEAST &&
         (!privileged ||
          (compatibility != ANATIVEWINDOW_FRAME_RATE_EXACT &&
           compatibility != ANATIVEWINDOW_FRAME_RATE_NO_VOTE))) {
@@ -56,9 +56,7 @@ bool ValidateFrameRate(float frameRate, int8_t compatibility, int8_t changeFrame
             changeFrameRateStrategy != ANATIVEWINDOW_CHANGE_FRAME_RATE_ALWAYS) {
             ALOGE("%s failed - invalid change frame rate strategy value %d", functionName,
                   changeFrameRateStrategy);
-            if (flags::bq_setframerate()) {
-                return false;
-            }
+            return false;
         }
     }
 

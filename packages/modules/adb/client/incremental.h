@@ -16,10 +16,9 @@
 
 #pragma once
 
-#include "adb_unique_fd.h"
-
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "sysdeps.h"
 
@@ -28,10 +27,9 @@ namespace incremental {
 using Files = std::vector<std::string>;
 using Args = std::vector<std::string_view>;
 
-bool can_install(const Files& files);
-std::optional<Process> install(const Files& files, const Args& passthrough_args, bool silent);
+// Returns true if incremental installation should be used by default for the given set of files.
+bool should_use_incremental_by_default(const Files& files);
 
-enum class Result { Success, Failure, None };
-Result wait_for_installation(int read_fd);
+std::optional<Process> install(const Files& files, const Args& passthrough_args, bool silent);
 
 }  // namespace incremental

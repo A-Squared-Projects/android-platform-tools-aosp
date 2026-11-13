@@ -17,6 +17,9 @@
 #pragma once
 
 #include <string>
+#include <vector>
+
+#include <stdint.h>
 
 namespace android {
 namespace base {
@@ -26,6 +29,14 @@ namespace base {
 // Hex values are printed in order, e.g. 0xDEAD will result in 'adde' because
 // Android is little-endian.
 std::string HexString(const void* bytes, size_t len);
+
+// Converts hexString to binary data.
+//
+// hex: Input hexString
+// bytes: Output binary data
+//
+// Returns true on success, false on failure
+bool HexToBytes(const std::string& hex, std::vector<uint8_t>* bytes);
 
 }  // namespace base
 }  // namespace android

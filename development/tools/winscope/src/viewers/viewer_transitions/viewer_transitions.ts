@@ -13,69 +13,31 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {FunctionUtils} from 'common/function_utils';
-import {Timestamp} from 'common/time';
-import {TracePositionUpdate, WinscopeEvent} from 'messaging/winscope_event';
-import {EmitEvent} from 'messaging/winscope_event_emitter';
-import {Traces} from 'trace/traces';
-import {TraceType} from 'trace/trace_type';
-import {PropertyTreeNode} from 'trace/tree_node/property_tree_node';
-import {ViewerEvents} from 'viewers/common/viewer_events';
-import {View, Viewer, ViewType} from 'viewers/viewer';
-import {Events} from './events';
+import {Store} from 'common/store/store';
+import {Trace} from 'trace_api/trace';
+import {TraceType} from 'trace_api/trace_type';
+import {Traces} from 'trace_api/traces';
+import {HierarchyTreeNode} from 'tree_node/hierarchy_tree_node';
+import {AbstractViewer} from 'viewers/abstract_viewer';
+import {ViewerComponent} from 'viewers/components/viewer_component';
 import {Presenter} from './presenter';
 import {UiData} from './ui_data';
 
-export class ViewerTransitions implements Viewer {
+export class ViewerTransitions extends AbstractViewer<HierarchyTreeNode> {
   static readonly DEPENDENCIES: TraceType[] = [TraceType.TRANSITION];
 
-  private readonly htmlElement: HTMLElement;
-  private readonly presenter: Presenter;
-  private readonly view: View;
-  private emitAppEvent: EmitEvent = FunctionUtils.DO_NOTHING_ASYNC;
-
-  constructor(traces: Traces) {
-    this.htmlElement = document.createElement('viewer-transitions');
-
-    this.presenter = new Presenter(traces, (data: UiData) => {
-      (this.htmlElement as any).inputData = data;
-    });
-
-    this.htmlElement.addEventListener(Events.TransitionSelected, (event) => {
-      this.presenter.onTransitionSelected((event as CustomEvent).detail);
-    });
-
-    this.htmlElement.addEventListener(ViewerEvents.TimestampClick, (event) => {
-      this.propagateTimestamp((event as CustomEvent).detail);
-    });
-
-    this.view = new View(
-      ViewType.TAB,
-      this.getDependencies(),
-      this.htmlElement,
-      'Transitions',
-      TraceType.TRANSITION,
-    );
+  constructor(trace: Trace<HierarchyTreeNode>, traces: Traces, store: Store) {
+    super(trace, traces, 'viewer-transitions', store);
   }
 
-  async onWinscopeEvent(event: WinscopeEvent) {
-    await this.presenter.onAppEvent(event);
-  }
-
-  setEmitEvent(callback: EmitEvent) {
-    this.emitAppEvent = callback;
-  }
-
-  async propagateTimestamp(timestampNode: PropertyTreeNode) {
-    const timestamp: Timestamp = timestampNode.getValue();
-    await this.emitAppEvent(TracePositionUpdate.fromTimestamp(timestamp, true));
-  }
-
-  getViews(): View[] {
-    return [this.view];
-  }
-
-  getDependencies(): TraceType[] {
-    return ViewerTransitions.DEPENDENCIES;
+  protected override initializePresenter(
+    trace: Trace<HierarchyTreeNode>,
+    traces: Traces,
+    store: Store,
+  ): Presenter {
+    const notifyViewCallback = (data: UiData) => {
+      (this.htmlElement as unknown as ViewerComponent<UiData>).inputData = data;
+    };
+    return new Presenter(trace, traces, store, notifyViewCallback);
   }
 }

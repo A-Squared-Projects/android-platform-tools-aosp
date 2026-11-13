@@ -167,7 +167,7 @@ class AdbUdpSocket : public UdpSocket {
             return;
         }
         fdevent_set(fde_, FDE_READ);
-        LOG(INFO) << __func__ << " fd=" << fd_.get();
+        VLOG(MDNS) << " fd=" << fd_.get();
     }
 
     ~AdbUdpSocket() override {
@@ -271,7 +271,7 @@ class AdbUdpSocket : public UdpSocket {
         // TODO: remove once osp-discovery calls Bind() after SetMulticastOutboundInterface().
         *mdns_ifindex_ = ifindex;
 
-        LOG(INFO) << "SetMulticastOutboundInterface for index=" << ifindex;
+        VLOG(MDNS) << "SetMulticastOutboundInterface for index=" << ifindex;
         switch (local_endpoint_.address.version()) {
             case UdpSocket::Version::kV4: {
                 struct ip_mreq multicast_properties = {};
@@ -285,7 +285,7 @@ class AdbUdpSocket : public UdpSocket {
                     const auto default_ip =
                             IPAddress(IPAddress::Version::kV4,
                                       reinterpret_cast<const uint8_t*>(&default_addr.s_addr));
-                    LOG(INFO) << "BEFORE IP_MULTICAST_IF: default multicast addr=" << default_ip;
+                    VLOG(MDNS) << "BEFORE IP_MULTICAST_IF: default multicast addr=" << default_ip;
                 }
 #endif  // DEBUG_UDP
                 if (adb_setsockopt(fd_, IPPROTO_IP, IP_MULTICAST_IF, &multicast_properties,
@@ -399,7 +399,6 @@ class AdbUdpSocket : public UdpSocket {
             return;
         }
 
-        VLOG(MDNS) << "SendMessage ip=" << dest.ToString() << ", size=" << length;
         adb_iovec iov;
         iov.iov_len = length;
         iov.iov_base = const_cast<void*>(data);
@@ -438,13 +437,14 @@ class AdbUdpSocket : public UdpSocket {
             }
         }
 
-        if (num_bytes_sent == -1) {
+        // Some VPN result in "short send" where less than the full datagram is reported sent. We
+        // shield ourselves from these and hypothetical "long send" and plain errors by reporting
+        // any unexpected return value.
+        if (num_bytes_sent != (ssize_t)length) {
+            LOG(WARNING) << "Error: sendmsg datagram size=" << length << " sent=" << num_bytes_sent;
             client_->OnSendError(this, ChooseError(errno, Error::Code::kSocketSendFailure));
             return;
         }
-
-        // Validity-check: UDP datagram sendmsg() is all or nothing.
-        CHECK_EQ(static_cast<size_t>(num_bytes_sent), length);
     }
 
     // Sets the DSCP value to use for all messages sent from this socket.
@@ -530,7 +530,7 @@ class AdbUdpSocket : public UdpSocket {
                 if (adb_getsockname(fd_, reinterpret_cast<sockaddr*>(&sa), &sa_len) != -1) {
                     local_endpoint_.address = GetIPAddressFromSockAddr(sa);
                     local_endpoint_.port = GetPortFromFromSockAddr(sa);
-                    LOG(INFO) << "bind endpoint=" << local_endpoint_;
+                    VLOG(MDNS) << "bind endpoint=" << local_endpoint_;
                 }
                 return;
             }
@@ -555,8 +555,8 @@ class AdbUdpSocket : public UdpSocket {
                 if (adb_getsockname(fd_, reinterpret_cast<sockaddr*>(&sa), &sa_len) != -1) {
                     local_endpoint_.address = GetIPAddressFromSockAddr(sa);
                     local_endpoint_.port = GetPortFromFromSockAddr(sa);
-                    LOG(INFO) << "bind endpoint=" << local_endpoint_
-                              << " scope_id=" << sa.sin6_scope_id;
+                    VLOG(MDNS) << "bind endpoint=" << local_endpoint_
+                               << " scope_id=" << sa.sin6_scope_id;
                 }
                 return;
             }
@@ -578,7 +578,6 @@ class AdbUdpSocket : public UdpSocket {
             client_->OnRead(this, ChooseError(errno, Error::Code::kSocketReadFailure));
             return;
         }
-        VLOG(MDNS) << "mDNS received bytes=" << *bytes_available;
 
         UdpPacket packet(*bytes_available);
         packet.set_socket(this);

@@ -14,22 +14,19 @@
  * limitations under the License.
  */
 
-#undef LOG_TAG
-#define LOG_TAG "Planner"
 // #define LOG_NDEBUG 0
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
+#include <common/trace.h>
 #include <compositionengine/impl/OutputCompositionState.h>
 #include <compositionengine/impl/planner/CachedSet.h>
 #include <math/HashCombine.h>
 #include <renderengine/DisplaySettings.h>
 #include <renderengine/RenderEngine.h>
 #include <ui/DebugUtils.h>
-#include <utils/Trace.h>
-
-#include <utils/Trace.h>
+#include <ui/HdrRenderTypeUtils.h>
 
 namespace android::compositionengine::impl::planner {
 
@@ -161,7 +158,7 @@ void CachedSet::updateAge(std::chrono::steady_clock::time_point now) {
 void CachedSet::render(renderengine::RenderEngine& renderEngine, TexturePool& texturePool,
                        const OutputCompositionState& outputState,
                        bool deviceHandlesColorTransform) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     if (outputState.powerCallback) {
         outputState.powerCallback->notifyCpuLoadUp();
     }
@@ -197,9 +194,14 @@ void CachedSet::render(renderengine::RenderEngine& renderEngine, TexturePool& te
     std::vector<renderengine::LayerSettings> layerSettings;
     renderengine::LayerSettings highlight;
     for (const auto& layer : mLayers) {
+        auto blurSettings = targetSettings;
+        if (!layer.hasBlurBehind()) {
+            blurSettings.blurSetting =
+                    LayerFE::ClientCompositionTargetSettings::BlurSetting::Disabled;
+        }
         if (auto clientCompositionSettings =
                     layer.getState()->getOutputLayer()->getLayerFE().prepareClientComposition(
-                            targetSettings)) {
+                            blurSettings)) {
             layerSettings.push_back(std::move(*clientCompositionSettings));
         }
     }
@@ -306,7 +308,7 @@ bool CachedSet::requiresHolePunch() const {
         return false;
     }
 
-    if (hasUnsupportedDataspace()) {
+    if (hasKnownColorShift()) {
         return false;
     }
 
@@ -366,22 +368,27 @@ compositionengine::OutputLayer* CachedSet::getBlurLayer() const {
     return mBlurLayer ? mBlurLayer->getOutputLayer() : nullptr;
 }
 
-bool CachedSet::hasUnsupportedDataspace() const {
+bool CachedSet::hasKnownColorShift() const {
     return std::any_of(mLayers.cbegin(), mLayers.cend(), [](const Layer& layer) {
         auto dataspace = layer.getState()->getDataspace();
-        const auto transfer = static_cast<ui::Dataspace>(dataspace & ui::Dataspace::TRANSFER_MASK);
-        if (transfer == ui::Dataspace::TRANSFER_ST2084 || transfer == ui::Dataspace::TRANSFER_HLG) {
-            // Skip HDR.
+
+        // Layers are never dimmed when rendering a cached set, meaning that we may ask HWC to
+        // dim a cached set. But this means that we can never cache any HDR layers so that we
+        // don't accidentally dim those layers.
+        const auto hdrType = getHdrRenderType(dataspace, layer.getState()->getPixelFormat(),
+                                              layer.getState()->getHdrSdrRatio());
+        if (hdrType != HdrRenderType::SDR) {
+            return true;
+        }
+
+        // Layers that have dimming disabled pretend that they're HDR.
+        if (!layer.getState()->isDimmingEnabled()) {
             return true;
         }
 
         if ((dataspace & HAL_DATASPACE_STANDARD_MASK) == HAL_DATASPACE_STANDARD_BT601_625) {
             // RenderEngine does not match some DPUs, so skip
             // to avoid flickering/color differences.
-            return true;
-        }
-        // TODO(b/274804887): temp fix of overdimming issue, skip caching if hsdr/sdr ratio > 1.01f
-        if (layer.getState()->getHdrSdrRatio() > 1.01f) {
             return true;
         }
         return false;

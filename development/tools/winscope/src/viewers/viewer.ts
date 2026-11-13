@@ -13,34 +13,33 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 import {WinscopeEvent} from 'messaging/winscope_event';
 import {
   EmitEvent,
   WinscopeEventEmitter,
 } from 'messaging/winscope_event_emitter';
 import {WinscopeEventListener} from 'messaging/winscope_event_listener';
-import {TraceType} from 'trace/trace_type';
+import {Trace} from 'trace_api/trace';
 
-enum ViewType {
-  TAB,
+export enum ViewType {
+  TRACE_TAB,
   OVERLAY,
+  GLOBAL_SEARCH,
 }
 
-class View {
+export class View {
   constructor(
     public type: ViewType,
-    public dependencies: TraceType[],
+    public traces: Array<Trace<object>>,
     public htmlElement: HTMLElement,
     public title: string,
-    public traceType: TraceType,
   ) {}
 }
 
-interface Viewer extends WinscopeEventListener, WinscopeEventEmitter {
+export interface Viewer extends WinscopeEventListener, WinscopeEventEmitter {
   onWinscopeEvent(event: WinscopeEvent): Promise<void>;
   setEmitEvent(callback: EmitEvent): void;
   getViews(): View[];
-  getDependencies(): TraceType[];
+  getTraces(): Array<Trace<object>>;
 }
-
-export {Viewer, View, ViewType};

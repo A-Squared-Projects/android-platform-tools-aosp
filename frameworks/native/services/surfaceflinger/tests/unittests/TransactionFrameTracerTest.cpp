@@ -35,7 +35,7 @@ using testing::_;
 using testing::Mock;
 using testing::Return;
 
-using PresentState = frametimeline::SurfaceFrame::PresentState;
+using PresentState = scheduler::SurfaceFrame::PresentState;
 
 class TransactionFrameTracerTest : public testing::Test {
 public:
@@ -94,17 +94,18 @@ public:
                                                          HAL_PIXEL_FORMAT_RGBA_8888,
                                                          0ULL /*usage*/);
         layer->setBuffer(externalTexture, bufferData, postTime, /*desiredPresentTime*/ 30, false,
-                         dequeueTime, FrameTimelineInfo{});
+                         FrameTimelineInfo{}, gui::GameMode::Unsupported);
 
         commitTransaction(layer.get());
         nsecs_t latchTime = 25;
+        nsecs_t expectedPresentTime = 30;
         EXPECT_CALL(*mFlinger.getFrameTracer(),
                     traceFence(layerId, bufferId, frameNumber, _,
                                FrameTracer::FrameEvent::ACQUIRE_FENCE, /*startTime*/ 0));
         EXPECT_CALL(*mFlinger.getFrameTracer(),
                     traceTimestamp(layerId, bufferId, frameNumber, latchTime,
                                    FrameTracer::FrameEvent::LATCH, /*duration*/ 0));
-        layer->updateTexImage(latchTime);
+        layer->updateTexImage(latchTime, expectedPresentTime);
 
         auto glDoneFence = fenceFactory.createFenceTimeForTest(fence);
         auto presentFence = fenceFactory.createFenceTimeForTest(fence);
@@ -112,7 +113,8 @@ public:
         EXPECT_CALL(*mFlinger.getFrameTracer(),
                     traceFence(layerId, bufferId, frameNumber, presentFence,
                                FrameTracer::FrameEvent::PRESENT_FENCE, /*startTime*/ 0));
-        layer->onCompositionPresented(nullptr, glDoneFence, presentFence, compositorTiming);
+        layer->onCompositionPresented(nullptr, glDoneFence, presentFence, compositorTiming,
+                                      gui::GameMode::Unsupported);
     }
 };
 

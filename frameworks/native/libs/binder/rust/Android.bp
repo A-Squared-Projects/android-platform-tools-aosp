@@ -15,10 +15,13 @@ rust_library {
         "libbinder_ndk_sys",
         "libdowncast_rs",
         "liblibc",
+        "liblog_rust",
+        "libzerocopy",
     ],
     host_supported: true,
     vendor_available: true,
     product_available: true,
+    recovery_available: true,
     target: {
         darwin: {
             enabled: false,
@@ -79,9 +82,13 @@ rust_library {
     shared_libs: [
         "libbinder_ndk",
     ],
+    rustlibs: [
+        "liblibc",
+    ],
     host_supported: true,
     vendor_available: true,
     product_available: true,
+    recovery_available: true,
     target: {
         darwin: {
             enabled: false,
@@ -129,12 +136,25 @@ rust_bindgen {
         // rustified
         "libbinder_ndk_bindgen_flags.txt",
     ],
+    bindgen_flags: [
+        "--blocklist-type",
+        "sockaddr",
+        "--raw-line",
+        "use libc::sockaddr;",
+    ],
+    cflags: [
+        "-DANDROID_PLATFORM",
+    ],
     shared_libs: [
         "libbinder_ndk",
+    ],
+    rustlibs: [
+        "liblibc",
     ],
     host_supported: true,
     vendor_available: true,
     product_available: true,
+    recovery_available: true,
 
     // Currently necessary for host builds
     // TODO(b/31559095): bionic on host should define this
@@ -166,6 +186,9 @@ rust_bindgen {
         // rustified
         "libbinder_ndk_bindgen_flags.txt",
     ],
+    cflags: [
+        "-DANDROID_PLATFORM",
+    ],
     shared_libs: [
         "libbinder_ndk_on_trusty_mock",
         "libc++",
@@ -185,6 +208,8 @@ rust_test {
         "libbinder_ndk_sys",
         "libdowncast_rs",
         "liblibc",
+        "liblog_rust",
+        "libzerocopy",
     ],
 }
 
@@ -196,4 +221,7 @@ rust_test {
     auto_gen_config: true,
     clippy_lints: "none",
     lints: "none",
+    rustlibs: [
+        "liblibc",
+    ],
 }

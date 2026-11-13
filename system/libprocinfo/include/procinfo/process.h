@@ -28,7 +28,6 @@
 #include <type_traits>
 
 #include <android-base/file.h>
-#include <android-base/logging.h>
 #include <android-base/parseint.h>
 #include <android-base/stringprintf.h>
 #include <android-base/unique_fd.h>
@@ -38,13 +37,16 @@ namespace procinfo {
 
 #if defined(__linux__)
 
-enum ProcessState {
-  kProcessStateUnknown,
-  kProcessStateRunning,
-  kProcessStateSleeping,
-  kProcessStateUninterruptibleWait,
-  kProcessStateStopped,
-  kProcessStateZombie,
+enum ProcessState : char {
+  kProcessStateUnknown = '?',
+  kProcessStateRunning = 'R',
+  kProcessStateSleeping = 'S',
+  kProcessStateUninterruptibleWait = 'D',
+  kProcessStateStopped = 'T',
+  kProcessStateZombie = 'Z',
+  kProcessStateTracingStop = 't',
+  kProcessStateDead = 'X',
+  kProcessStateIdle = 'I',
 };
 
 struct ProcessInfo {
@@ -53,6 +55,7 @@ struct ProcessInfo {
   pid_t tid;
   pid_t pid;
   pid_t ppid;
+  pid_t pgrp;
   pid_t tracer;
   uid_t uid;
   uid_t gid;

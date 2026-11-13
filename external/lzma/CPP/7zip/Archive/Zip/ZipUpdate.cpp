@@ -250,13 +250,26 @@ struct CThreadInfo
   
   HRESULT CreateEvents()
   {
-    WRes wres = CompressEvent.CreateIfNotCreated_Reset();
+    const WRes wres = CompressEvent.CreateIfNotCreated_Reset();
     return HRESULT_FROM_WIN32(wres);
   }
   
-  HRESULT CreateThread()
+  // (group < 0) means no_group.
+  HRESULT CreateThread_with_group(
+#ifdef _WIN32
+      int group
+#endif
+      )
   {
-    WRes wres = Thread.Create(CoderThread, this);
+    // tested in win10: If thread is created by another thread,
+    // child thread probably uses same group as parent thread.
+    // So we don't need to send (group) to encoder in created thread.
+    const WRes wres =
+#ifdef _WIN32
+      group >= 0 ?
+        Thread.Create_With_Group(CoderThread, this, (unsigned)group) :
+#endif
+        Thread.Create(CoderThread, this);
     return HRESULT_FROM_WIN32(wres);
   }
 
@@ -450,8 +463,12 @@ static HRESULT UpdateItemOldData(
   if (ui.NewProps)
   {
     if (item.HasDescriptor())
-      return E_NOTIMPL;
-    
+    {
+      // we know compressed / uncompressed sizes and crc.
+      // so we remove descriptor here
+      item.Flags = (UInt16)(item.Flags & ~NFileHeader::NFlags::kDescriptorUsedMask);
+      // return E_NOTIMPL;
+    }
     // we keep ExternalAttrib and some another properties from old archive
     // item.ExternalAttrib = ui.Attrib;
     // if we don't change Comment, we keep Comment from OldProperties
@@ -1000,6 +1017,9 @@ static HRESULT Update2(
   #ifndef Z7_ST
 
   UInt32 numThreads = options._numThreads;
+#ifdef _WIN32
+  const UInt32 numThreadGroups = options._numThreadGroups;
+#endif
 
   UInt32 numZipThreads_limit = numThreads;
   if (numZipThreads_limit > numFilesToCompress)
@@ -1014,12 +1034,10 @@ static HRESULT Update2(
   }
 
   {
+    // we reduce number of threads for 32-bit to reduce memory usege to 256 MB
     const UInt32 kNumMaxThreads =
-      #ifdef _WIN32
-        64; // _WIN32 supports only 64 threads in one group. So no need for more threads here
-      #else
-        128;
-      #endif
+        // _WIN32 (64-bit) supports only 64 threads in one group.
+        8 << (sizeof(size_t) / 2); // 32 threads for 32-bit : 128 threads for 64-bit
     if (numThreads > kNumMaxThreads)
       numThreads = kNumMaxThreads;
   }
@@ -1264,7 +1282,14 @@ static HRESULT Update2(
       threadInfo.Progress = threadInfo.ProgressSpec;
       threadInfo.ProgressSpec->Init(&mtCompressProgressMixer, i);
       threadInfo.MtSem = &mtSem;
-      RINOK(threadInfo.CreateThread())
+      const HRESULT hres =
+        threadInfo.CreateThread_with_group(
+#ifdef _WIN32
+          (numThreadGroups > 1 && numThreads > 1) ?
+            (int)(i % numThreadGroups) : -1
+#endif
+        );
+      RINOK(hres)
     }
   }
 
@@ -1755,16 +1780,17 @@ HRESULT CCacheOutStream::FlushFromCache(size_t size)
   PRF(printf("\n-- CCacheOutStream::FlushFromCache %u\n", (unsigned)size));
   if (_hres != S_OK)
     return _hres;
-  if (size == 0 || _cachedSize == 0)
+  if (size > _cachedSize)
+      size = _cachedSize;
+  // (size <= _cachedSize)
+  if (size == 0)
     return S_OK;
   RINOK(SeekPhy(_cachedPos))
   for (;;)
   {
     // (_phyPos == _cachedPos)
     const size_t pos = (size_t)_cachedPos & kCacheMask;
-    size_t cur = kCacheSize - pos;
-    cur = MyMin(cur, _cachedSize);
-    cur = MyMin(cur, size);
+    const size_t cur = MyMin(kCacheSize - pos, size);
     _hres = SetRestriction_ForWrite(cur);
     RINOK(_hres)
     PRF(printf("\n-- CCacheOutStream::WriteFromCache _phyPos = 0x%x, size = %d\n", (unsigned)_phyPos, (unsigned)cur));
@@ -1776,7 +1802,7 @@ HRESULT CCacheOutStream::FlushFromCache(size_t size)
     _cachedPos += cur;
     _cachedSize -= cur;
     size -= cur;
-    if (size == 0 || _cachedSize == 0)
+    if (size == 0)
       return S_OK;
   }
 }
@@ -1964,7 +1990,11 @@ Z7_COM7F_IMF(CCacheOutStream::SetSize(UInt64 newSize))
       // so we reduce cache
       _cachedSize = (size_t)offset;
       if (_phySize <= newSize)
-        return S_OK; // _phySize will be restored later after cache flush
+      {
+        // _phySize will be restored later after cache flush
+        _virtSize = newSize;
+        return S_OK;
+      }
       // (_phySize > newSize)
       // so we must reduce phyStream size to (newSize) or to (_cachedPos)
       // newPhySize = _cachedPos; // optional reduce to _cachedPos

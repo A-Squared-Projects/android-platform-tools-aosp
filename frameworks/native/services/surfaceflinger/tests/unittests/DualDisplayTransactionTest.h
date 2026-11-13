@@ -27,7 +27,7 @@ struct DualDisplayTransactionTest : DisplayTransactionTest {
     DualDisplayTransactionTest() : DisplayTransactionTest(kWithMockScheduler) {}
 
     void SetUp() override {
-        injectMockScheduler(kInnerDisplayId);
+        injectMockScheduler(getInnerDisplayId());
 
         {
             InnerDisplayVariant::injectHwcDisplay<kInnerDisplayPowerMode, kExpectSetPowerModeOnce>(
@@ -48,8 +48,17 @@ struct DualDisplayTransactionTest : DisplayTransactionTest {
         }
     }
 
-    static inline PhysicalDisplayId kInnerDisplayId = InnerDisplayVariant::DISPLAY_ID::get();
-    static inline PhysicalDisplayId kOuterDisplayId = OuterDisplayVariant::DISPLAY_ID::get();
+    static PhysicalDisplayId getInnerDisplayId() {
+        static PhysicalDisplayId kInnerDisplayId =
+                asPhysicalDisplayId(InnerDisplayVariant::DISPLAY_ID::get()).value();
+        return kInnerDisplayId;
+    }
+
+    static PhysicalDisplayId getOuterDisplayId() {
+        static PhysicalDisplayId kOuterDisplayId =
+                asPhysicalDisplayId(OuterDisplayVariant::DISPLAY_ID::get()).value();
+        return kOuterDisplayId;
+    }
 
     sp<DisplayDevice> mInnerDisplay, mOuterDisplay;
 };

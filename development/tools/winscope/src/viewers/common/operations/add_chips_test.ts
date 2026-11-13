@@ -14,12 +14,13 @@
  * limitations under the License.
  */
 
-import {assertDefined} from 'common/assert_utils';
+import {assertDefined} from 'common/assert';
 import {HierarchyTreeBuilder} from 'test/unit/hierarchy_tree_builder';
-import {LayerCompositionType} from 'trace/layer_composition_type';
+import {LayerCompositionType} from 'trace/surface_flinger/layer_composition_type';
 import {
   DUPLICATE_CHIP,
   GPU_CHIP,
+  HIDDEN_BY_POLICY_CHIP,
   HWC_CHIP,
   MISSING_Z_PARENT_CHIP,
   RELATIVE_Z_CHIP,
@@ -172,12 +173,12 @@ describe('AddChips', () => {
           {
             id: 2,
             name: 'parentNode',
-            properties: {id: 2, zOrderRelativeOf: -1},
+            properties: {layerId: 2, zOrderRelativeOf: -1},
             children: [
               {
                 id: 1,
                 name: 'node',
-                properties: {id: 1, zOrderRelativeOf: 2},
+                properties: {layerId: 1, zOrderRelativeOf: 2},
               },
             ],
           },
@@ -193,5 +194,26 @@ describe('AddChips', () => {
     expect(
       assertDefined(parentWithChips.getChildByName('node')).getChips(),
     ).toEqual([RELATIVE_Z_CHIP]);
+  });
+
+  it('adds HIDDEN_BY_POLICY_CHIP', () => {
+    hierarchyRoot = UiHierarchyTreeNode.from(
+      new HierarchyTreeBuilder()
+        .setId('test')
+        .setName('node')
+        .setChildren([
+          {
+            id: 1,
+            name: 'node',
+            properties: {isHiddenByPolicy: true},
+          },
+        ])
+        .build(),
+    );
+
+    operation.apply(hierarchyRoot);
+    expect(
+      assertDefined(hierarchyRoot.getChildByName('node')).getChips(),
+    ).toEqual([HIDDEN_BY_POLICY_CHIP]);
   });
 });

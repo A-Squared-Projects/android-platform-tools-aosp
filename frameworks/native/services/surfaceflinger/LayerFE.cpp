@@ -15,18 +15,17 @@
  */
 
 // #define LOG_NDEBUG 0
-#undef LOG_TAG
-#define LOG_TAG "SurfaceFlinger"
+
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
+#include <common/trace.h>
 #include <gui/GLConsumer.h>
-#include <gui/TraceUtils.h>
 #include <math/vec3.h>
 #include <system/window.h>
-#include <utils/Log.h>
 
 #include "LayerFE.h"
 #include "SurfaceFlinger.h"
+#include "ui/FenceResult.h"
 
 namespace android {
 
@@ -78,12 +77,20 @@ void getDrawingTransformMatrix(const std::shared_ptr<renderengine::ExternalTextu
 
 LayerFE::LayerFE(const std::string& name) : mName(name) {}
 
+LayerFE::~LayerFE() {
+    // Ensures that no promise is left unfulfilled before the LayerFE is destroyed.
+    // An unfulfilled promise could occur when a screenshot is attempted, but the
+    // render area is invalid and there is no memory for the capture result.
+    if (mReleaseFencePromiseStatus == ReleaseFencePromiseStatus::INITIALIZED) {
+        setReleaseFence(Fence::NO_FENCE);
+    }
+}
+
 const compositionengine::LayerFECompositionState* LayerFE::getCompositionState() const {
     return mSnapshot.get();
 }
 
-bool LayerFE::onPreComposition(nsecs_t refreshStartTime, bool) {
-    mCompositionResult.refreshStartTime = refreshStartTime;
+bool LayerFE::onPreComposition(bool) {
     return mSnapshot->hasReadyFrame;
 }
 
@@ -105,15 +112,29 @@ std::optional<compositionengine::LayerFE::LayerSettings> LayerFE::prepareClientC
     // set the shadow for the layer if needed
     prepareShadowClientComposition(*layerSettings, targetSettings.viewport);
 
+    layerSettings->borderSettings = mSnapshot->borderSettings;
+    layerSettings->boxShadowSettings = mSnapshot->boxShadowSettings;
+
     return layerSettings;
 }
 
 std::optional<compositionengine::LayerFE::LayerSettings> LayerFE::prepareClientCompositionInternal(
         compositionengine::LayerFE::ClientCompositionTargetSettings& targetSettings) const {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     compositionengine::LayerFE::LayerSettings layerSettings;
+    layerSettings.geometry.originalBounds = mSnapshot->geomLayerBounds;
+
+    if (mSnapshot->parentRoundedCorner.hasRequestedRadius()) {
+        layerSettings.geometry.otherRoundedCornersRadii = mSnapshot->parentRoundedCorner.radii;
+        layerSettings.geometry.otherCrop = mSnapshot->parentRoundedCorner.cropRect;
+    } else {
+        layerSettings.geometry.otherCrop = mSnapshot->parentGeomLayerCrop;
+    }
+
     layerSettings.geometry.boundaries =
-            reduce(mSnapshot->geomLayerBounds, mSnapshot->transparentRegionHint);
+            (FlagManager::getInstance().disable_transparent_region_hint())
+            ? mSnapshot->geomLayerBounds
+            : reduce(mSnapshot->geomLayerBounds, mSnapshot->transparentRegionHint);
     layerSettings.geometry.positionTransform = mSnapshot->geomLayerTransform.asMatrix4();
 
     // skip drawing content if the targetSettings indicate the content will be occluded
@@ -125,7 +146,7 @@ std::optional<compositionengine::LayerFE::LayerSettings> LayerFE::prepareClientC
     }
 
     const auto& roundedCornerState = mSnapshot->roundedCorner;
-    layerSettings.geometry.roundedCornersRadius = roundedCornerState.radius;
+    layerSettings.geometry.roundedCornersRadii = roundedCornerState.radii;
     layerSettings.geometry.roundedCornersCrop = roundedCornerState.cropRect;
 
     layerSettings.alpha = mSnapshot->alpha;
@@ -147,11 +168,13 @@ std::optional<compositionengine::LayerFE::LayerSettings> LayerFE::prepareClientC
     switch (targetSettings.blurSetting) {
         case LayerFE::ClientCompositionTargetSettings::BlurSetting::Enabled:
             layerSettings.backgroundBlurRadius = mSnapshot->backgroundBlurRadius;
+            layerSettings.backgroundBlurScale = mSnapshot->backgroundBlurScale;
             layerSettings.blurRegions = mSnapshot->blurRegions;
             layerSettings.blurRegionTransform = mSnapshot->localTransformInverse.asMatrix4();
             break;
         case LayerFE::ClientCompositionTargetSettings::BlurSetting::BackgroundBlurOnly:
             layerSettings.backgroundBlurRadius = mSnapshot->backgroundBlurRadius;
+            layerSettings.backgroundBlurScale = mSnapshot->backgroundBlurScale;
             break;
         case LayerFE::ClientCompositionTargetSettings::BlurSetting::BlurRegionsOnly:
             layerSettings.blurRegions = mSnapshot->blurRegions;
@@ -162,8 +185,10 @@ std::optional<compositionengine::LayerFE::LayerSettings> LayerFE::prepareClientC
             break;
     }
     layerSettings.stretchEffect = mSnapshot->stretchEffect;
+    layerSettings.edgeExtensionEffect = mSnapshot->edgeExtensionEffect;
     // Record the name of the layer for debugging further down the stack.
     layerSettings.name = mSnapshot->name;
+    layerSettings.luts = mSnapshot->luts ? mSnapshot->luts : targetSettings.luts;
 
     if (hasEffect() && !hasBufferOrSidebandStream()) {
         prepareEffectsClientComposition(layerSettings, targetSettings);
@@ -181,6 +206,7 @@ void LayerFE::prepareClearClientComposition(LayerFE::LayerSettings& layerSetting
     layerSettings.disableBlending = true;
     layerSettings.bufferId = 0;
     layerSettings.frameNumber = 0;
+    layerSettings.sequence = -1;
 
     // If layer is blacked out, force alpha to 1 so that we draw a black color layer.
     layerSettings.alpha = blackout ? 1.0f : 0.0f;
@@ -194,7 +220,7 @@ void LayerFE::prepareEffectsClientComposition(
     if (targetSettings.realContentIsVisible && fillsColor()) {
         // Set color for color fill settings.
         layerSettings.source.solidColor = mSnapshot->color.rgb;
-    } else if (hasBlur() || drawShadows()) {
+    } else if (hasBlur() || drawShadows() || hasBorderSettings() || hasBoxShadowSettings()) {
         layerSettings.skipContentDraw = true;
     }
 }
@@ -202,21 +228,14 @@ void LayerFE::prepareEffectsClientComposition(
 void LayerFE::prepareBufferStateClientComposition(
         compositionengine::LayerFE::LayerSettings& layerSettings,
         compositionengine::LayerFE::ClientCompositionTargetSettings& targetSettings) const {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     if (CC_UNLIKELY(!mSnapshot->externalTexture)) {
         // If there is no buffer for the layer or we have sidebandstream where there is no
         // activeBuffer, then we need to return LayerSettings.
         return;
     }
-    bool blackOutLayer;
-    if (FlagManager::getInstance().display_protected()) {
-        blackOutLayer = (mSnapshot->hasProtectedContent && !targetSettings.isProtected) ||
+    bool blackOutLayer = (mSnapshot->hasProtectedContent && !targetSettings.isProtected) ||
                 (mSnapshot->isSecure && !targetSettings.isSecure);
-    } else {
-        blackOutLayer = (mSnapshot->hasProtectedContent && !targetSettings.isProtected) ||
-                ((mSnapshot->isSecure || mSnapshot->hasProtectedContent) &&
-                 !targetSettings.isSecure);
-    }
     const bool bufferCanBeUsedAsHwTexture =
             mSnapshot->externalTexture->getUsage() & GraphicBuffer::USAGE_HW_TEXTURE;
     if (blackOutLayer || !bufferCanBeUsedAsHwTexture) {
@@ -252,6 +271,7 @@ void LayerFE::prepareBufferStateClientComposition(
     layerSettings.source.buffer.maxLuminanceNits = maxLuminance;
     layerSettings.frameNumber = mSnapshot->frameNumber;
     layerSettings.bufferId = mSnapshot->externalTexture->getId();
+    layerSettings.sequence = mSnapshot->sequence;
 
     const bool useFiltering = targetSettings.needsFiltering ||
                               mSnapshot->geomLayerTransform.needsBilinearFiltering();
@@ -267,7 +287,7 @@ void LayerFE::prepareBufferStateClientComposition(
          * the code below applies the primary display's inverse transform to
          * the texture transform
          */
-        uint32_t transform = SurfaceFlinger::getActiveDisplayRotationFlags();
+        uint32_t transform = SurfaceFlinger::getFrontInternalDisplayRotationFlags();
         mat4 tr = inverseOrientation(transform);
 
         /**
@@ -324,21 +344,31 @@ void LayerFE::prepareShadowClientComposition(LayerFE::LayerSettings& caster,
         return;
     }
 
-    // Shift the spot light x-position to the middle of the display and then
-    // offset it by casting layer's screen pos.
-    state.lightPos.x =
-            (static_cast<float>(layerStackRect.width()) / 2.f) - mSnapshot->transformedBounds.left;
-    state.lightPos.y -= mSnapshot->transformedBounds.top;
+    // The light source should be at (screenWidth/2, globalShadowSettings.lightPos.y) in
+    // screenspace.
+    vec2 lightPosScreenSpace = {
+            (static_cast<float>(layerStackRect.width()) / 2.f),
+            state.lightPos.y,
+    };
+
+    // Skia expects light pos in layer space.
+    vec2 lightPosLayerSpace = mSnapshot->geomInverseLayerTransform.transform(lightPosScreenSpace);
+
+    state.lightPos.x = lightPosLayerSpace.x;
+    state.lightPos.y = lightPosLayerSpace.y;
+
     caster.shadow = state;
 }
 
-void LayerFE::onLayerDisplayed(ftl::SharedFuture<FenceResult> futureFenceResult,
-                               ui::LayerStack layerStack) {
-    mCompositionResult.releaseFences.emplace_back(std::move(futureFenceResult), layerStack);
+void LayerFE::onPictureProfileCommitted() {
+    mCompositionResult.wasPictureProfileCommitted = true;
+    mCompositionResult.pictureProfileHandle = mSnapshot->pictureProfileHandle;
 }
 
-CompositionResult&& LayerFE::stealCompositionResult() {
-    return std::move(mCompositionResult);
+CompositionResult LayerFE::stealCompositionResult() {
+    CompositionResult result;
+    std::swap(mCompositionResult, result);
+    return result;
 }
 
 const char* LayerFE::getDebugName() const {
@@ -378,6 +408,14 @@ bool LayerFE::hasBlur() const {
     return mSnapshot->backgroundBlurRadius > 0 || mSnapshot->blurRegions.size() > 0;
 }
 
+bool LayerFE::hasBorderSettings() const {
+    return mSnapshot->hasBorderSettings();
+}
+
+bool LayerFE::hasBoxShadowSettings() const {
+    return mSnapshot->hasBoxShadowSettings();
+}
+
 bool LayerFE::drawShadows() const {
     return mSnapshot->shadowSettings.length > 0.f &&
             (mSnapshot->shadowSettings.ambientColor.a > 0 ||
@@ -386,6 +424,64 @@ bool LayerFE::drawShadows() const {
 
 const sp<GraphicBuffer> LayerFE::getBuffer() const {
     return mSnapshot->externalTexture ? mSnapshot->externalTexture->getBuffer() : nullptr;
+}
+
+void LayerFE::setReleaseFence(const FenceResult& releaseFence) {
+    // Promises should not be fulfilled more than once. This case can occur if virtual
+    // displays with the same layerstack ID are being created and destroyed in quick
+    // succession, such as in tests. This would result in a race condition in which
+    // multiple displays have the same layerstack ID within the same vsync interval.
+    if (mReleaseFencePromiseStatus == ReleaseFencePromiseStatus::FULFILLED) {
+        return;
+    }
+
+    if (releaseFence.has_value()) {
+        if (FlagManager::getInstance().monitor_buffer_fences()) {
+            if (auto strongBuffer = mReleasedBuffer.promote()) {
+                strongBuffer->getDependencyMonitor()
+                        .addAccessCompletion(FenceTime::makeValid(releaseFence.value()), "HWC");
+            }
+        }
+    }
+    mReleaseFence.set_value(releaseFence);
+    mReleaseFencePromiseStatus = ReleaseFencePromiseStatus::FULFILLED;
+}
+
+// LayerFEs are reused and a new fence needs to be created whevever a buffer is latched.
+ftl::Future<FenceResult> LayerFE::createReleaseFenceFuture() {
+    if (mReleaseFencePromiseStatus == ReleaseFencePromiseStatus::INITIALIZED) {
+        LOG_ALWAYS_FATAL("Attempting to create a new promise while one is still unfulfilled.");
+    }
+    mReleaseFence = std::promise<FenceResult>();
+    mReleaseFencePromiseStatus = ReleaseFencePromiseStatus::INITIALIZED;
+    return mReleaseFence.get_future();
+}
+
+LayerFE::ReleaseFencePromiseStatus LayerFE::getReleaseFencePromiseStatus() {
+    return mReleaseFencePromiseStatus;
+}
+
+void LayerFE::setReleasedBuffer(sp<GraphicBuffer> buffer) {
+    mReleasedBuffer = std::move(buffer);
+}
+
+void LayerFE::setLastHwcState(const LayerFE::HwcLayerDebugState &state) {
+    mLastHwcState = state;
+}
+
+const LayerFE::HwcLayerDebugState& LayerFE::getLastHwcState() const {
+    return mLastHwcState;
+};
+
+void LayerFE::setLastClientTargetAcquireFence(const FenceResult& lastCompositionAcquireFence) {
+    mLastClientCompositionAcquireFence = lastCompositionAcquireFence;
+}
+
+sp<Fence> LayerFE::getAndClearLastClientTargetAcquireFence() {
+    sp<Fence> lastCompositionAcquireFence =
+            mLastClientCompositionAcquireFence.value_or(Fence::NO_FENCE);
+    mLastClientCompositionAcquireFence = Fence::NO_FENCE;
+    return lastCompositionAcquireFence;
 }
 
 } // namespace android

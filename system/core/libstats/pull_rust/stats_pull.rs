@@ -14,13 +14,12 @@
 
 //! A Rust interface for the StatsD pull API.
 
-use once_cell::sync::Lazy;
 use statslog_rust_header::{Atoms, Stat, StatsError};
 use statspull_bindgen::*;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::os::raw::c_void;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
 /// The return value of callbacks.
 pub type StatsPullResult = Vec<Box<dyn Stat>>;
@@ -107,8 +106,8 @@ impl Default for Metadata {
     }
 }
 
-static COOKIES: Lazy<Mutex<HashMap<i32, fn() -> StatsPullResult>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+static COOKIES: LazyLock<Mutex<HashMap<i32, fn() -> StatsPullResult>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// # Safety
 ///
@@ -122,7 +121,7 @@ unsafe extern "C" fn callback_wrapper(
         let map = COOKIES.lock().unwrap();
         let cb = map.get(&atom_tag);
         match cb {
-            None => log::error!("No callback found for {}", atom_tag),
+            None => log::error!("No callback found for {atom_tag}"),
             Some(cb) => {
                 let stats = cb();
                 let result = stats
@@ -134,7 +133,7 @@ unsafe extern "C" fn callback_wrapper(
                     Ok(_) => {
                         return AStatsManager_PULL_SUCCESS as AStatsManager_PullAtomCallbackReturn
                     }
-                    _ => log::error!("Error adding astats events: {:?}", result),
+                    _ => log::error!("Error adding astats events: {result:?}"),
                 }
             }
         }

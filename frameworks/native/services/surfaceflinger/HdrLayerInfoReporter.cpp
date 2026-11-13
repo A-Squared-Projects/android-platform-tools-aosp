@@ -14,13 +14,11 @@
  * limitations under the License.
  */
 
-#undef LOG_TAG
-#define LOG_TAG "HdrLayerInfoReporter"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include <android-base/stringprintf.h>
+#include <common/trace.h>
 #include <inttypes.h>
-#include <utils/Trace.h>
 
 #include "HdrLayerInfoReporter.h"
 
@@ -29,7 +27,7 @@ namespace android {
 using base::StringAppendF;
 
 void HdrLayerInfoReporter::dispatchHdrLayerInfo(const HdrLayerInfo& info) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     if (mHdrInfoHistory.size() == 0 || mHdrInfoHistory.back().info != info) {
         mHdrInfoHistory.next() = EventHistoryEntry{info};
     }
@@ -47,7 +45,7 @@ void HdrLayerInfoReporter::dispatchHdrLayerInfo(const HdrLayerInfo& info) {
     }
 
     for (const auto& listener : toInvoke) {
-        ATRACE_NAME("invoking onHdrLayerInfoChanged");
+        SFTRACE_NAME("invoking onHdrLayerInfoChanged");
         listener->onHdrLayerInfoChanged(info.numberOfHdrLayers, info.maxW, info.maxH, info.flags,
                                         info.maxDesiredHdrSdrRatio);
     }

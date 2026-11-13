@@ -34,6 +34,7 @@
 #include <android-base/scopeguard.h>
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
+#include <cutils/android_get_control_file.h>
 #include <cutils/sockets.h>
 #include <processgroup/processgroup.h>
 #include <selinux/selinux.h>
@@ -203,8 +204,8 @@ void Service::KillProcessGroup(int signal) {
     // call this function to send SIGTERM/SIGKILL to all processes.
     // These signals must be sent for a successful shutdown.
     if (!process_cgroup_empty_ || IsRunning()) {
-        LOG(INFO) << "Sending signal " << signal << " to service '" << name_ << "' (pid " << pid_
-                  << ") process group...";
+        LOG(INFO) << "Sending " << SignalName(signal) << " to service '" << name_ << "' (pid "
+                  << pid_ << ") process group...";
         int r;
         if (signal == SIGTERM) {
             r = killProcessGroupOnce(uid(), pid_, signal);
@@ -215,7 +216,7 @@ void Service::KillProcessGroup(int signal) {
         if (r == 0) process_cgroup_empty_ = true;
     }
 
-    if (oom_score_adjust_ != DEFAULT_OOM_SCORE_ADJUST) {
+    if (!IsMicrodroid() && oom_score_adjust_ != DEFAULT_OOM_SCORE_ADJUST) {
         LmkdUnregister(name_, pid_);
     }
 }
@@ -610,8 +611,12 @@ Result<void> Service::Start() {
             flags_ |= SVC_RESTART;
         }
 
+        const std::chrono::milliseconds service_uptime =
+                std::chrono::duration_cast<std::chrono::milliseconds>(boot_clock::now() -
+                                                                      time_started_);
         LOG(INFO) << "service '" << name_
-                  << "' requested start, but it is already running (flags: " << flags_ << ")";
+                  << "' requested start, but it is already running (flags: " << flags_
+                  << ", pid: " << pid_ << ", started " << service_uptime.count() << "ms ago)";
 
         // It is not an error to try to start a service that is already running.
         reboot_on_failure.Disable();
@@ -630,6 +635,13 @@ Result<void> Service::Start() {
     if (Result<void> result = CheckConsole(); !result.ok()) {
         return result;
     }
+
+    auto expanded_path = ExpandProps(args_[0]);
+    if (!expanded_path.ok()) {
+        flags_ |= SVC_DISABLED;
+        return ErrnoError() << "Cannot expand path: " << expanded_path.error();
+    }
+    args_[0] = *expanded_path;
 
     struct stat sb;
     if (stat(args_[0].c_str(), &sb) == -1) {
@@ -653,8 +665,6 @@ Result<void> Service::Start() {
         SetMountNamespace();
     }
 
-    post_data_ = ServiceList::GetInstance().IsPostData();
-
     LOG(INFO) << "starting service '" << name_ << "'...";
 
     std::vector<Descriptor> descriptors;
@@ -671,6 +681,14 @@ Result<void> Service::Start() {
             descriptors.emplace_back(std::move(*result));
         } else {
             LOG(INFO) << "Could not open file '" << file.name << "': " << result.error();
+        }
+    }
+
+    if (shared_kallsyms_file_) {
+        if (auto result = CreateSharedKallsymsFd(); result.ok()) {
+            descriptors.emplace_back(std::move(*result));
+        } else {
+            LOG(INFO) << "Could not obtain a copy of /proc/kallsyms: " << result.error();
         }
     }
 
@@ -737,7 +755,11 @@ Result<void> Service::Start() {
     }
 
     if (oom_score_adjust_ != DEFAULT_OOM_SCORE_ADJUST) {
-        LmkdRegister(name_, uid(), pid_, oom_score_adjust_);
+        if (IsMicrodroid()) {
+            LOG(ERROR) << "oom_score_adjust not supported in microdroid";
+        } else {
+            LmkdRegister(name_, uid(), pid_, oom_score_adjust_);
+        }
     }
 
     if (Result<void> result = cgroups_activated.Write(kCgroupsActivated); !result.ok()) {
@@ -835,6 +857,35 @@ unique_fd Service::CreateSigchldFd() {
     }
 
     return unique_fd(signalfd(-1, &mask, SFD_CLOEXEC));
+}
+
+void Service::OpenAndSaveStaticKallsymsFd() {
+    Result<Descriptor> result = CreateSharedKallsymsFd();
+    if (!result.ok()) {
+      LOG(ERROR) << result.error();
+    }
+}
+
+// This function is designed to be called in two situations:
+// 1) early during second_stage init, to open and save the shared fd as a
+//    static (see OpenAndSaveStaticKallsymsFd).
+// 2) whenever a service requesting a copy of the fd is being started, at which
+//    point it will get a duplicated copy of the static fd.
+Result<Descriptor> Service::CreateSharedKallsymsFd() {
+    static constexpr char kallsyms_path[] = "/proc/kallsyms";
+    static int static_fd = open(kallsyms_path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (static_fd < 0) {
+        return ErrnoError() << "failed to open " << kallsyms_path;
+    }
+
+    unique_fd fd{fcntl(static_fd, F_DUPFD_CLOEXEC, /*min_fd=*/3)};
+    if (fd < 0) {
+        return ErrnoError() << "failed fcntl(F_DUPFD_CLOEXEC)";
+    }
+
+    // Use the same environment variable as if the service specified
+    // "file /proc/kallsyms r".
+    return Descriptor(std::string(ANDROID_FILE_ENV_PREFIX) + kallsyms_path, std::move(fd));
 }
 
 void Service::SetStartedInFirstStage(pid_t pid) {

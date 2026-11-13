@@ -14,15 +14,15 @@
  * limitations under the License.
  */
 
+#include <android/gui/TransactionBarrier.h>
 #include <gui/SurfaceComposerClient.h>
 #include <ui/Fence.h>
 #include <ui/Rect.h>
 
 #include "FrontEnd/LayerCreationArgs.h"
 #include "LayerProtoHelper.h"
+#include "QueuedTransactionState.h"
 #include "TransactionProtoParser.h"
-#include "TransactionState.h"
-#include "gui/LayerState.h"
 
 namespace android::surfaceflinger {
 
@@ -51,7 +51,8 @@ public:
     ~FakeExternalTexture() = default;
 };
 
-perfetto::protos::TransactionState TransactionProtoParser::toProto(const TransactionState& t) {
+perfetto::protos::TransactionState TransactionProtoParser::toProto(
+        const QueuedTransactionState& t) {
     perfetto::protos::TransactionState proto;
     proto.set_pid(t.originPid);
     proto.set_uid(t.originUid);
@@ -62,18 +63,25 @@ perfetto::protos::TransactionState TransactionProtoParser::toProto(const Transac
 
     proto.mutable_layer_changes()->Reserve(static_cast<int32_t>(t.states.size()));
     for (auto& layerState : t.states) {
-        proto.mutable_layer_changes()->Add(std::move(toProto(layerState)));
+        proto.mutable_layer_changes()->Add(toProto(layerState));
     }
 
     proto.mutable_display_changes()->Reserve(static_cast<int32_t>(t.displays.size()));
     for (auto& displayState : t.displays) {
-        proto.mutable_display_changes()->Add(std::move(toProto(displayState)));
+        proto.mutable_display_changes()->Add(toProto(displayState));
     }
 
     proto.mutable_merged_transaction_ids()->Reserve(
             static_cast<int32_t>(t.mergedTransactionIds.size()));
     for (auto& mergedTransactionId : t.mergedTransactionIds) {
         proto.mutable_merged_transaction_ids()->Add(mergedTransactionId);
+    }
+    proto.set_apply_token(reinterpret_cast<uint64_t>(t.applyToken.get()));
+
+    proto.mutable_transaction_barriers()->Reserve(
+            static_cast<int32_t>(t.transactionBarriers.size()));
+    for (auto& transactionBarrier : t.transactionBarriers) {
+        proto.mutable_transaction_barriers()->Add(toProto(transactionBarrier));
     }
 
     return proto;
@@ -121,10 +129,25 @@ perfetto::protos::LayerState TransactionProtoParser::toProto(
         matrixProto->set_dtdy(layer.matrix.dtdy);
     }
     if (layer.what & layer_state_t::eCornerRadiusChanged) {
-        proto.set_corner_radius(layer.cornerRadius);
+        perfetto::protos::LayerState_CornerRadii* radiiProto = proto.mutable_corner_radii();
+        radiiProto->set_tl(layer.cornerRadii.topLeft.x);
+        radiiProto->set_tr(layer.cornerRadii.topRight.x);
+        radiiProto->set_bl(layer.cornerRadii.bottomLeft.x);
+        radiiProto->set_br(layer.cornerRadii.bottomRight.x);
+        // TODO(b/430109627): Remove usage of deprecated corner_radius field
+        proto.set_corner_radius(layer.cornerRadii.topLeft.x);
+    }
+    if (layer.what & layer_state_t::eClientDrawnCornerRadiusChanged) {
+        perfetto::protos::LayerState_CornerRadii* radiiProto = proto.mutable_corner_radii();
+        radiiProto->set_tl(layer.clientDrawnCornerRadii.topLeft.x);
+        radiiProto->set_tr(layer.clientDrawnCornerRadii.topRight.x);
+        radiiProto->set_bl(layer.clientDrawnCornerRadii.bottomLeft.x);
     }
     if (layer.what & layer_state_t::eBackgroundBlurRadiusChanged) {
         proto.set_background_blur_radius(layer.backgroundBlurRadius);
+    }
+    if (layer.what & layer_state_t::eBackgroundBlurScaleChanged) {
+        proto.set_background_blur_scale(layer.backgroundBlurScale);
     }
 
     if (layer.what & layer_state_t::eAlphaChanged) {
@@ -138,7 +161,8 @@ perfetto::protos::LayerState TransactionProtoParser::toProto(
         colorProto->set_b(layer.color.b);
     }
     if (layer.what & layer_state_t::eTransparentRegionChanged) {
-        LayerProtoHelper::writeToProto(layer.transparentRegion, proto.mutable_transparent_region());
+        LayerProtoHelper::writeToProto(layer.getTransparentRegion(),
+                                       proto.mutable_transparent_region());
     }
     if (layer.what & layer_state_t::eBufferTransformChanged) {
         proto.set_transform(layer.bufferTransform);
@@ -147,7 +171,7 @@ perfetto::protos::LayerState TransactionProtoParser::toProto(
         proto.set_transform_to_display_inverse(layer.transformToDisplayInverse);
     }
     if (layer.what & layer_state_t::eCropChanged) {
-        LayerProtoHelper::writeToProto(layer.crop, proto.mutable_crop());
+        LayerProtoHelper::writeToProto(Rect(layer.crop), proto.mutable_crop());
     }
     if (layer.what & layer_state_t::eBufferChanged) {
         perfetto::protos::LayerState_BufferData* bufferProto = proto.mutable_buffer_data();
@@ -190,33 +214,30 @@ perfetto::protos::LayerState TransactionProtoParser::toProto(
     }
 
     if (layer.what & layer_state_t::eInputInfoChanged) {
-        if (layer.windowInfoHandle) {
-            const gui::WindowInfo* inputInfo = layer.windowInfoHandle->getInfo();
-            perfetto::protos::LayerState_WindowInfo* windowInfoProto =
-                    proto.mutable_window_info_handle();
-            windowInfoProto->set_layout_params_flags(inputInfo->layoutParamsFlags.get());
-            windowInfoProto->set_layout_params_type(
-                    static_cast<int32_t>(inputInfo->layoutParamsType));
-            windowInfoProto->set_input_config(inputInfo->inputConfig.get());
-            LayerProtoHelper::writeToProto(inputInfo->touchableRegion,
-                                           windowInfoProto->mutable_touchable_region());
-            windowInfoProto->set_surface_inset(inputInfo->surfaceInset);
-            windowInfoProto->set_focusable(
-                    !inputInfo->inputConfig.test(gui::WindowInfo::InputConfig::NOT_FOCUSABLE));
-            windowInfoProto->set_has_wallpaper(inputInfo->inputConfig.test(
-                    gui::WindowInfo::InputConfig::DUPLICATE_TOUCH_TO_WALLPAPER));
-            windowInfoProto->set_global_scale_factor(inputInfo->globalScaleFactor);
-            perfetto::protos::Transform* transformProto = windowInfoProto->mutable_transform();
-            transformProto->set_dsdx(inputInfo->transform.dsdx());
-            transformProto->set_dtdx(inputInfo->transform.dtdx());
-            transformProto->set_dtdy(inputInfo->transform.dtdy());
-            transformProto->set_dsdy(inputInfo->transform.dsdy());
-            transformProto->set_tx(inputInfo->transform.tx());
-            transformProto->set_ty(inputInfo->transform.ty());
-            windowInfoProto->set_replace_touchable_region_with_crop(
-                    inputInfo->replaceTouchableRegionWithCrop);
-            windowInfoProto->set_crop_layer_id(resolvedComposerState.touchCropId);
-        }
+        const gui::WindowInfo* inputInfo = &layer.getWindowInfo();
+        perfetto::protos::LayerState_WindowInfo* windowInfoProto =
+                proto.mutable_window_info_handle();
+        windowInfoProto->set_layout_params_flags(inputInfo->layoutParamsFlags.get());
+        windowInfoProto->set_layout_params_type(static_cast<int32_t>(inputInfo->layoutParamsType));
+        windowInfoProto->set_input_config(inputInfo->inputConfig.get());
+        LayerProtoHelper::writeToProto(inputInfo->touchableRegion,
+                                       windowInfoProto->mutable_touchable_region());
+        windowInfoProto->set_surface_inset(inputInfo->surfaceInset);
+        windowInfoProto->set_focusable(
+                !inputInfo->inputConfig.test(gui::WindowInfo::InputConfig::NOT_FOCUSABLE));
+        windowInfoProto->set_has_wallpaper(inputInfo->inputConfig.test(
+                gui::WindowInfo::InputConfig::DUPLICATE_TOUCH_TO_WALLPAPER));
+        windowInfoProto->set_global_scale_factor(inputInfo->globalScaleFactor);
+        perfetto::protos::Transform* transformProto = windowInfoProto->mutable_transform();
+        transformProto->set_dsdx(inputInfo->transform.dsdx());
+        transformProto->set_dtdx(inputInfo->transform.dtdx());
+        transformProto->set_dtdy(inputInfo->transform.dtdy());
+        transformProto->set_dsdy(inputInfo->transform.dsdy());
+        transformProto->set_tx(inputInfo->transform.tx());
+        transformProto->set_ty(inputInfo->transform.ty());
+        windowInfoProto->set_replace_touchable_region_with_crop(
+                inputInfo->replaceTouchableRegionWithCrop);
+        windowInfoProto->set_crop_layer_id(resolvedComposerState.touchCropId);
     }
     if (layer.what & layer_state_t::eBackgroundColorChanged) {
         proto.set_bg_color_alpha(layer.bgColor.a);
@@ -247,7 +268,8 @@ perfetto::protos::LayerState TransactionProtoParser::toProto(
         proto.set_auto_refresh(layer.autoRefresh);
     }
     if (layer.what & layer_state_t::eTrustedOverlayChanged) {
-        proto.set_is_trusted_overlay(layer.isTrustedOverlay);
+        proto.set_is_trusted_overlay(layer.trustedOverlay == gui::TrustedOverlay::ENABLED);
+        // TODO(b/339701674) update protos
     }
     if (layer.what & layer_state_t::eBufferCropChanged) {
         LayerProtoHelper::writeToProto(layer.bufferCrop, proto.mutable_buffer_crop());
@@ -259,7 +281,57 @@ perfetto::protos::LayerState TransactionProtoParser::toProto(
         proto.set_drop_input_mode(
                 static_cast<perfetto::protos::LayerState_DropInputMode>(layer.dropInputMode));
     }
+    if (layer.what & layer_state_t::eSystemContentPriorityChanged) {
+        proto.set_system_content_priority(layer.systemContentPriority);
+    }
+    if (layer.what & layer_state_t::eBoxShadowSettingsChanged) {
+        perfetto::protos::BoxShadowSettings* protoSettings = proto.mutable_box_shadow_settings();
+        for (const auto& boxShadow : layer.boxShadowSettings.boxShadows) {
+            perfetto::protos::BoxShadowSettings_BoxShadowParams* protoParams =
+                    protoSettings->add_box_shadows();
+            protoParams->set_blur_radius(boxShadow.blurRadius);
+            protoParams->set_spread_radius(boxShadow.spreadRadius);
+            protoParams->set_color(boxShadow.color);
+            protoParams->set_offset_x(boxShadow.offsetX);
+            protoParams->set_offset_y(boxShadow.offsetY);
+        }
+    }
+    if (layer.what & layer_state_t::eBorderSettingsChanged) {
+        perfetto::protos::BorderSettings* protoSettings = proto.mutable_border_settings();
+        protoSettings->set_stroke_width(layer.borderSettings.strokeWidth);
+        protoSettings->set_color(layer.borderSettings.color);
+    }
     return proto;
+}
+
+perfetto::protos::TransactionBarrier TransactionProtoParser::toProto(
+        const gui::TransactionBarrier& transactionBarrier) {
+    perfetto::protos::TransactionBarrier proto;
+    proto.set_kind(static_cast<uint32_t>(transactionBarrier.kind));
+    android::String8 barrierToken(transactionBarrier.barrierToken);
+    proto.mutable_barrier_token()->assign(barrierToken.c_str(), barrierToken.size());
+    return proto;
+}
+
+gui::TransactionBarrier TransactionProtoParser::fromProto(
+        const perfetto::protos::TransactionBarrier& proto) {
+    gui::TransactionBarrier barrier;
+    auto kind = static_cast<gui::TransactionBarrier::BarrierKind>(proto.kind());
+    switch (kind) {
+        case gui::TransactionBarrier::BarrierKind::KIND_SIGNAL:
+        case gui::TransactionBarrier::BarrierKind::KIND_WAIT:
+            barrier.kind = kind;
+            break;
+        default:
+            barrier.kind = gui::TransactionBarrier::BarrierKind::KIND_INVALID;
+            break;
+    }
+
+    String8 barrierTokenUTF8(proto.barrier_token().data(), proto.barrier_token().size());
+    String16 barrierTokenUTF16(barrierTokenUTF8);
+    barrier.barrierToken = barrierTokenUTF16;
+
+    return barrier;
 }
 
 perfetto::protos::DisplayState TransactionProtoParser::toProto(const DisplayState& display) {
@@ -299,9 +371,9 @@ perfetto::protos::LayerCreationArgs TransactionProtoParser::toProto(const LayerC
     return proto;
 }
 
-TransactionState TransactionProtoParser::fromProto(
+QueuedTransactionState TransactionProtoParser::fromProto(
         const perfetto::protos::TransactionState& proto) {
-    TransactionState t;
+    QueuedTransactionState t;
     t.originPid = proto.pid();
     t.originUid = proto.uid();
     t.frameTimelineInfo.vsyncId = proto.vsync_id();
@@ -321,8 +393,15 @@ TransactionState TransactionProtoParser::fromProto(
     int32_t displayCount = proto.display_changes_size();
     t.displays.reserve(static_cast<size_t>(displayCount));
     for (int i = 0; i < displayCount; i++) {
-        t.displays.add(fromProto(proto.display_changes(i)));
+        t.displays.emplace_back(fromProto(proto.display_changes(i)));
     }
+
+    int32_t barrierCount = proto.transaction_barriers_size();
+    t.transactionBarriers.reserve(static_cast<size_t>(barrierCount));
+    for (int i = 0; i < barrierCount; i++) {
+        t.transactionBarriers.emplace_back(fromProto(proto.transaction_barriers(i)));
+    }
+
     return t;
 }
 
@@ -391,10 +470,27 @@ void TransactionProtoParser::fromProto(const perfetto::protos::LayerState& proto
         layer.matrix.dtdy = matrixProto.dtdy();
     }
     if (proto.what() & layer_state_t::eCornerRadiusChanged) {
-        layer.cornerRadius = proto.corner_radius();
+        const perfetto::protos::LayerState_CornerRadii& radiiProto = proto.corner_radii();
+        layer.cornerRadii.topLeft.x = radiiProto.tl();
+        layer.cornerRadii.topRight.x = radiiProto.tr();
+        layer.cornerRadii.bottomLeft.x = radiiProto.bl();
+        layer.cornerRadii.bottomRight.y = radiiProto.br();
+        // TODO(b/430109627): Remove usage of deprecated corner_radius field
+        layer.cornerRadii.topLeft.x = proto.corner_radius();
+    }
+    if (proto.what() & layer_state_t::eClientDrawnCornerRadiusChanged) {
+        const perfetto::protos::LayerState_CornerRadii& radiiProto =
+                proto.client_drawn_corner_radii();
+        layer.clientDrawnCornerRadii.topLeft.x = radiiProto.tl();
+        layer.clientDrawnCornerRadii.topRight.x = radiiProto.tr();
+        layer.clientDrawnCornerRadii.bottomLeft.x = radiiProto.bl();
+        layer.clientDrawnCornerRadii.bottomRight.y = radiiProto.br();
     }
     if (proto.what() & layer_state_t::eBackgroundBlurRadiusChanged) {
         layer.backgroundBlurRadius = proto.background_blur_radius();
+    }
+    if (proto.what() & layer_state_t::eBackgroundBlurScaleChanged) {
+        layer.backgroundBlurScale = proto.background_blur_radius();
     }
 
     if (proto.what() & layer_state_t::eAlphaChanged) {
@@ -408,7 +504,9 @@ void TransactionProtoParser::fromProto(const perfetto::protos::LayerState& proto
         layer.color.b = colorProto.b();
     }
     if (proto.what() & layer_state_t::eTransparentRegionChanged) {
-        LayerProtoHelper::readFromProto(proto.transparent_region(), layer.transparentRegion);
+        Region transparentRegion;
+        LayerProtoHelper::readFromProto(proto.transparent_region(), transparentRegion);
+        layer.updateTransparentRegion(transparentRegion);
     }
     if (proto.what() & layer_state_t::eBufferTransformChanged) {
         layer.bufferTransform = proto.transform();
@@ -435,6 +533,7 @@ void TransactionProtoParser::fromProto(const perfetto::protos::LayerState& proto
         layer.bufferData->flags = ftl::Flags<BufferData::BufferDataChange>(bufferProto.flags());
         layer.bufferData->cachedBuffer.id = bufferProto.cached_buffer_id();
         layer.bufferData->acquireFence = Fence::NO_FENCE;
+        layer.bufferData->dequeueTime = -1;
     }
 
     if (proto.what() & layer_state_t::eApiChanged) {
@@ -483,7 +582,7 @@ void TransactionProtoParser::fromProto(const perfetto::protos::LayerState& proto
                 windowInfoProto.replace_touchable_region_with_crop();
         resolvedComposerState.touchCropId = windowInfoProto.crop_layer_id();
 
-        layer.windowInfoHandle = sp<gui::WindowInfoHandle>::make(inputInfo);
+        *layer.editWindowInfo() = inputInfo;
     }
     if (proto.what() & layer_state_t::eBackgroundColorChanged) {
         layer.bgColor.a = proto.bg_color_alpha();
@@ -515,7 +614,8 @@ void TransactionProtoParser::fromProto(const perfetto::protos::LayerState& proto
         layer.autoRefresh = proto.auto_refresh();
     }
     if (proto.what() & layer_state_t::eTrustedOverlayChanged) {
-        layer.isTrustedOverlay = proto.is_trusted_overlay();
+        layer.trustedOverlay = proto.is_trusted_overlay() ? gui::TrustedOverlay::ENABLED
+                                                          : gui::TrustedOverlay::UNSET;
     }
     if (proto.what() & layer_state_t::eBufferCropChanged) {
         LayerProtoHelper::readFromProto(proto.buffer_crop(), layer.bufferCrop);
@@ -525,6 +625,28 @@ void TransactionProtoParser::fromProto(const perfetto::protos::LayerState& proto
     }
     if (proto.what() & layer_state_t::eDropInputModeChanged) {
         layer.dropInputMode = static_cast<gui::DropInputMode>(proto.drop_input_mode());
+    }
+    if (proto.what() & layer_state_t::eSystemContentPriorityChanged) {
+        layer.systemContentPriority = proto.system_content_priority();
+    }
+    if ((proto.what() & layer_state_t::eBoxShadowSettingsChanged) &&
+        proto.has_box_shadow_settings()) {
+        const auto& protoSettings = proto.box_shadow_settings();
+        for (int i = 0; i < protoSettings.box_shadows_size(); i++) {
+            const auto& protoParams = protoSettings.box_shadows(i);
+            android::gui::BoxShadowSettings::BoxShadowParams params;
+            params.blurRadius = protoParams.blur_radius();
+            params.spreadRadius = protoParams.spread_radius();
+            params.color = protoParams.color();
+            params.offsetX = protoParams.offset_x();
+            params.offsetY = protoParams.offset_y();
+            layer.boxShadowSettings.boxShadows.push_back(params);
+        }
+    }
+    if ((proto.what() & layer_state_t::eBorderSettingsChanged) && proto.has_border_settings()) {
+        const auto& protoSettings = proto.border_settings();
+        layer.borderSettings.strokeWidth = protoSettings.stroke_width();
+        layer.borderSettings.color = protoSettings.color();
     }
 }
 
@@ -566,7 +688,7 @@ perfetto::protos::DisplayInfo TransactionProtoParser::toProto(
         const frontend::DisplayInfo& displayInfo, uint32_t layerStack) {
     perfetto::protos::DisplayInfo proto;
     proto.set_layer_stack(layerStack);
-    proto.set_display_id(displayInfo.info.displayId);
+    proto.set_display_id(displayInfo.info.displayId.val());
     proto.set_logical_width(displayInfo.info.logicalWidth);
     proto.set_logical_height(displayInfo.info.logicalHeight);
     asProto(proto.mutable_transform_inverse(), displayInfo.info.transform);
@@ -588,7 +710,7 @@ void fromProto2(ui::Transform& outTransform, const perfetto::protos::Transform& 
 frontend::DisplayInfo TransactionProtoParser::fromProto(
         const perfetto::protos::DisplayInfo& proto) {
     frontend::DisplayInfo displayInfo;
-    displayInfo.info.displayId = proto.display_id();
+    displayInfo.info.displayId = ui::LogicalDisplayId{proto.display_id()};
     displayInfo.info.logicalWidth = proto.logical_width();
     displayInfo.info.logicalHeight = proto.logical_height();
     fromProto2(displayInfo.info.transform, proto.transform_inverse());

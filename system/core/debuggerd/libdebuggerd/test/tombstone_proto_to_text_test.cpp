@@ -22,6 +22,7 @@
 #include <android-base/test_utils.h>
 
 #include "libdebuggerd/tombstone.h"
+#include "libdebuggerd/tombstone_proto_to_text.h"
 #include "tombstone.pb.h"
 
 using CallbackType = std::function<void(const std::string& line, bool should_log)>;
@@ -60,12 +61,16 @@ class TombstoneProtoToTextTest : public ::testing::Test {
 
   void ProtoToString() {
     text_ = "";
-    EXPECT_TRUE(
-        tombstone_proto_to_text(*tombstone_, [this](const std::string& line, bool should_log) {
+    EXPECT_TRUE(tombstone_proto_to_text(
+        *tombstone_,
+        [this](const std::string& line, bool should_log) {
           if (should_log) {
             text_ += "LOG ";
           }
           text_ += line + '\n';
+        },
+        [&](const BacktraceFrame& frame) {
+          text_ += "SYMBOLIZE " + frame.build_id() + " " + std::to_string(frame.pc()) + "\n";
         }));
   }
 
@@ -133,4 +138,45 @@ TEST_F(TombstoneProtoToTextTest, crash_detail_bytes) {
   crash_detail->set_data("helloworld\1\255\3");
   ProtoToString();
   EXPECT_MATCH(text_, R"(CRASH_DETAIL_NAME: 'helloworld\\1\\255\\3')");
+}
+
+TEST_F(TombstoneProtoToTextTest, stack_record) {
+  auto* cause = tombstone_->add_causes();
+  cause->set_human_readable("stack tag-mismatch on thread 123");
+  auto* stack = tombstone_->mutable_stack_history_buffer();
+  stack->set_tid(123);
+  {
+    auto* shb_entry = stack->add_entries();
+    shb_entry->set_fp(0x1);
+    shb_entry->set_tag(0xb);
+    auto* addr = shb_entry->mutable_addr();
+    addr->set_rel_pc(0x567);
+    addr->set_file_name("foo.so");
+    addr->set_build_id("ABC123");
+  }
+  {
+    auto* shb_entry = stack->add_entries();
+    shb_entry->set_fp(0x2);
+    shb_entry->set_tag(0xc);
+    auto* addr = shb_entry->mutable_addr();
+    addr->set_rel_pc(0x678);
+    addr->set_file_name("bar.so");
+  }
+  ProtoToString();
+  EXPECT_MATCH(text_, "stack tag-mismatch on thread 123");
+  EXPECT_MATCH(text_, "stack_record fp:0x1 tag:0xb pc:foo\\.so\\+0x567 \\(BuildId: ABC123\\)");
+  EXPECT_MATCH(text_, "stack_record fp:0x2 tag:0xc pc:bar\\.so\\+0x678");
+}
+
+TEST_F(TombstoneProtoToTextTest, symbolize) {
+  BacktraceFrame* frame = main_thread_->add_current_backtrace();
+  frame->set_pc(12345);
+  frame->set_build_id("0123456789abcdef");
+  ProtoToString();
+  EXPECT_MATCH(text_, "\\(BuildId: 0123456789abcdef\\)\\nSYMBOLIZE 0123456789abcdef 12345\\n");
+}
+
+TEST_F(TombstoneProtoToTextTest, uid) {
+  ProtoToString();
+  EXPECT_MATCH(text_, "\\nLOG uid: 0\\n");
 }

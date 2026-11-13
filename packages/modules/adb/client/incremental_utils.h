@@ -18,6 +18,7 @@
 
 #include "adb_unique_fd.h"
 
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -43,7 +44,8 @@ std::vector<int32_t> PriorityBlocksForFile(const std::string& filepath, borrowed
 Size verity_tree_blocks_for_file(Size fileSize);
 Size verity_tree_size_for_file(Size fileSize);
 
-std::pair<std::vector<char>, int32_t> read_id_sig_headers(borrowed_fd fd);
-std::pair<off64_t, ssize_t> skip_id_sig_headers(borrowed_fd fd);
+std::optional<std::pair<std::vector<char>, int32_t>> read_id_sig_headers(borrowed_fd fd,
+                                                                         std::string* error);
+std::optional<std::pair<off64_t, ssize_t>> skip_id_sig_headers(borrowed_fd fd, std::string* error);
 
 }  // namespace incremental

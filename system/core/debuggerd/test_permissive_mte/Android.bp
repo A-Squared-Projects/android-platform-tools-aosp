@@ -18,7 +18,6 @@ package {
 
 cc_binary {
     name: "mte_crash",
-    tidy: false,
     srcs: ["mte_crash.cpp"],
     sanitize: {
         memtag_heap: true,
@@ -39,7 +38,7 @@ java_test_host {
         "src/**/PermissiveMteTest.java",
         ":libtombstone_proto-src",
     ],
-    data: [":mte_crash"],
+    device_first_data: [":mte_crash"],
     test_config: "AndroidTest.xml",
     test_suites: ["general-tests"],
 }

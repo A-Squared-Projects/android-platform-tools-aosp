@@ -18,7 +18,9 @@
 #define COMMANDLINE_H
 
 #include <android-base/strings.h>
+#include <google/protobuf/text_format.h>
 
+#include <stdlib.h>
 #include <optional>
 
 #include "adb.h"
@@ -36,11 +38,11 @@ class StandardStreamsCallbackInterface {
     }
     // Handles the stdout output from devices supporting the Shell protocol.
     // Returns true on success and false on failure.
-    virtual bool OnStdout(const char* buffer, size_t length) = 0;
+    virtual bool OnStdoutReceived(const char* buffer, size_t length) = 0;
 
     // Handles the stderr output from devices supporting the Shell protocol.
     // Returns true on success and false on failure.
-    virtual bool OnStderr(const char* buffer, size_t length) = 0;
+    virtual bool OnStderrReceived(const char* buffer, size_t length) = 0;
 
     // Indicates the communication is finished and returns the appropriate error
     // code.
@@ -50,8 +52,8 @@ class StandardStreamsCallbackInterface {
     virtual int Done(int status) = 0;
 
   protected:
-    static bool OnStream(std::string* string, FILE* stream, const char* buffer, size_t length,
-                         bool returnErrors) {
+    static bool SendTo(std::string* string, FILE* stream, const char* buffer, size_t length,
+                       bool returnErrors) {
         if (string != nullptr) {
             string->append(buffer, length);
             return true;
@@ -70,8 +72,8 @@ class StandardStreamsCallbackInterface {
 // stream or to a string passed to the constructor.
 class DefaultStandardStreamsCallback : public StandardStreamsCallbackInterface {
   public:
-    // If |stdout_str| is non-null, OnStdout will append to it.
-    // If |stderr_str| is non-null, OnStderr will append to it.
+    // If |stdout_str| is non-null, OnStdoutReceived will append to it.
+    // If |stderr_str| is non-null, OnStderrReceived will append to it.
     DefaultStandardStreamsCallback(std::string* stdout_str, std::string* stderr_str)
         : stdout_str_(stdout_str), stderr_str_(stderr_str), returnErrors_(false) {
     }
@@ -80,12 +82,24 @@ class DefaultStandardStreamsCallback : public StandardStreamsCallbackInterface {
         : stdout_str_(stdout_str), stderr_str_(stderr_str), returnErrors_(returnErrors) {
     }
 
-    bool OnStdout(const char* buffer, size_t length) {
-        return OnStream(stdout_str_, stdout, buffer, length, returnErrors_);
+    // Called when receiving from the device standard input stream
+    bool OnStdoutReceived(const char* buffer, size_t length) override {
+        return SendToOut(buffer, length);
     }
 
-    bool OnStderr(const char* buffer, size_t length) {
-        return OnStream(stderr_str_, stderr, buffer, length, returnErrors_);
+    // Called when receiving from the device error input stream
+    bool OnStderrReceived(const char* buffer, size_t length) override {
+        return SendToErr(buffer, length);
+    }
+
+    // Send to local standard input stream (or stdout_str if one was provided).
+    bool SendToOut(const char* buffer, size_t length) {
+        return SendTo(stdout_str_, stdout, buffer, length, returnErrors_);
+    }
+
+    // Send to local standard error stream (or stderr_str if one was provided).
+    bool SendToErr(const char* buffer, size_t length) {
+        return SendTo(stderr_str_, stderr, buffer, length, returnErrors_);
     }
 
     int Done(int status) {
@@ -107,13 +121,69 @@ class DefaultStandardStreamsCallback : public StandardStreamsCallbackInterface {
 class SilentStandardStreamsCallbackInterface : public StandardStreamsCallbackInterface {
   public:
     SilentStandardStreamsCallbackInterface() = default;
-    bool OnStdout(const char*, size_t) override final { return true; }
-    bool OnStderr(const char*, size_t) override final { return true; }
-    int Done(int status) override final { return status; }
+    bool OnStdoutReceived(const char*, size_t) final { return true; }
+    bool OnStderrReceived(const char*, size_t) final { return true; }
+    int Done(int status) final { return status; }
 };
 
 // Singleton.
 extern DefaultStandardStreamsCallback DEFAULT_STANDARD_STREAMS_CALLBACK;
+
+// Prints out human-readable form of the protobuf message received in binary format.
+// Expected input is a stream of (<hex4>, [binary protobuf]).
+template <typename T>
+class ProtoBinaryToText : public DefaultStandardStreamsCallback {
+  public:
+    explicit ProtoBinaryToText(const std::string& m, std::string* std_out = nullptr,
+                               std::string* std_err = nullptr)
+        : DefaultStandardStreamsCallback(std_out, std_err), message(m) {}
+    bool OnStdoutReceived(const char* b, size_t l) override {
+        constexpr size_t kHeader_size = 4;
+
+        // Add the incoming bytes to our internal buffer.
+        std::copy_n(b, l, std::back_inserter(buffer_));
+
+        // Do we have at least the header?
+        if (buffer_.size() < kHeader_size) {
+            return true;
+        }
+
+        // We have a header. Convert <hex4> to size_t and check if we have received all
+        // the payload.
+        const std::string expected_size_hex = std::string(buffer_.data(), kHeader_size);
+        const size_t expected_size = strtoull(expected_size_hex.c_str(), nullptr, 16);
+
+        // Do we have the header + all expected payload?
+        if (buffer_.size() < expected_size + kHeader_size) {
+            return true;
+        }
+
+        // Convert binary to text proto.
+        T binary_proto;
+        binary_proto.ParseFromString(std::string(buffer_.data() + kHeader_size, expected_size));
+        std::string string_proto;
+        google::protobuf::TextFormat::PrintToString(binary_proto, &string_proto);
+
+        // Drop bytes that we just consumed.
+        buffer_.erase(buffer_.begin(), buffer_.begin() + kHeader_size + expected_size);
+
+        SendToOut(message.data(), message.length());
+        SendToOut(string_proto.data(), string_proto.length());
+
+        // Recurse if there is still data in our buffer (there may be more messages).
+        if (!buffer_.empty()) {
+            OnStdoutReceived("", 0);
+        }
+
+        return true;
+    }
+
+  private:
+    DISALLOW_COPY_AND_ASSIGN(ProtoBinaryToText);
+    // We buffer bytes here until we get all the header and payload bytes
+    std::vector<char> buffer_;
+    std::string message;
+};
 
 int adb_commandline(int argc, const char** argv);
 
@@ -140,7 +210,7 @@ int read_and_dump(borrowed_fd fd, bool use_shell_protocol = false,
 // Connects to the device "abb" service with |command| and returns the fd.
 template <typename ContainerT>
 unique_fd send_abb_exec_command(const ContainerT& command_args, std::string* error) {
-    std::string service_string = "abb_exec:" + android::base::Join(command_args, ABB_ARG_DELIMETER);
+    std::string service_string = "abb_exec:" + android::base::Join(command_args, ABB_ARG_DELIMITER);
 
     unique_fd fd(adb_connect(service_string, error));
     if (fd < 0) {

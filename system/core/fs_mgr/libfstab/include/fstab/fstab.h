@@ -33,6 +33,7 @@ namespace fs_mgr {
 struct FstabEntry {
     std::string blk_device;
     std::vector<std::string> user_devices;
+    std::vector<int> device_aliased;
     std::string logical_partition_name;
     std::string mount_point;
     std::string fs_type;
@@ -86,6 +87,8 @@ struct FstabEntry {
         bool fs_compress : 1;
         bool overlayfs_remove_missing_lowerdir : 1;
         bool is_zoned : 1;
+        bool overlay_on : 1;
+        bool overlay_off : 1;
     } fs_mgr_flags = {};
 
     bool is_encryptable() const { return fs_mgr_flags.crypt; }
@@ -125,6 +128,16 @@ void TransformFstabForDsu(Fstab* fstab, const std::string& dsu_slot,
 
 std::set<std::string> GetBootDevices();
 
+// Get the Partition UUID the kernel loaded from if the bootloader passed it.
+//
+// If the kernel's Partition UUID is provided then we can use this to help
+// identify which block device contains the filesystems we care about.
+//
+// NOTE: Nothing secures a UUID other than the convention that two disks
+// aren't supposed to both have the same UUID. We still need other mechanisms
+// to ensure we've got the right disk.
+std::string GetBootPartUuid();
+
 // Return the name of the dm-verity device for the given fstab entry. This does
 // not check whether the device is valid or exists; it merely returns the
 // expected name.
@@ -152,6 +165,9 @@ bool GetKernelCmdline(const std::string& key, std::string* out);
 
 // Return the "other" slot for the given slot suffix.
 std::string OtherSlotSuffix(const std::string& suffix);
+
+bool GetBootconfigFromString(const std::string& bootconfig, const std::string& key,
+                             std::string* out);
 
 }  // namespace fs_mgr
 }  // namespace android

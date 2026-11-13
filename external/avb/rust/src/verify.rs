@@ -20,23 +20,26 @@
 extern crate alloc;
 
 use crate::{
-    descriptor::{get_descriptors, Descriptor, DescriptorResult},
+    Ops,
+    descriptor::{Descriptor, DescriptorResult, get_descriptors},
     error::{
-        slot_verify_enum_to_result, vbmeta_verify_enum_to_result, SlotVerifyError,
-        SlotVerifyNoDataResult, SlotVerifyResult, VbmetaVerifyResult,
+        SlotVerifyError, SlotVerifyNoDataResult, SlotVerifyResult, VbmetaVerifyResult,
+        slot_verify_enum_to_result, vbmeta_verify_enum_to_result,
     },
-    ops, Ops,
+    ops,
 };
 use alloc::vec::Vec;
 use avb_bindgen::{
-    avb_slot_verify, avb_slot_verify_data_free, AvbPartitionData, AvbSlotVerifyData, AvbVBMetaData,
+    AVB_SHA256_DIGEST_SIZE, AVB_SHA512_DIGEST_SIZE, AvbDigestType, AvbPartitionData,
+    AvbSlotVerifyData, AvbVBMetaData, avb_slot_verify,
+    avb_slot_verify_data_calculate_vbmeta_digest, avb_slot_verify_data_free,
 };
 use core::{
-    ffi::{c_char, CStr},
+    ffi::{CStr, c_char},
     fmt,
     marker::PhantomData,
     pin::pin,
-    ptr::{self, null, null_mut, NonNull},
+    ptr::{self, NonNull, null, null_mut},
     slice,
 };
 
@@ -101,6 +104,7 @@ impl VbmetaData {
     /// Extracts the descriptors from the vbmeta image.
     ///
     /// Note that this function allocates memory to hold the `Descriptor` objects.
+    /// TODO(b/437999882): get rid of the allocation or provide allocation-free counterpart.
     ///
     /// # Returns
     /// A vector of descriptors, or `DescriptorError` on failure.
@@ -110,15 +114,32 @@ impl VbmetaData {
         unsafe { get_descriptors(self) }
     }
 
-    /// Gets a property from the vbmeta image for the given key
+    /// Gets a property value from the vbmeta image for the given key
     ///
     /// This function re-implements the libavb avb_property_lookup logic.
+    ///
+    /// Note that this function allocates memory to hold all the `Descriptor` objects.
+    /// TODO(b/437999882): get rid of the allocation or provide allocation-free counterpart.
     ///
     /// # Returns
     /// Byte array with property data or None in case property not found or failure.
     pub fn get_property_value(&self, key: &str) -> Option<&[u8]> {
+        self.get_property_value_with_nul(key)
+            .map(|v| &v[..v.len() - 1])
+    }
+
+    /// Gets a nul terminated property value from the vbmeta image for the given key
+    ///
+    /// This function re-implements the libavb avb_property_lookup logic.
+    ///
+    /// Note that this function allocates memory to hold all the `Descriptor` objects.
+    /// TODO(b/437999882): get rid of the allocation or provide allocation-free counterpart.
+    ///
+    /// # Returns
+    /// Byte array with nul terminated property data or None in case property not found or failure.
+    pub fn get_property_value_with_nul(&self, key: &str) -> Option<&[u8]> {
         self.descriptors().ok()?.iter().find_map(|d| match d {
-            Descriptor::Property(p) if p.key == key => Some(p.value),
+            Descriptor::Property(p) if p.key == key => Some(p.value_with_nul),
             _ => None,
         })
     }
@@ -237,14 +258,14 @@ pub struct SlotVerifyData<'a> {
 }
 
 // Useful so that `SlotVerifyError`, which may hold a `SlotVerifyData`, can derive `PartialEq`.
-impl<'a> PartialEq for SlotVerifyData<'a> {
+impl PartialEq for SlotVerifyData<'_> {
     fn eq(&self, other: &Self) -> bool {
         // A `SlotVerifyData` uniquely owns the underlying data so is only equal to itself.
         ptr::eq(self, other)
     }
 }
 
-impl<'a> Eq for SlotVerifyData<'a> {}
+impl Eq for SlotVerifyData<'_> {}
 
 impl<'a> SlotVerifyData<'a> {
     /// Creates a `SlotVerifyData` wrapping the given raw `AvbSlotVerifyData`.
@@ -259,7 +280,7 @@ impl<'a> SlotVerifyData<'a> {
     /// # Arguments
     /// * `data`: a `AvbSlotVerifyData` object created by libavb using `ops`.
     /// * `ops`: the user-provided `Ops` object that was used for verification; only used here to
-    ///          grab the preloaded data lifetime.
+    ///   grab the preloaded data lifetime.
     ///
     /// # Returns
     /// The new object, or `Err(SlotVerifyError::Internal)` if the data looks invalid.
@@ -348,10 +369,45 @@ impl<'a> SlotVerifyData<'a> {
         // SAFETY: `raw_data` points to a valid `AvbSlotVerifyData` object owned by us.
         unsafe { self.raw_data.as_ref() }.resolved_hashtree_error_mode
     }
+
+    /// Calculates the SHA-256 digest of all vbmeta images in this `SlotVerifyData`.
+    pub fn calculate_sha256_digest(&self) -> [u8; 32] {
+        let mut digest = [0; AVB_SHA256_DIGEST_SIZE as usize];
+        // SAFETY:
+        // * `digest` is of size AVB_SHA256_DIGEST_SIZE, as needed by AVB_DIGEST_TYPE_SHA256.
+        unsafe { self.calculate_digest(AvbDigestType::AVB_DIGEST_TYPE_SHA256, &mut digest) };
+        digest
+    }
+
+    /// Calculates the SHA-512 digest of all vbmeta images in this `SlotVerifyData`.
+    pub fn calculate_sha512_digest(&self) -> [u8; 64] {
+        let mut digest = [0; AVB_SHA512_DIGEST_SIZE as usize];
+        // SAFETY:
+        // * `digest` is of size AVB_SHA512_DIGEST_SIZE, as needed by AVB_DIGEST_TYPE_SHA512.
+        unsafe { self.calculate_digest(AvbDigestType::AVB_DIGEST_TYPE_SHA512, &mut digest) };
+        digest
+    }
+
+    /// Calculates the requested digest of all vbmeta images in this `SlotVerifyData`.
+    ///
+    /// # Safety
+    /// * `out` must be large enough to hold a digest of the requested type.
+    unsafe fn calculate_digest(&self, digest_type: AvbDigestType, out: &mut [u8]) {
+        // SAFETY:
+        // * `raw_data` points to a valid `AvbSlotVerifyData` object owned by us.
+        // * `out` is mutable, owned by the caller who ensured it is large enough.
+        unsafe {
+            avb_slot_verify_data_calculate_vbmeta_digest(
+                self.raw_data.as_ptr(),
+                digest_type,
+                out.as_mut_ptr(),
+            )
+        };
+    }
 }
 
 /// Frees any internally-allocated and owned data.
-impl<'a> Drop for SlotVerifyData<'a> {
+impl Drop for SlotVerifyData<'_> {
     fn drop(&mut self) {
         // SAFETY:
         // * `raw_data` points to a valid `AvbSlotVerifyData` object owned by us.
@@ -364,7 +420,7 @@ impl<'a> Drop for SlotVerifyData<'a> {
 ///
 /// This implementation will print the slot, partition name, and verification status for all
 /// vbmetadata and images.
-impl<'a> fmt::Display for SlotVerifyData<'a> {
+impl fmt::Display for SlotVerifyData<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -378,7 +434,7 @@ impl<'a> fmt::Display for SlotVerifyData<'a> {
 
 /// Forwards to `Display` formatting; the default `Debug` formatting implementation isn't very
 /// useful as it's mostly raw pointer addresses.
-impl<'a> fmt::Debug for SlotVerifyData<'a> {
+impl fmt::Debug for SlotVerifyData<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(self, f)
     }
@@ -428,7 +484,7 @@ pub fn slot_verify<'a>(
 
     // To be more Rust idiomatic we allow `ab_suffix` to be `None`, but libavb requires a valid
     // pointer to an empty string in this case, not NULL.
-    let ab_suffix = ab_suffix.unwrap_or(CStr::from_bytes_with_nul(b"\0").unwrap());
+    let ab_suffix = ab_suffix.unwrap_or(c"");
 
     let ops_bridge = pin!(ops::OpsBridge::new(ops));
     let mut out_data: *mut AvbSlotVerifyData = null_mut();
@@ -465,7 +521,11 @@ pub fn slot_verify<'a>(
     match result {
         // libavb will always provide verification data on success.
         Ok(()) => Ok(data.unwrap()),
-        // Data may also be provided on verification failure, fold it into the error.
+        // Data may also be provided on non-fatal failures, fold it into the error.
+        Err(SlotVerifyError::PublicKeyRejected(None)) => {
+            Err(SlotVerifyError::PublicKeyRejected(data))
+        }
+        Err(SlotVerifyError::RollbackIndex(None)) => Err(SlotVerifyError::RollbackIndex(data)),
         Err(SlotVerifyError::Verification(None)) => Err(SlotVerifyError::Verification(data)),
         // No other error provides verification data.
         Err(e) => Err(e),

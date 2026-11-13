@@ -14,23 +14,22 @@
  * limitations under the License.
  */
 
-import {FunctionUtils} from 'common/function_utils';
 import {WinscopeEvent} from 'messaging/winscope_event';
 import {EmitEvent} from 'messaging/winscope_event_emitter';
-import {TraceType} from 'trace/trace_type';
+import {Trace} from 'trace_api/trace';
 import {View, Viewer, ViewType} from './viewer';
 
 class ViewerStub implements Viewer {
+  private readonly traces: Array<Trace<object>> = [];
   private htmlElement: HTMLElement;
   private title: string;
   private view: View;
-  private dependencies: TraceType[];
-  private emitAppEvent: EmitEvent = FunctionUtils.DO_NOTHING_ASYNC;
+  private emitAppEvent: EmitEvent = () => Promise.resolve();
 
   constructor(
     title: string,
     viewContent?: string,
-    dependencies?: TraceType[],
+    trace?: Trace<object>,
     viewType?: ViewType,
   ) {
     this.title = title;
@@ -41,15 +40,13 @@ class ViewerStub implements Viewer {
     } else {
       this.htmlElement = undefined as unknown as HTMLElement;
     }
-
-    this.dependencies = dependencies ?? [TraceType.WINDOW_MANAGER];
+    if (trace) this.traces = [trace];
 
     this.view = new View(
-      viewType ?? ViewType.TAB,
-      this.getDependencies(),
+      viewType ?? ViewType.TRACE_TAB,
+      this.getTraces(),
       this.htmlElement,
       this.title,
-      this.getDependencies()[0],
     );
   }
 
@@ -69,8 +66,8 @@ class ViewerStub implements Viewer {
     return [this.view];
   }
 
-  getDependencies(): TraceType[] {
-    return this.dependencies;
+  getTraces(): Array<Trace<object>> {
+    return this.traces;
   }
 }
 

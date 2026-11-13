@@ -17,6 +17,7 @@
 #ifndef ANDROID_GUI_BUFFERQUEUEPRODUCER_H
 #define ANDROID_GUI_BUFFERQUEUEPRODUCER_H
 
+#include <gui/AdditionalOptions.h>
 #include <gui/BufferQueueDefs.h>
 
 #include <gui/IGraphicBufferProducer.h>
@@ -35,8 +36,6 @@ class BufferQueueProducer : public BnGraphicBufferProducer {
 public:
     friend class BufferQueue; // Needed to access binderDied
 
-    explicit BufferQueueProducer(const sp<BufferQueueCore>& core,
-                                 bool consumerIsSurfaceFlinger = false);
     ~BufferQueueProducer() override;
 
     // requestBuffer returns the GraphicBuffer for slot N.
@@ -45,6 +44,11 @@ public:
     // by dequeueBuffer.  It must be called again if dequeueBuffer returns
     // flags indicating that previously-returned buffers are no longer valid.
     virtual status_t requestBuffer(int slot, sp<GraphicBuffer>* buf);
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+    // see IGraphicsBufferProducer::extendSlotCount
+    virtual status_t extendSlotCount(int size) override;
+#endif
 
     // see IGraphicsBufferProducer::setMaxDequeuedBufferCount
     virtual status_t setMaxDequeuedBufferCount(int maxDequeuedBuffers);
@@ -202,16 +206,27 @@ public:
 
     // See IGraphicBufferProducer::setAutoPrerotation
     virtual status_t setAutoPrerotation(bool autoPrerotation);
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_SETFRAMERATE)
     // See IGraphicBufferProducer::setFrameRate
     status_t setFrameRate(float frameRate, int8_t compatibility,
                           int8_t changeFrameRateStrategy) override;
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_EXTENDEDALLOCATE)
+    status_t setAdditionalOptions(const std::vector<gui::AdditionalOptions>& options) override;
 #endif
 
 protected:
+    explicit BufferQueueProducer(const sp<BufferQueueCore>& core,
+                                 bool consumerIsSurfaceFlinger = false);
+    friend class sp<BufferQueueProducer>;
     // see IGraphicsBufferProducer::setMaxDequeuedBufferCount, but with the ability to retrieve the
     // total maximum buffer count for the buffer queue (dequeued AND acquired)
     status_t setMaxDequeuedBufferCount(int maxDequeuedBuffers, int* maxBufferCount);
+
+    // Wait until a buffer has been released. The method may spuriously return OK when no buffer has
+    // been released. The BufferQueue mutex is passed in the locked state. It must be unlocked
+    // before waiting for a release and locked before returning.
+    virtual status_t waitForBufferRelease(std::unique_lock<std::mutex>& lock,
+                                          nsecs_t timeout) const;
 
 private:
     // This is required by the IBinder::DeathRecipient interface

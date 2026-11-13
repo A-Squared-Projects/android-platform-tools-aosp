@@ -14,12 +14,14 @@
  * limitations under the License.
  */
 
-#include <gui/TraceUtils.h>
-
+#include <common/FlagManager.h>
+#include <common/trace.h>
 #include <scheduler/FrameTargeter.h>
 #include <scheduler/IVsyncSource.h>
+#include <utils/Log.h>
 
 namespace android::scheduler {
+using namespace std::chrono_literals;
 
 FrameTarget::FrameTarget(const std::string& displayLabel)
       : mFramePending("PrevFramePending " + displayLabel, false),
@@ -27,29 +29,67 @@ FrameTarget::FrameTarget(const std::string& displayLabel)
         mHwcFrameMissed("PrevHwcFrameMissed " + displayLabel, false),
         mGpuFrameMissed("PrevGpuFrameMissed " + displayLabel, false) {}
 
-TimePoint FrameTarget::pastVsyncTime(Period minFramePeriod) const {
-    // TODO(b/267315508): Generalize to N VSYNCs.
-    const int shift = static_cast<int>(targetsVsyncsAhead<2>(minFramePeriod));
-    return mExpectedPresentTime - Period::fromNs(minFramePeriod.ns() << shift);
+std::pair<bool /* wouldBackpressure */, FrameTarget::PresentFence>
+FrameTarget::expectedSignaledPresentFence(Period vsyncPeriod, Period minFramePeriod) const {
+    SFTRACE_CALL();
+
+    bool wouldBackpressure = true;
+    auto expectedPresentTime = mExpectedPresentTime;
+    for (size_t i = mPresentFences.size(); i != 0; --i) {
+        const auto& fence = mPresentFences[i - 1];
+        SFTRACE_FORMAT_INSTANT("fence at idx: %zu expectedPresentTime in %.2f", i - 1,
+                               ticks<std::milli, float>(fence.expectedPresentTime -
+                                                        TimePoint::now()));
+
+        if (fence.expectedPresentTime + minFramePeriod < expectedPresentTime - vsyncPeriod / 2) {
+            SFTRACE_FORMAT_INSTANT("would not backpressure");
+            wouldBackpressure = false;
+        }
+
+        if (fence.expectedPresentTime <= mFrameBeginTime) {
+            SFTRACE_FORMAT_INSTANT("fence at idx: %zu is %.2f before frame begin "
+                                   "(wouldBackpressure=%s)",
+                                   i - 1,
+                                   ticks<std::milli, float>(mFrameBeginTime -
+                                                            fence.expectedPresentTime),
+                                   wouldBackpressure ? "true" : "false");
+            return {wouldBackpressure, fence};
+        }
+
+        expectedPresentTime = fence.expectedPresentTime;
+    }
+    SFTRACE_FORMAT_INSTANT("No fence found");
+    return {wouldBackpressure, PresentFence{}};
 }
 
-const FenceTimePtr& FrameTarget::presentFenceForPastVsync(Period minFramePeriod) const {
-    // TODO(b/267315508): Generalize to N VSYNCs.
-    const size_t i = static_cast<size_t>(targetsVsyncsAhead<2>(minFramePeriod));
-    return mPresentFences[i].fenceTime;
-}
-
-bool FrameTarget::wouldPresentEarly(Period minFramePeriod) const {
-    // TODO(b/241285475): Since this is called during `composite`, the calls to `targetsVsyncsAhead`
-    // should use `TimePoint::now()` in case of delays since `mFrameBeginTime`.
-
-    // TODO(b/267315508): Generalize to N VSYNCs.
+bool FrameTarget::wouldPresentEarly(Period vsyncPeriod, Period minFramePeriod) const {
     if (targetsVsyncsAhead<3>(minFramePeriod)) {
         return true;
     }
 
-    const auto fence = presentFenceForPastVsync(minFramePeriod);
-    return fence->isValid() && fence->getSignalTime() != Fence::SIGNAL_TIME_PENDING;
+    const auto [wouldBackpressure, fence] =
+            expectedSignaledPresentFence(vsyncPeriod, minFramePeriod);
+
+    return !wouldBackpressure ||
+            (fence.fenceTime->isValid() &&
+             fence.fenceTime->getSignalTime() != Fence::SIGNAL_TIME_PENDING);
+}
+
+const FenceTimePtr& FrameTarget::presentFenceForPreviousFrame() const {
+    if (mPresentFences.size() > 0) {
+        return mPresentFences.back().fenceTime;
+    }
+    return FenceTime::NO_FENCE;
+}
+
+size_t FrameTargeter::countPresentFencesPendingAt(TimePoint time) const {
+    size_t pendingFenceCount = 0;
+    for (ssize_t i = static_cast<ssize_t>(mPresentFences.size() - 1); i >= 0; --i) {
+        if (mPresentFences[static_cast<size_t>(i)].fenceTime->wasPendingAt(time.ns())) {
+            pendingFenceCount++;
+        }
+    }
+    return pendingFenceCount;
 }
 
 void FrameTargeter::beginFrame(const BeginFrameArgs& args, const IVsyncSource& vsyncSource) {
@@ -60,6 +100,7 @@ void FrameTargeter::beginFrame(const BeginFrameArgs& args, const IVsyncSource& v
                                IsFencePendingFuncPtr isFencePendingFuncPtr) {
     mVsyncId = args.vsyncId;
     mFrameBeginTime = args.frameBeginTime;
+    mDebugPresentTimeDelay = args.debugPresentTimeDelay;
 
     // The `expectedVsyncTime`, which was predicted when this frame was scheduled, is normally in
     // the future relative to `frameBeginTime`, but may not be for delayed frames. Adjust
@@ -83,27 +124,35 @@ void FrameTargeter::beginFrame(const BeginFrameArgs& args, const IVsyncSource& v
     }
 
     if (!mSupportsExpectedPresentTime) {
-        mEarliestPresentTime = computeEarliestPresentTime(minFramePeriod, args.hwcMinWorkDuration);
+        mEarliestPresentTime =
+                computeEarliestPresentTime(vsyncPeriod, minFramePeriod, args.hwcMinWorkDuration);
     }
 
-    ATRACE_FORMAT("%s %" PRId64 " vsyncIn %.2fms%s", __func__, ftl::to_underlying(args.vsyncId),
-                  ticks<std::milli, float>(mExpectedPresentTime - TimePoint::now()),
-                  mExpectedPresentTime == args.expectedVsyncTime ? "" : " (adjusted)");
+    SFTRACE_FORMAT("%s %" PRId64 " vsyncIn %.2fms%s", __func__, ftl::to_underlying(args.vsyncId),
+                   ticks<std::milli, float>(mExpectedPresentTime - TimePoint::now()),
+                   mExpectedPresentTime == args.expectedVsyncTime ? "" : " (adjusted)");
 
-    const FenceTimePtr& pastPresentFence = presentFenceForPastVsync(minFramePeriod);
+    const auto [wouldBackpressure, fence] =
+            expectedSignaledPresentFence(vsyncPeriod, minFramePeriod);
 
     // In cases where the present fence is about to fire, give it a small grace period instead of
     // giving up on the frame.
-    //
-    // TODO(b/280667110): The grace period should depend on `sfWorkDuration` and `vsyncPeriod` being
-    // approximately equal, not whether backpressure propagation is enabled.
-    const int graceTimeForPresentFenceMs = static_cast<int>(
-            mBackpressureGpuComposition || !mCompositionCoverage.test(CompositionCoverage::Gpu));
+    const int graceTimeForPresentFenceMs = [&] {
+        const bool considerBackpressure =
+                mBackpressureGpuComposition || !mCompositionCoverage.test(CompositionCoverage::Gpu);
+
+        if (!wouldBackpressure || !considerBackpressure) {
+            return 0;
+        }
+
+        return static_cast<int>((std::abs(fence.expectedPresentTime.ns() - mFrameBeginTime.ns()) <=
+                                 Duration(1ms).ns()));
+    }();
 
     // Pending frames may trigger backpressure propagation.
     const auto& isFencePending = *isFencePendingFuncPtr;
-    mFramePending = pastPresentFence != FenceTime::NO_FENCE &&
-            isFencePending(pastPresentFence, graceTimeForPresentFenceMs);
+    mFramePending = fence.fenceTime != FenceTime::NO_FENCE &&
+            isFencePending(fence.fenceTime, graceTimeForPresentFenceMs);
 
     // A frame is missed if the prior frame is still pending. If no longer pending, then we still
     // count the frame as missed if the predicted present time was further in the past than when the
@@ -111,8 +160,16 @@ void FrameTargeter::beginFrame(const BeginFrameArgs& args, const IVsyncSource& v
     // than a typical frame duration, but should not be so small that it reports reasonable drift as
     // a missed frame.
     mFrameMissed = mFramePending || [&] {
-        const nsecs_t pastPresentTime = pastPresentFence->getSignalTime();
+        const nsecs_t pastPresentTime = fence.fenceTime->getSignalTime();
         if (pastPresentTime < 0) return false;
+        mLastSignaledFrameTime = {.signalTime = TimePoint::fromNs(pastPresentTime),
+                                  .expectedPresentTime = fence.expectedPresentTime};
+        SFTRACE_FORMAT_INSTANT("LastSignaledFrameTime expectedPresentTime %.2f ago, signalTime "
+                               "%.2f ago",
+                               ticks<std::milli, float>(mLastSignaledFrameTime.expectedPresentTime -
+                                                        TimePoint::now()),
+                               ticks<std::milli, float>(mLastSignaledFrameTime.signalTime -
+                                                        TimePoint::now()));
         const nsecs_t frameMissedSlop = vsyncPeriod.ns() / 2;
         return lastScheduledPresentTime.ns() < pastPresentTime - frameMissedSlop;
     }();
@@ -123,11 +180,14 @@ void FrameTargeter::beginFrame(const BeginFrameArgs& args, const IVsyncSource& v
     if (mFrameMissed) mFrameMissedCount++;
     if (mHwcFrameMissed) mHwcFrameMissedCount++;
     if (mGpuFrameMissed) mGpuFrameMissedCount++;
+
+    mWouldBackpressureHwc = mFramePending && wouldBackpressure;
 }
 
-std::optional<TimePoint> FrameTargeter::computeEarliestPresentTime(Period minFramePeriod,
+std::optional<TimePoint> FrameTargeter::computeEarliestPresentTime(Period vsyncPeriod,
+                                                                   Period minFramePeriod,
                                                                    Duration hwcMinWorkDuration) {
-    if (wouldPresentEarly(minFramePeriod)) {
+    if (wouldPresentEarly(vsyncPeriod, minFramePeriod)) {
         return previousFrameVsyncTime(minFramePeriod) - hwcMinWorkDuration;
     }
     return {};
@@ -143,8 +203,7 @@ FenceTimePtr FrameTargeter::setPresentFence(sp<Fence> presentFence) {
 }
 
 FenceTimePtr FrameTargeter::setPresentFence(sp<Fence> presentFence, FenceTimePtr presentFenceTime) {
-    mPresentFences[1] = mPresentFences[0];
-    mPresentFences[0] = {std::move(presentFence), presentFenceTime};
+    addFence(std::move(presentFence), presentFenceTime, mExpectedPresentTime);
     return presentFenceTime;
 }
 
@@ -156,7 +215,7 @@ void FrameTargeter::dump(utils::Dumper& dumper) const {
 }
 
 bool FrameTargeter::isFencePending(const FenceTimePtr& fence, int graceTimeMs) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     const status_t status = fence->wait(graceTimeMs);
 
     // This is the same as Fence::Status::Unsignaled, but it saves a call to getStatus,

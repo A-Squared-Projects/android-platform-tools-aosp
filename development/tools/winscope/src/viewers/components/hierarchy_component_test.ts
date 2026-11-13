@@ -13,45 +13,54 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import {ClipboardModule} from '@angular/cdk/clipboard';
 import {CommonModule} from '@angular/common';
-import {
-  ComponentFixture,
-  ComponentFixtureAutoDetect,
-  TestBed,
-} from '@angular/core/testing';
+import {ComponentFixtureAutoDetect, TestBed} from '@angular/core/testing';
 import {FormsModule} from '@angular/forms';
-import {MatCheckboxModule} from '@angular/material/checkbox';
+import {MatButtonModule} from '@angular/material/button';
 import {MatDividerModule} from '@angular/material/divider';
 import {MatFormFieldModule} from '@angular/material/form-field';
 import {MatIconModule} from '@angular/material/icon';
 import {MatInputModule} from '@angular/material/input';
 import {MatTooltipModule} from '@angular/material/tooltip';
 import {BrowserAnimationsModule} from '@angular/platform-browser/animations';
-import {assertDefined} from 'common/assert_utils';
-import {PersistentStore} from 'common/persistent_store';
-import {TreeNodeUtils} from 'test/unit/tree_node_utils';
+import {assertDefined} from 'common/assert';
+import {FilterFlag} from 'common/filter_flag';
+import {InMemoryStorage} from 'common/store/in_memory_storage';
+import {PersistentStore} from 'common/store/persistent_store';
+import {DuplicateLayerIds, MissingLayerIds} from 'messaging/user_warnings';
+import {checkTooltips, DOMTestHelper} from 'test/unit/dom_test_helpers';
+import {HierarchyTreeBuilder} from 'test/unit/hierarchy_tree_builder';
+import {TRACE_INFO} from 'trace_api/trace_info';
+import {TraceType} from 'trace_api/trace_type';
+import {TextFilter} from 'viewers/common/text_filter';
+import {UiHierarchyTreeNode} from 'viewers/common/ui_hierarchy_tree_node';
+import {ViewerEvents} from 'viewers/common/viewer_events';
 import {HierarchyTreeNodeDataViewComponent} from 'viewers/components/hierarchy_tree_node_data_view_component';
 import {TreeComponent} from 'viewers/components/tree_component';
 import {TreeNodeComponent} from 'viewers/components/tree_node_component';
+import {CollapsibleSectionTitleComponent} from './collapsible_section_title_component';
 import {HierarchyComponent} from './hierarchy_component';
+import {SearchBoxComponent} from './search_box_component';
+import {UserOptionsComponent} from './user_options_component';
 
 describe('HierarchyComponent', () => {
-  let fixture: ComponentFixture<HierarchyComponent>;
   let component: HierarchyComponent;
-  let htmlElement: HTMLElement;
+  let dom: DOMTestHelper<HierarchyComponent>;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       providers: [{provide: ComponentFixtureAutoDetect, useValue: true}],
-      declarations: [
+      imports: [
         HierarchyComponent,
+        HierarchyTreeNodeDataViewComponent,
+        CollapsibleSectionTitleComponent,
+        UserOptionsComponent,
+        SearchBoxComponent,
         TreeComponent,
         TreeNodeComponent,
-        HierarchyTreeNodeDataViewComponent,
-      ],
-      imports: [
         CommonModule,
-        MatCheckboxModule,
+        MatButtonModule,
         MatDividerModule,
         MatInputModule,
         MatFormFieldModule,
@@ -59,21 +68,22 @@ describe('HierarchyComponent', () => {
         FormsModule,
         MatIconModule,
         MatTooltipModule,
+        ClipboardModule,
       ],
     }).compileComponents();
-
-    fixture = TestBed.createComponent(HierarchyComponent);
+    const fixture = TestBed.createComponent(HierarchyComponent);
     component = fixture.componentInstance;
-    htmlElement = fixture.nativeElement;
+    dom = new DOMTestHelper(fixture, fixture.nativeElement);
 
-    const tree = TreeNodeUtils.makeUiHierarchyNode({
-      id: 'RootNode1',
-      name: 'Root node',
-    });
-    tree.addOrReplaceChild(
-      TreeNodeUtils.makeUiHierarchyNode({id: 'Child1', name: 'Child node'}),
-    );
-    component.tree = tree;
+    component.trees = [
+      UiHierarchyTreeNode.from(
+        new HierarchyTreeBuilder()
+          .setId('RootNode1')
+          .setName('Root node')
+          .setChildren([{id: 'Child1', name: 'Child node'}])
+          .build(),
+      ),
+    ];
 
     component.store = new PersistentStore();
     component.userOptions = {
@@ -83,8 +93,10 @@ describe('HierarchyComponent', () => {
         isUnavailable: false,
       },
     };
+    component.textFilter = new TextFilter();
+    component.dependencies = [TraceType.SURFACE_FLINGER];
 
-    fixture.detectChanges();
+    dom.detectChanges();
   });
 
   it('can be created', () => {
@@ -92,79 +104,177 @@ describe('HierarchyComponent', () => {
   });
 
   it('renders title', () => {
-    const title = htmlElement.querySelector('.hierarchy-title');
-    expect(title).toBeTruthy();
+    expect(dom.find('.hierarchy-title')).toBeDefined();
   });
 
   it('renders view controls', () => {
-    const viewControls = htmlElement.querySelector('.view-controls');
-    expect(viewControls).toBeTruthy();
-    const box = htmlElement.querySelector('.view-controls input');
-    expect(box).toBeTruthy(); //renders at least one view control option
-  });
-
-  it('disables checkboxes if option unavailable', () => {
-    let box = htmlElement.querySelector('.view-controls input');
-    expect(box).toBeTruthy();
-    expect((box as HTMLInputElement).disabled).toBeFalse();
-
-    component.userOptions['showDiff'].isUnavailable = true;
-    fixture.detectChanges();
-    box = htmlElement.querySelector('.view-controls input');
-    expect((box as HTMLInputElement).disabled).toBeTrue();
-  });
-
-  it('updates tree on user option checkbox change', () => {
-    const box = htmlElement.querySelector('.view-controls input');
-    expect(box).toBeTruthy();
-
-    const spy = spyOn(component, 'onUserOptionChange');
-    (box as HTMLInputElement).checked = true;
-    (box as HTMLInputElement).dispatchEvent(new Event('click'));
-    fixture.detectChanges();
-    expect(spy).toHaveBeenCalled();
+    expect(dom.find('.view-controls')).toBeDefined();
+    expect(dom.find('.view-controls .user-option')).toBeDefined(); //renders at least one view control option
   });
 
   it('renders initial tree elements', () => {
-    const treeView = htmlElement.querySelector('tree-view');
-    expect(treeView).toBeTruthy();
-    expect(assertDefined(treeView).innerHTML).toContain('Root node');
-    expect(assertDefined(treeView).innerHTML).toContain('Child node');
+    const treeView = dom.get('tree-view');
+    treeView.checkText('Root node');
+    treeView.checkText('Child node');
+  });
+
+  it('renders multiple trees', () => {
+    component.trees = [
+      component.trees[0],
+      UiHierarchyTreeNode.from(
+        new HierarchyTreeBuilder().setId('subtree').setName('subtree').build(),
+      ),
+    ];
+    dom.detectChanges();
+    const trees = dom.findAll('.tree-wrapper .tree');
+    expect(trees.length).toBe(2);
+    trees[1].checkText('subtree');
   });
 
   it('renders pinned nodes', () => {
-    const pinnedNodesDiv = htmlElement.querySelector('.pinned-items');
-    expect(pinnedNodesDiv).toBeFalsy();
+    expect(dom.find('.pinned-items')).toBeUndefined();
+    component.pinnedItems = assertDefined(component.trees);
+    dom.detectChanges();
+    expect(dom.find('.pinned-items tree-node')).toBeDefined();
+  });
 
-    component.pinnedItems = [assertDefined(component.tree)];
-    fixture.detectChanges();
-    const pinnedNodeEl = htmlElement.querySelector('.pinned-items tree-node');
-    expect(pinnedNodeEl).toBeTruthy();
+  it('renders placeholder text', () => {
+    component.trees = [];
+    component.placeholderText = 'Placeholder text.';
+    dom.detectChanges();
+
+    const placeholderText = dom.get('.placeholder-text');
+    placeholderText.checkTextExact(
+      'Placeholder text.' +
+        ` There may be no ${
+          TRACE_INFO[component.dependencies[0]].name
+        } state associated with the current state in the active trace.` +
+        ' Try changing timeline position.',
+    );
+
+    component.dependencies = [];
+    dom.detectChanges();
+    placeholderText.checkTextExact(
+      'Placeholder text.' +
+        ' There may be no state for this trace associated with the current state in the active trace.' +
+        ' Try changing timeline position.',
+    );
   });
 
   it('handles pinned node click', () => {
-    component.pinnedItems = [assertDefined(component.tree)];
-    fixture.detectChanges();
-    const pinnedNodeEl = htmlElement.querySelector('.pinned-items tree-node');
-    expect(pinnedNodeEl).toBeTruthy();
+    const node = assertDefined(component.trees[0]);
+    component.pinnedItems = [node];
+    dom.detectChanges();
 
-    const propertyTreeChangeSpy = spyOn(component, 'onSelectedTreeChange');
-    const highlightedChangeSpy = spyOn(component, 'onHighlightedItemChange');
-    (pinnedNodeEl as HTMLButtonElement).click();
-    fixture.detectChanges();
-    expect(propertyTreeChangeSpy).toHaveBeenCalled();
-    expect(highlightedChangeSpy).toHaveBeenCalled();
+    let highlightedItem: UiHierarchyTreeNode | undefined;
+    dom.addEventListener(ViewerEvents.HighlightedNodeChange, (event) => {
+      highlightedItem = (event as CustomEvent).detail.node;
+    });
+
+    dom.findAndClick('.pinned-items tree-node');
+    expect(highlightedItem).toEqual(node);
+  });
+
+  it('handles pinned item change from tree', () => {
+    let pinnedItem: UiHierarchyTreeNode | undefined;
+    dom.addEventListener(ViewerEvents.HierarchyPinnedChange, (event) => {
+      pinnedItem = (event as CustomEvent).detail.pinnedItem;
+    });
+    const child = assertDefined(
+      component.trees[0].getChildByName('Child node'),
+    );
+    component.pinnedItems = [child];
+    dom.detectChanges();
+
+    dom.findAndClick('.pinned-items tree-node .pin-node-btn');
+    expect(pinnedItem).toEqual(child);
   });
 
   it('handles change in filter', () => {
-    const inputEl = htmlElement.querySelector('.title-filter input');
-    expect(inputEl).toBeTruthy();
-
-    const spy = spyOn(component, 'onFilterChange');
-    (inputEl as HTMLInputElement).value = 'Root';
-    (inputEl as HTMLInputElement).dispatchEvent(new Event('input'));
-    fixture.detectChanges();
-    expect(spy).toHaveBeenCalled();
-    expect(component.filterString).toBe('Root');
+    let textFilter: TextFilter | undefined;
+    dom.addEventListener(ViewerEvents.HierarchyFilterChange, (event) => {
+      textFilter = (event as CustomEvent).detail;
+    });
+    dom.findAndClick('.search-box button');
+    dom.findAndDispatchInput('.title-section', 'Root');
+    expect(textFilter).toEqual(new TextFilter('Root', [FilterFlag.MATCH_CASE]));
   });
+
+  it('handles collapse button click', () => {
+    const spy = spyOn(component.collapseButtonClicked, 'emit');
+    dom.findAndClick('collapsible-section-title button');
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it('shows warnings from all trees', () => {
+    expect(dom.find('.warning')).toBeUndefined();
+
+    component.trees = [
+      component.trees[0],
+      UiHierarchyTreeNode.from(
+        new HierarchyTreeBuilder()
+          .setId('RootNode2')
+          .setName('Root node')
+          .setChildren([{id: 'Child2', name: 'Child node'}])
+          .build(),
+      ),
+    ];
+    dom.detectChanges();
+    const warning1 = new DuplicateLayerIds([123]);
+    component.trees[0].addWarning(warning1);
+    const warning2 = new MissingLayerIds();
+    component.trees[1].addWarning(warning2);
+    dom.detectChanges();
+    const warnings = dom.findAll('.warning');
+    expect(warnings.length).toBe(2);
+    warnings[0].checkTextExact('warning ' + warning1.getMessage());
+    warnings[1].checkTextExact('warning ' + warning2.getMessage());
+  });
+
+  it('shows warning tooltip if text overflowing', () => {
+    const warning = new DuplicateLayerIds([123]);
+    component.trees[0].addWarning(warning);
+    dom.detectChanges();
+
+    const warningEl = dom.get('.warning');
+    const msgEl = dom.get('.warning-message').getHTMLElement();
+
+    const spy = spyOnProperty(msgEl, 'scrollWidth').and.returnValue(
+      msgEl.clientWidth,
+    );
+    checkTooltips([warningEl], [undefined]);
+
+    spy.and.returnValue(msgEl.clientWidth + 1);
+    dom.detectChanges();
+    checkTooltips([warningEl], [warning.getMessage()]);
+  });
+
+  it('handles arrow down key press', () => {
+    testArrowKeyPress(ViewerEvents.ArrowDownPress);
+  });
+
+  it('handles arrow up key press', () => {
+    testArrowKeyPress(ViewerEvents.ArrowUpPress);
+  });
+
+  function testArrowKeyPress(viewerEvent: string) {
+    let storage: InMemoryStorage | undefined;
+    dom.addEventListener(viewerEvent, (event) => {
+      storage = (event as CustomEvent).detail;
+    });
+    let keydown: () => void;
+    if (viewerEvent === ViewerEvents.ArrowDownPress) {
+      keydown = () => dom.keydownArrowDown(true);
+    } else {
+      keydown = () => dom.keydownArrowUp(true);
+    }
+    keydown();
+    expect(storage).toEqual(component.treeStorage);
+
+    storage = undefined;
+    dom.getHTMLElement().style.height = '0px';
+    dom.detectChanges();
+    keydown();
+    expect(storage).toBeUndefined();
+  }
 });

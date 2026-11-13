@@ -13,27 +13,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {
-  ComponentFixture,
-  ComponentFixtureAutoDetect,
-  TestBed,
-} from '@angular/core/testing';
+import {ComponentFixtureAutoDetect, TestBed} from '@angular/core/testing';
 import {TransformMatrixComponent} from './transform_matrix_component';
 
 describe('TransformMatrixComponent', () => {
-  let fixture: ComponentFixture<TransformMatrixComponent>;
   let component: TransformMatrixComponent;
 
   beforeAll(async () => {
     await TestBed.configureTestingModule({
       providers: [{provide: ComponentFixtureAutoDetect, useValue: true}],
-      declarations: [TransformMatrixComponent],
-      schemas: [],
+      imports: [TransformMatrixComponent],
     }).compileComponents();
   });
 
   beforeEach(() => {
-    fixture = TestBed.createComponent(TransformMatrixComponent);
+    const fixture = TestBed.createComponent(TransformMatrixComponent);
     component = fixture.componentInstance;
   });
 

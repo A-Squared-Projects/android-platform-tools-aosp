@@ -98,12 +98,19 @@ void BufferQueue::ProxyConsumerListener::addAndGetFrameTimestamps(
     }
 }
 
-#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(BQ_SETFRAMERATE)
 void BufferQueue::ProxyConsumerListener::onSetFrameRate(float frameRate, int8_t compatibility,
                                                         int8_t changeFrameRateStrategy) {
     sp<ConsumerListener> listener(mConsumerListener.promote());
     if (listener != nullptr) {
         listener->onSetFrameRate(frameRate, compatibility, changeFrameRateStrategy);
+    }
+}
+
+#if COM_ANDROID_GRAPHICS_LIBGUI_FLAGS(WB_UNLIMITED_SLOTS)
+void BufferQueue::ProxyConsumerListener::onSlotCountChanged(int slotCount) {
+    sp<ConsumerListener> listener(mConsumerListener.promote());
+    if (listener != nullptr) {
+        listener->onSlotCountChanged(slotCount);
     }
 }
 #endif
@@ -116,15 +123,16 @@ void BufferQueue::createBufferQueue(sp<IGraphicBufferProducer>* outProducer,
     LOG_ALWAYS_FATAL_IF(outConsumer == nullptr,
             "BufferQueue: outConsumer must not be NULL");
 
-    sp<BufferQueueCore> core(new BufferQueueCore());
+    sp<BufferQueueCore> core = sp<BufferQueueCore>::make();
     LOG_ALWAYS_FATAL_IF(core == nullptr,
             "BufferQueue: failed to create BufferQueueCore");
 
-    sp<IGraphicBufferProducer> producer(new BufferQueueProducer(core, consumerIsSurfaceFlinger));
+    sp<IGraphicBufferProducer> producer =
+            sp<BufferQueueProducer>::make(core, consumerIsSurfaceFlinger);
     LOG_ALWAYS_FATAL_IF(producer == nullptr,
             "BufferQueue: failed to create BufferQueueProducer");
 
-    sp<IGraphicBufferConsumer> consumer(new BufferQueueConsumer(core));
+    sp<IGraphicBufferConsumer> consumer = sp<BufferQueueConsumer>::make(core);
     LOG_ALWAYS_FATAL_IF(consumer == nullptr,
             "BufferQueue: failed to create BufferQueueConsumer");
 

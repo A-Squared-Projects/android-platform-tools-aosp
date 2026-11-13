@@ -14,24 +14,22 @@
  * limitations under the License.
  */
 
-//#define LOG_NDEBUG 0
-#undef LOG_TAG
-#define LOG_TAG "RenderEngine"
+// #define LOG_NDEBUG 0
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include "SkiaGLRenderEngine.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <GrContextOptions.h>
-#include <GrTypes.h>
 #include <android-base/stringprintf.h>
-#include <gl/GrGLInterface.h>
+#include <common/trace.h>
+#include <include/gpu/ganesh/GrContextOptions.h>
+#include <include/gpu/ganesh/GrTypes.h>
 #include <include/gpu/ganesh/gl/GrGLDirectContext.h>
-#include <gui/TraceUtils.h>
+#include <include/gpu/ganesh/gl/GrGLInterface.h>
+#include <log/log_main.h>
 #include <sync/sync.h>
 #include <ui/DebugUtils.h>
-#include <utils/Trace.h>
 
 #include <cmath>
 #include <cstdint>
@@ -39,7 +37,7 @@
 #include <numeric>
 
 #include "GLExtensions.h"
-#include "log/log_main.h"
+#include "compat/SkiaGpuContext.h"
 
 namespace android {
 namespace renderengine {
@@ -174,12 +172,12 @@ std::unique_ptr<SkiaGLRenderEngine> SkiaGLRenderEngine::create(
     const std::optional<RenderEngine::ContextPriority> priority = createContextPriority(args);
     if (args.enableProtectedContext && extensions.hasProtectedContent()) {
         protectedContext =
-                createEglContext(display, config, nullptr, priority, Protection::PROTECTED);
+                createEglContext(display, config, nullptr, priority, Protection::Protected);
         ALOGE_IF(protectedContext == EGL_NO_CONTEXT, "Can't create protected context");
     }
 
     EGLContext ctxt =
-            createEglContext(display, config, protectedContext, priority, Protection::UNPROTECTED);
+            createEglContext(display, config, protectedContext, priority, Protection::Unprotected);
 
     // if can't create a GL context, we can only abort.
     LOG_ALWAYS_FATAL_IF(ctxt == EGL_NO_CONTEXT, "EGLContext creation failed");
@@ -187,7 +185,7 @@ std::unique_ptr<SkiaGLRenderEngine> SkiaGLRenderEngine::create(
     EGLSurface placeholder = EGL_NO_SURFACE;
     if (!extensions.hasSurfacelessContext()) {
         placeholder = createPlaceholderEglPbufferSurface(display, config, args.pixelFormat,
-                                                         Protection::UNPROTECTED);
+                                                         Protection::Unprotected);
         LOG_ALWAYS_FATAL_IF(placeholder == EGL_NO_SURFACE, "can't create placeholder pbuffer");
     }
     EGLBoolean success = eglMakeCurrent(display, placeholder, placeholder, ctxt);
@@ -198,7 +196,7 @@ std::unique_ptr<SkiaGLRenderEngine> SkiaGLRenderEngine::create(
     EGLSurface protectedPlaceholder = EGL_NO_SURFACE;
     if (protectedContext != EGL_NO_CONTEXT && !extensions.hasSurfacelessContext()) {
         protectedPlaceholder = createPlaceholderEglPbufferSurface(display, config, args.pixelFormat,
-                                                                  Protection::PROTECTED);
+                                                                  Protection::Protected);
         ALOGE_IF(protectedPlaceholder == EGL_NO_SURFACE,
                  "can't create protected placeholder pbuffer");
     }
@@ -207,7 +205,7 @@ std::unique_ptr<SkiaGLRenderEngine> SkiaGLRenderEngine::create(
     std::unique_ptr<SkiaGLRenderEngine> engine(new SkiaGLRenderEngine(args, display, ctxt,
                                                                       placeholder, protectedContext,
                                                                       protectedPlaceholder));
-    engine->ensureGrContextsCreated();
+    engine->ensureContextsCreated();
 
     ALOGI("OpenGL ES informations:");
     ALOGI("vendor    : %s", extensions.getVendor());
@@ -269,7 +267,7 @@ SkiaGLRenderEngine::SkiaGLRenderEngine(const RenderEngineCreationArgs& args, EGL
                                        EGLContext ctxt, EGLSurface placeholder,
                                        EGLContext protectedContext, EGLSurface protectedPlaceholder)
       : SkiaRenderEngine(args.threaded, static_cast<PixelFormat>(args.pixelFormat),
-                         args.supportsBackgroundBlur),
+                         args.blurAlgorithm),
         mEGLDisplay(display),
         mEGLContext(ctxt),
         mPlaceholderSurface(placeholder),
@@ -277,7 +275,7 @@ SkiaGLRenderEngine::SkiaGLRenderEngine(const RenderEngineCreationArgs& args, EGL
         mProtectedPlaceholderSurface(protectedPlaceholder) {}
 
 SkiaGLRenderEngine::~SkiaGLRenderEngine() {
-    finishRenderingAndAbandonContext();
+    finishRenderingAndAbandonContexts();
     if (mPlaceholderSurface != EGL_NO_SURFACE) {
         eglDestroySurface(mEGLDisplay, mPlaceholderSurface);
     }
@@ -295,9 +293,7 @@ SkiaGLRenderEngine::~SkiaGLRenderEngine() {
     eglReleaseThread();
 }
 
-SkiaRenderEngine::Contexts SkiaGLRenderEngine::createDirectContexts(
-    const GrContextOptions& options) {
-
+SkiaRenderEngine::Contexts SkiaGLRenderEngine::createContexts() {
     LOG_ALWAYS_FATAL_IF(isProtected(),
                         "Cannot setup contexts while already in protected mode");
 
@@ -305,17 +301,33 @@ SkiaRenderEngine::Contexts SkiaGLRenderEngine::createDirectContexts(
 
     LOG_ALWAYS_FATAL_IF(!glInterface.get(), "GrGLMakeNativeInterface() failed");
 
+    auto glesVersion = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+    auto size = glesVersion ? strlen(glesVersion) : -1;
+
+    auto& cache = persistentCache(glesVersion, size);
+
     SkiaRenderEngine::Contexts contexts;
-    contexts.first = GrDirectContexts::MakeGL(glInterface, options);
+    contexts.first = SkiaGpuContext::MakeGL_Ganesh(glInterface, cache);
     if (supportsProtectedContentImpl()) {
         useProtectedContextImpl(GrProtected::kYes);
-        contexts.second = GrDirectContexts::MakeGL(glInterface, options);
+        contexts.second = SkiaGpuContext::MakeGL_Ganesh(glInterface, cache);
         useProtectedContextImpl(GrProtected::kNo);
     }
 
     return contexts;
 }
 
+bool SkiaGLRenderEngine::supportsFastRotatedClipRRectAA() const {
+    // clipRRect can take 1-10ms depending on the rrect size due to generating the
+    // clip mask on the CPU.
+    return false;
+}
+
+bool SkiaGLRenderEngine::supportsForwardPixelKill() const {
+    // ARM gpu support this since 2013
+    constexpr std::string kArm = "ARM";
+    return GLExtensions::getInstance().getVendor() == kArm;
+}
 bool SkiaGLRenderEngine::supportsProtectedContentImpl() const {
     return mProtectedEGLContext != EGL_NO_CONTEXT;
 }
@@ -330,25 +342,30 @@ bool SkiaGLRenderEngine::useProtectedContextImpl(GrProtected isProtected) {
     return eglMakeCurrent(mEGLDisplay, surface, surface, context) == EGL_TRUE;
 }
 
-void SkiaGLRenderEngine::waitFence(GrDirectContext*, base::borrowed_fd fenceFd) {
+void SkiaGLRenderEngine::waitFence(SkiaGpuContext*, base::borrowed_fd fenceFd) {
     if (fenceFd.get() >= 0 && !waitGpuFence(fenceFd)) {
-        ATRACE_NAME("SkiaGLRenderEngine::waitFence");
+        SFTRACE_NAME("SkiaGLRenderEngine::waitFence");
         sync_wait(fenceFd.get(), -1);
     }
 }
 
-base::unique_fd SkiaGLRenderEngine::flushAndSubmit(GrDirectContext* grContext) {
-    base::unique_fd drawFence = flush();
+base::unique_fd SkiaGLRenderEngine::flushAndSubmit(SkiaGpuContext* context,
+                                                   sk_sp<SkSurface> dstSurface) {
+    sk_sp<GrDirectContext> grContext = context->grDirectContext();
+    {
+        SFTRACE_NAME("flush surface");
+        grContext->flush(dstSurface.get());
+    }
+    base::unique_fd drawFence = flushGL();
 
     bool requireSync = drawFence.get() < 0;
     if (requireSync) {
-        ATRACE_BEGIN("Submit(sync=true)");
+        SFTRACE_BEGIN("Submit(sync=true)");
     } else {
-        ATRACE_BEGIN("Submit(sync=false)");
+        SFTRACE_BEGIN("Submit(sync=false)");
     }
-    bool success = grContext->submit(requireSync ? GrSyncCpu::kYes :
-                                                   GrSyncCpu::kNo);
-    ATRACE_END();
+    bool success = grContext->submit(requireSync ? GrSyncCpu::kYes : GrSyncCpu::kNo);
+    SFTRACE_END();
     if (!success) {
         ALOGE("Failed to flush RenderEngine commands");
         // Chances are, something illegal happened (Skia's internal GPU object
@@ -394,8 +411,8 @@ bool SkiaGLRenderEngine::waitGpuFence(base::borrowed_fd fenceFd) {
     return true;
 }
 
-base::unique_fd SkiaGLRenderEngine::flush() {
-    ATRACE_CALL();
+base::unique_fd SkiaGLRenderEngine::flushGL() {
+    SFTRACE_CALL();
     if (!GLExtensions::getInstance().hasNativeFenceSync()) {
         return base::unique_fd();
     }
@@ -447,22 +464,22 @@ EGLContext SkiaGLRenderEngine::createEglContext(EGLDisplay display, EGLConfig co
     if (contextPriority) {
         contextAttributes.push_back(EGL_CONTEXT_PRIORITY_LEVEL_IMG);
         switch (*contextPriority) {
-            case ContextPriority::REALTIME:
+            case ContextPriority::Realtime:
                 contextAttributes.push_back(EGL_CONTEXT_PRIORITY_REALTIME_NV);
                 break;
-            case ContextPriority::MEDIUM:
+            case ContextPriority::Medium:
                 contextAttributes.push_back(EGL_CONTEXT_PRIORITY_MEDIUM_IMG);
                 break;
-            case ContextPriority::LOW:
+            case ContextPriority::Low:
                 contextAttributes.push_back(EGL_CONTEXT_PRIORITY_LOW_IMG);
                 break;
-            case ContextPriority::HIGH:
+            case ContextPriority::High:
             default:
                 contextAttributes.push_back(EGL_CONTEXT_PRIORITY_HIGH_IMG);
                 break;
         }
     }
-    if (protection == Protection::PROTECTED) {
+    if (protection == Protection::Protected) {
         contextAttributes.push_back(EGL_PROTECTED_CONTENT_EXT);
         contextAttributes.push_back(EGL_TRUE);
     }
@@ -492,16 +509,16 @@ std::optional<RenderEngine::ContextPriority> SkiaGLRenderEngine::createContextPr
     }
 
     switch (args.contextPriority) {
-        case RenderEngine::ContextPriority::REALTIME:
+        case RenderEngine::ContextPriority::Realtime:
             if (GLExtensions::getInstance().hasRealtimePriority()) {
-                return RenderEngine::ContextPriority::REALTIME;
+                return RenderEngine::ContextPriority::Realtime;
             } else {
                 ALOGI("Realtime priority unsupported, degrading gracefully to high priority");
-                return RenderEngine::ContextPriority::HIGH;
+                return RenderEngine::ContextPriority::High;
             }
-        case RenderEngine::ContextPriority::HIGH:
-        case RenderEngine::ContextPriority::MEDIUM:
-        case RenderEngine::ContextPriority::LOW:
+        case RenderEngine::ContextPriority::High:
+        case RenderEngine::ContextPriority::Medium:
+        case RenderEngine::ContextPriority::Low:
             return args.contextPriority;
         default:
             return std::nullopt;
@@ -521,7 +538,7 @@ EGLSurface SkiaGLRenderEngine::createPlaceholderEglPbufferSurface(EGLDisplay dis
     attributes.push_back(1);
     attributes.push_back(EGL_HEIGHT);
     attributes.push_back(1);
-    if (protection == Protection::PROTECTED) {
+    if (protection == Protection::Protected) {
         attributes.push_back(EGL_PROTECTED_CONTENT_EXT);
         attributes.push_back(EGL_TRUE);
     }
@@ -538,7 +555,7 @@ int SkiaGLRenderEngine::getContextPriority() {
 
 void SkiaGLRenderEngine::appendBackendSpecificInfoToDump(std::string& result) {
     const GLExtensions& extensions = GLExtensions::getInstance();
-    StringAppendF(&result, "\n ------------RE GLES------------\n");
+    StringAppendF(&result, "\n ------------RE GLES (Ganesh)------------\n");
     StringAppendF(&result, "EGL implementation : %s\n", extensions.getEGLVersion());
     StringAppendF(&result, "%s\n", extensions.getEGLExtensions());
     StringAppendF(&result, "GLES: %s, %s, %s\n", extensions.getVendor(), extensions.getRenderer(),

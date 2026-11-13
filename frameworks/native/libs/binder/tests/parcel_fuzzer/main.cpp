@@ -25,13 +25,17 @@
 #include <android-base/logging.h>
 #include <android/binder_auto_utils.h>
 #include <android/binder_libbinder.h>
+#include <binder/ProcessState.h>
+#include <binder/Trace.h>
 #include <fuzzbinder/random_parcel.h>
 #include <fuzzer/FuzzedDataProvider.h>
+#include <hwbinder/ProcessState.h>
 
-#include <cstdlib>
-#include <ctime>
 #include <sys/resource.h>
 #include <sys/time.h>
+#include <cstdlib>
+#include <ctime>
+#include <filesystem>
 
 #include "../../Utils.h"
 
@@ -39,6 +43,7 @@ using android::fillRandomParcel;
 using android::RandomParcelOptions;
 using android::sp;
 using android::HexString;
+std::once_flag gOpenFds;
 
 void fillRandomParcel(::android::hardware::Parcel* p, FuzzedDataProvider&& provider,
                       RandomParcelOptions* options) {
@@ -46,7 +51,18 @@ void fillRandomParcel(::android::hardware::Parcel* p, FuzzedDataProvider&& provi
     (void)options;
 
     std::vector<uint8_t> input = provider.ConsumeRemainingBytes<uint8_t>();
-    p->setData(input.data(), input.size());
+
+    if (input.size() % 4 != 0) {
+        input.resize(input.size() + (sizeof(uint32_t) - input.size() % sizeof(uint32_t)));
+    }
+    CHECK_EQ(0, input.size() % 4);
+
+    p->setDataCapacity(input.size());
+    for (size_t i = 0; i < input.size(); i += 4) {
+        p->writeInt32(*((int32_t*)(input.data() + i)));
+    }
+
+    CHECK_EQ(0, memcmp(input.data(), p->data(), p->dataSize()));
 }
 static void fillRandomParcel(NdkParcelAdapter* p, FuzzedDataProvider&& provider,
                              RandomParcelOptions* options) {
@@ -59,7 +75,7 @@ void doTransactFuzz(const char* backend, const sp<B>& binder, FuzzedDataProvider
     uint32_t code = provider.ConsumeIntegral<uint32_t>();
     uint32_t flag = provider.ConsumeIntegral<uint32_t>();
 
-    FUZZ_LOG() << "backend: " << backend;
+    FUZZ_LOG() << "doTransactFuzz backend: " << backend;
 
     RandomParcelOptions options;
 
@@ -69,6 +85,7 @@ void doTransactFuzz(const char* backend, const sp<B>& binder, FuzzedDataProvider
     (void)binder->transact(code, data, &reply, flag);
 }
 
+// start with a Parcel full of data (e.g. like you get from another process)
 template <typename P>
 void doReadFuzz(const char* backend, const std::vector<ParcelRead<P>>& reads,
                 FuzzedDataProvider&& provider) {
@@ -84,12 +101,12 @@ void doReadFuzz(const char* backend, const std::vector<ParcelRead<P>>& reads,
     RandomParcelOptions options;
 
     P p;
-    fillRandomParcel(&p, std::move(provider), &options);
+    fillRandomParcel(&p, std::move(provider), &options); // consumes provider
 
     // since we are only using a byte to index
-    CHECK(reads.size() <= 255) << reads.size();
+    CHECK_LE(reads.size(), 255u) << reads.size();
 
-    FUZZ_LOG() << "backend: " << backend;
+    FUZZ_LOG() << "doReadFuzz backend: " << backend;
     FUZZ_LOG() << "input: " << HexString(p.data(), p.dataSize());
     FUZZ_LOG() << "instructions: " << HexString(instructions.data(), instructions.size());
 
@@ -104,26 +121,34 @@ void doReadFuzz(const char* backend, const std::vector<ParcelRead<P>>& reads,
     }
 }
 
-// Append two random parcels.
 template <typename P>
-void doAppendFuzz(const char* backend, FuzzedDataProvider&& provider) {
-    int32_t start = provider.ConsumeIntegral<int32_t>();
-    int32_t len = provider.ConsumeIntegral<int32_t>();
-
-    std::vector<uint8_t> bytes = provider.ConsumeBytes<uint8_t>(
-            provider.ConsumeIntegralInRange<size_t>(0, provider.remaining_bytes()));
-
-    // same options so that FDs and binders could be shared in both Parcels
+void doReadWriteFuzz(const char* backend, const std::vector<ParcelRead<P>>& reads,
+                     const std::vector<ParcelWrite<P>>& writes, FuzzedDataProvider&& provider) {
     RandomParcelOptions options;
+    P p;
 
-    P p0, p1;
-    fillRandomParcel(&p0, FuzzedDataProvider(bytes.data(), bytes.size()), &options);
-    fillRandomParcel(&p1, std::move(provider), &options);
+    // small amount of initial Parcel data, since fillRandomParcel uses makeDangerousViewOf
+    std::vector<uint8_t> parcelData =
+            provider.ConsumeBytes<uint8_t>(provider.ConsumeIntegralInRange<size_t>(0, 20));
+    fillRandomParcel(&p, FuzzedDataProvider(parcelData.data(), parcelData.size()), &options);
 
-    FUZZ_LOG() << "backend: " << backend;
-    FUZZ_LOG() << "start: " << start << " len: " << len;
+    // since we are only using a byte to index
+    CHECK_LE(reads.size() + writes.size(), 255u) << reads.size();
 
-    p0.appendFrom(&p1, start, len);
+    FUZZ_LOG() << "doReadWriteFuzz backend: " << backend;
+
+    while (provider.remaining_bytes() > 0) {
+        uint8_t idx = provider.ConsumeIntegralInRange<uint8_t>(0, reads.size() + writes.size() - 1);
+
+        FUZZ_LOG() << "Instruction " << idx << " avail: " << p.dataAvail()
+                   << " pos: " << p.dataPosition() << " cap: " << p.dataCapacity();
+
+        if (idx < reads.size()) {
+            reads.at(idx)(p, provider);
+        } else {
+            writes.at(idx - reads.size())(p, provider, &options);
+        }
+    }
 }
 
 void* NothingClass_onCreate(void* args) {
@@ -137,15 +162,31 @@ static AIBinder_Class* kNothingClass =
         AIBinder_Class_define("nothing", NothingClass_onCreate, NothingClass_onDestroy,
                               NothingClass_onTransact);
 
+static long numFds() {
+    return std::distance(std::filesystem::directory_iterator("/proc/self/fd"),
+                         std::filesystem::directory_iterator{});
+}
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (size <= 1) return 0;  // no use
 
     // avoid timeouts, see b/142617274, b/142473153
     if (size > 50000) return 0;
+    std::call_once(gOpenFds, []() {
+        // Cause the known FDs to be created before we track them.
+        android::binder::ScopedTrace openYourFds(ATRACE_TAG_AIDL, "Open FDs");
+        (void)android::ProcessState::self();
+        (void)android::hardware::ProcessState::self();
+        ALOGE("Logging creates a socked + a pmsg FD");
+    });
+
+    struct rlimit limit{};
+    CHECK_EQ(0, getrlimit(RLIMIT_NOFILE, &limit));
+    uint64_t maxFds = limit.rlim_cur;
+    int initialFds = numFds();
 
     FuzzedDataProvider provider = FuzzedDataProvider(data, size);
 
-    const std::function<void(FuzzedDataProvider &&)> fuzzBackend[] = {
+    const std::function<void(FuzzedDataProvider&&)> fuzzBackend[] = {
             [](FuzzedDataProvider&& provider) {
                 doTransactFuzz<
                         ::android::hardware::Parcel>("hwbinder",
@@ -176,14 +217,19 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
                                              std::move(provider));
             },
             [](FuzzedDataProvider&& provider) {
-                doAppendFuzz<::android::Parcel>("binder", std::move(provider));
+                doReadWriteFuzz<::android::Parcel>("binder", BINDER_PARCEL_READ_FUNCTIONS,
+                                                   BINDER_PARCEL_WRITE_FUNCTIONS,
+                                                   std::move(provider));
             },
             [](FuzzedDataProvider&& provider) {
-                doAppendFuzz<NdkParcelAdapter>("binder_ndk", std::move(provider));
+                doReadWriteFuzz<NdkParcelAdapter>("binder_ndk", BINDER_NDK_PARCEL_READ_FUNCTIONS,
+                                                  BINDER_NDK_PARCEL_WRITE_FUNCTIONS,
+                                                  std::move(provider));
             },
     };
 
     provider.PickValueInArray(fuzzBackend)(std::move(provider));
 
+    CHECK_EQ(initialFds, numFds()) << "FDs are being leaked";
     return 0;
 }

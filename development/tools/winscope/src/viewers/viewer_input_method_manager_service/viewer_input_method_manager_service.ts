@@ -14,42 +14,36 @@
  * limitations under the License.
  */
 
-import {Traces} from 'trace/traces';
-import {ImeTraceType, TraceType} from 'trace/trace_type';
-import {ViewerInputMethod} from 'viewers/common/viewer_input_method';
-import {View, ViewType} from 'viewers/viewer';
+import {Store} from 'common/store/store';
+import {Trace} from 'trace_api/trace';
+import {ImeTraceType, TraceType} from 'trace_api/trace_type';
+import {Traces} from 'trace_api/traces';
+import {HierarchyTreeNode} from 'tree_node/hierarchy_tree_node';
+import {NotifyHierarchyViewCallbackType} from 'viewers/common/abstract_hierarchy_viewer_presenter';
+import {AbstractViewerInputMethod} from 'viewers/common/abstract_viewer_input_method';
+import {ImeUiData} from 'viewers/common/ime_ui_data';
 import {PresenterInputMethodManagerService} from './presenter_input_method_manager_service';
 
-class ViewerInputMethodManagerService extends ViewerInputMethod {
+export class ViewerInputMethodManagerService extends AbstractViewerInputMethod {
   static readonly DEPENDENCIES: ImeTraceType[] = [
     TraceType.INPUT_METHOD_MANAGER_SERVICE,
   ];
 
-  override readonly view: View;
-
-  constructor(traces: Traces, storage: Storage) {
-    super(traces, storage);
-    this.view = new View(
-      ViewType.TAB,
-      this.getDependencies(),
-      this.htmlElement,
-      'Input Method Manager Service',
-      TraceType.INPUT_METHOD_MANAGER_SERVICE,
-    );
+  constructor(trace: Trace<HierarchyTreeNode>, traces: Traces, store: Store) {
+    super(trace, traces, store);
   }
 
-  override getDependencies(): ImeTraceType[] {
-    return ViewerInputMethodManagerService.DEPENDENCIES;
-  }
-
-  override initialisePresenter(traces: Traces, storage: Storage) {
+  override createPresenter(
+    trace: Trace<HierarchyTreeNode>,
+    traces: Traces,
+    store: Store,
+    imeUiCallback: NotifyHierarchyViewCallbackType<ImeUiData>,
+  ) {
     return new PresenterInputMethodManagerService(
+      trace,
       traces,
-      storage,
-      this.getDependencies(),
-      this.imeUiCallback,
+      store,
+      imeUiCallback,
     );
   }
 }
-
-export {ViewerInputMethodManagerService};

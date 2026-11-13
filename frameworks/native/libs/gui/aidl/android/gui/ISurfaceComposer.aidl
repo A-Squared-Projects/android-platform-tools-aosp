@@ -33,6 +33,7 @@ import android.gui.FrameEvent;
 import android.gui.FrameStats;
 import android.gui.HdrConversionCapability;
 import android.gui.HdrConversionStrategy;
+import android.gui.IActivePictureListener;
 import android.gui.IDisplayEventConnection;
 import android.gui.IFpsListener;
 import android.gui.IHdrLayerInfoListener;
@@ -42,10 +43,11 @@ import android.gui.ISurfaceComposerClient;
 import android.gui.ITunnelModeEnabledListener;
 import android.gui.IWindowInfosListener;
 import android.gui.IWindowInfosPublisher;
+import android.gui.IJankListener;
 import android.gui.LayerCaptureArgs;
-import android.gui.LayerDebugInfo;
 import android.gui.OverlayProperties;
 import android.gui.PullAtomData;
+import android.gui.RegionSamplingDescriptor;
 import android.gui.ScreenCaptureResults;
 import android.gui.ARect;
 import android.gui.SchedulingPolicy;
@@ -64,6 +66,12 @@ interface ISurfaceComposer {
     enum EventRegistration {
         modeChanged = 1 << 0,
         frameRateOverride = 1 << 1,
+        modeRejected = 1 << 2,
+    }
+
+    enum OptimizationPolicy {
+        optimizeForPower = 0,
+        optimizeForPerformance = 1,
     }
 
     /**
@@ -73,7 +81,7 @@ interface ISurfaceComposer {
     void bootFinished();
 
     /**
-     * Create a display event connection
+     * Create a display event connection.
      *
      * layerHandle
      *     Optional binder handle representing a Layer in SF to associate the new
@@ -90,12 +98,18 @@ interface ISurfaceComposer {
     @nullable ISurfaceComposerClient createConnection();
 
     /**
-     * Create a virtual display
+     * Create a virtual display.
      *
      * displayName
-     *     The name of the virtual display
-     * secure
-     *     Whether this virtual display is secure
+     *     The name of the virtual display.
+     * isSecure
+     *     Whether this virtual display is secure.
+     * optimizationPolicy
+     *     Whether to optimize for power or performance. Displays that are optimizing for power may
+     *     be dependent on a different display that optimizes for performance when they are on,
+     *     which will guarantee performance for all of the other displays.
+     * uniqueId
+     *     The unique ID for the display.
      * requestedRefreshRate
      *     The refresh rate, frames per second, to request on the virtual display.
      *     This is just a request, the actual rate may be adjusted to align well
@@ -104,14 +118,14 @@ interface ISurfaceComposer {
      *
      * requires ACCESS_SURFACE_FLINGER permission.
      */
-    @nullable IBinder createDisplay(@utf8InCpp String displayName, boolean secure,
-            float requestedRefreshRate);
+    @nullable IBinder createVirtualDisplay(@utf8InCpp String displayName, boolean isSecure,
+            OptimizationPolicy optimizationPolicy, @utf8InCpp String uniqueId, float requestedRefreshRate);
 
     /**
-     * Destroy a virtual display
+     * Destroy a virtual display.
      * requires ACCESS_SURFACE_FLINGER permission.
      */
-    void destroyDisplay(IBinder display);
+    void destroyVirtualDisplay(IBinder displayToken);
 
     /**
      * Get stable IDs for connected physical displays.
@@ -226,6 +240,11 @@ interface ISurfaceComposer {
     void setGameContentType(IBinder display, boolean on);
 
     /**
+     * Gets the maximum number of picture profiles supported by the display.
+     */
+    int getMaxLayerPictureProfiles(IBinder display);
+
+    /**
      * Capture the specified screen. This requires READ_FRAME_BUFFER
      * permission.  This function will fail if there is a secure window on
      * screen and DisplayCaptureArgs.captureSecureLayers is false.
@@ -289,13 +308,6 @@ interface ISurfaceComposer {
     PullAtomData onPullAtom(int atomId);
 
     /**
-     * Gets the list of active layers in Z order for debugging purposes
-     *
-     * Requires the ACCESS_SURFACE_FLINGER permission.
-     */
-    List<LayerDebugInfo> getLayerDebugInfo();
-
-    /**
      * Gets the composition preference of the default data space and default pixel format,
      * as well as the wide color gamut data space and wide color gamut pixel format.
      * If the wide color gamut data space is V0_SRGB, then it implies that the platform
@@ -340,18 +352,41 @@ interface ISurfaceComposer {
      * The sampling area is bounded by both samplingArea and the given stopLayerHandle
      * (i.e., only layers behind the stop layer will be captured and sampled).
      *
-     * Multiple listeners may be provided so long as they have independent listeners.
-     * If multiple listeners are provided, the effective sampling region for each listener will
-     * be bounded by whichever stop layer has a lower Z value.
+     * Multiple listeners for the same sampling region may be provided so long as they have
+     * independent IRegionSamplingListener objects. If multiple listeners are provided, the
+     * effective sampling region for each listener will be bounded by whichever stop layer has
+     * a lower Z-value.
      *
      * Requires the same permissions as captureLayers and captureScreen.
      */
     void addRegionSamplingListener(in ARect samplingArea, @nullable IBinder stopLayerHandle, IRegionSamplingListener listener);
 
     /**
+     * Registers a listener by stopLayerId to stream median luma updates from SurfaceFlinger.
+     *
+     * The sampling area is bounded by both samplingArea and the given stopLayerId
+     * (i.e., only layers behind the stop layer will be captured and sampled).
+     *
+     * Multiple listeners for the same sampling region may be provided so long as they have
+     * independent IRegionSamplingListener objects. If multiple listeners are provided, the
+     * effective sampling region for each listener will be bounded by whichever stop layer has
+     * a lower Z-value.
+     *
+     * Requires the ACCESS_SURFACE_FLINGER permission.
+     */
+    void addRegionSamplingListenerWithStopLayerId(in ARect samplingArea, int stopLayerId, IRegionSamplingListener listener);
+
+    /**
      * Removes a listener that was streaming median luma updates from SurfaceFlinger.
      */
     void removeRegionSamplingListener(IRegionSamplingListener listener);
+
+    /**
+     * Gets all listeners that are streaming median luma updates from SurfaceFlinger.
+     *
+     * Requires the ACCESS_SURFACE_FLINGER permission.
+     */
+    List<RegionSamplingDescriptor> getRegionSamplingListeners();
 
     /**
      * Registers a listener that streams fps updates from SurfaceFlinger.
@@ -469,7 +504,7 @@ interface ISurfaceComposer {
      * lightRadius
      *      Radius of the light casting the shadow.
      */
-    oneway void setGlobalShadowSettings(in Color ambientColor, in Color spotColor, float lightPosY, float lightPosZ, float lightRadius);
+    void setGlobalShadowSettings(in Color ambientColor, in Color spotColor, float lightPosY, float lightPosZ, float lightRadius);
 
     /**
      * Gets whether a display supports DISPLAY_DECORATION layers.
@@ -579,4 +614,55 @@ interface ISurfaceComposer {
     @nullable StalledTransactionInfo getStalledTransactionInfo(int pid);
 
     SchedulingPolicy getSchedulingPolicy();
+
+    /**
+     * Notifies the SurfaceFlinger that the ShutdownThread is running. When it is called,
+     * transaction traces will be captured and writted into a file.
+     * This method should not block the ShutdownThread therefore it's handled asynchronously.
+     */
+    oneway void notifyShutdown();
+
+    /**
+     * Registers the jank listener on the given layer to receive jank data of future frames.
+     */
+    void addJankListener(IBinder layer, IJankListener listener);
+
+    /**
+     * Flushes any pending jank data on the given layer to any registered listeners on that layer.
+     */
+    oneway void flushJankData(int layerId);
+
+    /**
+     * Schedules the removal of the jank listener from the given layer after the VSync with the
+     * specified ID. Use a value <= 0 for afterVsync to remove the listener immediately. The given
+     * listener will not be removed before the given VSync, but may still receive data for frames
+     * past the provided VSync.
+     */
+    oneway void removeJankListener(int layerId, IJankListener listener, long afterVsync);
+
+    /**
+     * Adds a listener used to monitor visible content that is being processed with picture
+     * profiles.
+     */
+    oneway void addActivePictureListener(IActivePictureListener listener);
+
+    /**
+     * Removes a listener used to monitor visible content that is being processed with picture
+     * profiles.
+     */
+    oneway void removeActivePictureListener(IActivePictureListener listener);
+
+    /**
+     * Force the display specified by the argument to become the pacesetter display until the
+     * display is removed or another forcePacesetter/resetForcedPacesetter call is invoked.
+     * Requires root
+     */
+    void forcePacesetter(long displayId);
+
+    /**
+     * Resets the forced pacesetter display selection made by the forcePacesetter call. No-op
+     * if there was no forced pacesetter display set.
+     * Requires root
+     */
+     void resetForcedPacesetter();
 }

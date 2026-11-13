@@ -29,13 +29,13 @@
 #include <android-base/strings.h>
 #include <android/dlext.h>
 #include <binder/IServiceManager.h>
+#include <bionic/dlext_namespaces.h>
+#include <com_android_graphics_graphicsenv_flags.h>
 #include <graphicsenv/IGpuService.h>
 #include <log/log.h>
-#include <nativeloader/dlext_namespaces.h>
 #include <sys/prctl.h>
 #include <utils/Trace.h>
 
-#include <memory>
 #include <string>
 #include <thread>
 
@@ -70,6 +70,8 @@ static bool isVndkEnabled() {
 }
 } // namespace
 
+namespace graphicsenv_flags = com::android::graphics::graphicsenv::flags;
+
 namespace android {
 
 enum NativeLibrary {
@@ -82,6 +84,54 @@ static constexpr const char* kNativeLibrariesSystemConfigPath[] =
          "/apex/com.android.vndk.v{}/etc/vndksp.libraries.{}.txt"};
 
 static const char* kLlndkLibrariesTxtPath = "/system/etc/llndk.libraries.txt";
+
+// List of libraries that were previously available via VNDK-SP,
+// and are now available via SPHAL.
+// On modern devices that lack the VNDK APEX, the device no longer
+// contains a helpful list of these libraries on the filesystem as above.
+// See system/sepolicy/vendor/file_contexts
+static const char* kFormerlyVndkspLibrariesList = "android.hardware.common-V2-ndk.so:"
+                                                  "android.hardware.common.fmq-V1-ndk.so:"
+                                                  "android.hardware.graphics.allocator-V2-ndk.so:"
+                                                  "android.hardware.graphics.common-V7-ndk.so:"
+                                                  "android.hardware.graphics.common@1.0.so:"
+                                                  "android.hardware.graphics.common@1.1.so:"
+                                                  "android.hardware.graphics.common@1.2.so:"
+                                                  "android.hardware.graphics.composer3-V1-ndk.so:"
+                                                  "android.hardware.graphics.mapper@2.0.so:"
+                                                  "android.hardware.graphics.mapper@2.1.so:"
+                                                  "android.hardware.graphics.mapper@3.0.so:"
+                                                  "android.hardware.graphics.mapper@4.0.so:"
+                                                  "android.hardware.renderscript@1.0.so:"
+                                                  "android.hidl.memory.token@1.0.so:"
+                                                  "android.hidl.memory@1.0-impl.so:"
+                                                  "android.hidl.memory@1.0.so:"
+                                                  "android.hidl.safe_union@1.0.so:"
+                                                  "libRSCpuRef.so:"
+                                                  "libRSDriver.so:"
+                                                  "libRS_internal.so:"
+                                                  "libbacktrace.so:"
+                                                  "libbase.so:"
+                                                  "libbcinfo.so:"
+                                                  "libblas.so:"
+                                                  "libc++.so:"
+                                                  "libcompiler_rt.so:"
+                                                  "libcutils.so:"
+                                                  "libdmabufheap.so:"
+                                                  "libft2.so:"
+                                                  "libgralloctypes.so:"
+                                                  "libhardware.so:"
+                                                  "libhidlbase.so:"
+                                                  "libhidlmemory.so:"
+                                                  "libion.so:"
+                                                  "libjsoncpp.so:"
+                                                  "liblzma.so:"
+                                                  "libpng.so:"
+                                                  "libprocessgroup.so:"
+                                                  "libunwindstack.so:"
+                                                  "libutils.so:"
+                                                  "libutilscallstack.so:"
+                                                  "libz.so";
 
 static std::string vndkVersionStr() {
 #ifdef __BIONIC__
@@ -122,8 +172,12 @@ static bool readConfig(const std::string& configFile, std::vector<std::string>* 
 static const std::string getSystemNativeLibraries(NativeLibrary type) {
     std::string nativeLibrariesSystemConfig = "";
 
-    if (!isVndkEnabled() && type == NativeLibrary::LLNDK) {
-        nativeLibrariesSystemConfig = kLlndkLibrariesTxtPath;
+    if (!isVndkEnabled()) {
+        if (type == NativeLibrary::VNDKSP) {
+            return kFormerlyVndkspLibrariesList;
+        } else {
+            nativeLibrariesSystemConfig = kLlndkLibrariesTxtPath;
+        }
     } else {
         nativeLibrariesSystemConfig = kNativeLibrariesSystemConfigPath[type];
         insertVndkVersionStr(&nativeLibrariesSystemConfig);
@@ -263,7 +317,7 @@ android_namespace_t* GraphicsEnv::getDriverNamespace() {
         ALOGI("Driver path is setup via UPDATABLE_GFX_DRIVER: %s", mDriverPath.c_str());
     }
 
-    auto vndkNamespace = android_get_exported_namespace("vndk");
+    auto vndkNamespace = android_get_exported_namespace(isVndkEnabled() ? "vndk" : "sphal");
     if (!vndkNamespace) {
         mDriverNamespace = nullptr;
         return mDriverNamespace;
@@ -348,18 +402,10 @@ void GraphicsEnv::setDriverToLoad(GpuStatsInfo::Driver driver) {
     switch (driver) {
         case GpuStatsInfo::Driver::GL:
         case GpuStatsInfo::Driver::GL_UPDATED:
-        case GpuStatsInfo::Driver::ANGLE: {
-            if (mGpuStats.glDriverToLoad == GpuStatsInfo::Driver::NONE ||
-                mGpuStats.glDriverToLoad == GpuStatsInfo::Driver::GL) {
-                mGpuStats.glDriverToLoad = driver;
-                break;
-            }
-
-            if (mGpuStats.glDriverFallback == GpuStatsInfo::Driver::NONE) {
-                mGpuStats.glDriverFallback = driver;
-            }
+        case GpuStatsInfo::Driver::ANGLE:
+            mGpuStats.glDriverToLoad = driver;
             break;
-        }
+
         case GpuStatsInfo::Driver::VULKAN:
         case GpuStatsInfo::Driver::VULKAN_UPDATED: {
             if (mGpuStats.vkDriverToLoad == GpuStatsInfo::Driver::NONE ||
@@ -445,6 +491,21 @@ void GraphicsEnv::setVulkanDeviceExtensions(uint32_t enabledExtensionCount,
                         extensionHashes, numStats);
 }
 
+void GraphicsEnv::addVulkanEngineName(const char* engineName) {
+    ATRACE_CALL();
+    if (engineName == nullptr) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(mStatsLock);
+    if (!readyToSendGpuStatsLocked()) return;
+
+    const sp<IGpuService> gpuService = getGpuService();
+    if (gpuService) {
+        gpuService->addVulkanEngineName(mGpuStats.appPackageName, mGpuStats.driverVersionCode,
+                                        engineName);
+    }
+}
+
 bool GraphicsEnv::readyToSendGpuStatsLocked() {
     // Only send stats for processes having at least one activity launched and that process doesn't
     // skip the GraphicsEnvironment setup.
@@ -493,8 +554,7 @@ void GraphicsEnv::sendGpuStatsLocked(GpuStatsInfo::Api api, bool isDriverLoaded,
     bool isIntendedDriverLoaded = false;
     if (api == GpuStatsInfo::Api::API_GL) {
         driver = mGpuStats.glDriverToLoad;
-        isIntendedDriverLoaded =
-                isDriverLoaded && (mGpuStats.glDriverFallback == GpuStatsInfo::Driver::NONE);
+        isIntendedDriverLoaded = isDriverLoaded;
     } else {
         driver = mGpuStats.vkDriverToLoad;
         isIntendedDriverLoaded =
@@ -537,7 +597,7 @@ bool GraphicsEnv::shouldUseAngle() {
 // If path is set to nonempty and shouldUseNativeDriver is true, ANGLE will be used regardless.
 void GraphicsEnv::setAngleInfo(const std::string& path, const bool shouldUseNativeDriver,
                                const std::string& packageName,
-                               const std::vector<std::string> eglFeatures) {
+                               const std::vector<std::string>& eglFeatures) {
     if (mShouldUseAngle) {
         // ANGLE is already set up for this application process, even if the application
         // needs to switch from apk to system or vice versa, the application process must
@@ -547,11 +607,11 @@ void GraphicsEnv::setAngleInfo(const std::string& path, const bool shouldUseNati
         return;
     }
 
-    mAngleEglFeatures = std::move(eglFeatures);
+    mAngleEglFeatures = eglFeatures;
     ALOGV("setting ANGLE path to '%s'", path.c_str());
-    mAnglePath = std::move(path);
+    mAnglePath = path;
     ALOGV("setting app package name to '%s'", packageName.c_str());
-    mPackageName = std::move(packageName);
+    mPackageName = packageName;
     if (mAnglePath == "system") {
         mShouldUseSystemAngle = true;
     }
@@ -559,14 +619,60 @@ void GraphicsEnv::setAngleInfo(const std::string& path, const bool shouldUseNati
         mShouldUseAngle = true;
     }
     mShouldUseNativeDriver = shouldUseNativeDriver;
+
+    if (mShouldUseAngle) {
+        updateAngleFeatureOverrides();
+    }
 }
 
 std::string& GraphicsEnv::getPackageName() {
     return mPackageName;
 }
 
+// List of ANGLE features to enable, specified in the Global.Settings value "angle_egl_features".
 const std::vector<std::string>& GraphicsEnv::getAngleEglFeatures() {
     return mAngleEglFeatures;
+}
+
+// List of ANGLE features to override (enabled or disable).
+// The list of overrides is loaded and parsed by GpuService.
+void GraphicsEnv::updateAngleFeatureOverrides() {
+    if (!graphicsenv_flags::angle_feature_overrides()) {
+        return;
+    }
+
+    const sp<IGpuService> gpuService = getGpuService();
+    if (!gpuService) {
+        ALOGE("No GPU service");
+        return;
+    }
+
+    gpuService->getFeatureOverrides(mFeatureOverrides);
+}
+
+void GraphicsEnv::getAngleFeatureOverrides(std::vector<const char*>& enabled,
+                                           std::vector<const char*>& disabled) {
+    if (!graphicsenv_flags::angle_feature_overrides()) {
+        return;
+    }
+
+    for (const FeatureConfig& feature : mFeatureOverrides.mGlobalFeatures) {
+        if (feature.mEnabled) {
+            enabled.push_back(feature.mFeatureName.c_str());
+        } else {
+            disabled.push_back(feature.mFeatureName.c_str());
+        }
+    }
+
+    if (mFeatureOverrides.mPackageFeatures.count(mPackageName)) {
+        for (const FeatureConfig& feature : mFeatureOverrides.mPackageFeatures[mPackageName]) {
+            if (feature.mEnabled) {
+                enabled.push_back(feature.mFeatureName.c_str());
+            } else {
+                disabled.push_back(feature.mFeatureName.c_str());
+            }
+        }
+    }
 }
 
 android_namespace_t* GraphicsEnv::getAngleNamespace() {
@@ -616,7 +722,7 @@ android_namespace_t* GraphicsEnv::getAngleNamespace() {
         return mAngleNamespace;
     }
 
-    auto vndkNamespace = android_get_exported_namespace("vndk");
+    auto vndkNamespace = android_get_exported_namespace(isVndkEnabled() ? "vndk" : "sphal");
     if (!vndkNamespace) {
         mAngleNamespace = nullptr;
         return mAngleNamespace;
@@ -636,6 +742,18 @@ void GraphicsEnv::nativeToggleAngleAsSystemDriver(bool enabled) {
         return;
     }
     gpuService->toggleAngleAsSystemDriver(enabled);
+}
+
+std::string GraphicsEnv::nativeGetPersistGraphicsEgl() {
+    if (!graphicsenv_flags::query_persist_graphics_egl()) {
+        return "";
+    }
+    const sp<IGpuService> gpuService = getGpuService();
+    if (!gpuService) {
+        ALOGE("No GPU service");
+        return "";
+    }
+    return gpuService->getPersistGraphicsEgl();
 }
 
 bool GraphicsEnv::shouldUseSystemAngle() {

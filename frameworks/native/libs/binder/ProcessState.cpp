@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "ProcessState"
+#define LOG_TAG "libbinder.ProcessState"
 
 #include <binder/ProcessState.h>
 
@@ -24,11 +24,11 @@
 #include <binder/IPCThreadState.h>
 #include <binder/IServiceManager.h>
 #include <binder/Stability.h>
-#include <cutils/atomic.h>
 #include <utils/AndroidThreads.h>
 #include <utils/String8.h>
 #include <utils/Thread.h>
 
+#include "BinderObserver.h"
 #include "Static.h"
 #include "Utils.h"
 #include "binder_module.h"
@@ -49,6 +49,10 @@
 #define DEFAULT_MAX_BINDER_THREADS 15
 #define DEFAULT_ENABLE_ONEWAY_SPAM_DETECTION 1
 
+#if defined(__ANDROID__) || defined(__Fuchsia__)
+#define EXPECT_BINDER_OPEN_SUCCESS
+#endif
+
 #ifdef __ANDROID_VNDK__
 const char* kDefaultDriver = "/dev/vndbinder";
 #else
@@ -56,6 +60,25 @@ const char* kDefaultDriver = "/dev/binder";
 #endif
 
 // -------------------------------------------------------------------------
+
+namespace {
+bool readDriverFeatureFile(const char* filename) {
+    int fd = open(filename, O_RDONLY | O_CLOEXEC);
+    char on;
+    if (fd == -1) {
+        ALOGE_IF(errno != ENOENT, "%s: cannot open %s: %s", __func__, filename, strerror(errno));
+        return false;
+    }
+    if (read(fd, &on, sizeof(on)) == -1) {
+        ALOGE("%s: error reading to %s: %s", __func__, filename, strerror(errno));
+        close(fd);
+        return false;
+    }
+    close(fd);
+    return on == '1';
+}
+
+} // namespace
 
 namespace android {
 
@@ -93,6 +116,11 @@ sp<ProcessState> ProcessState::initWithDriver(const char* driver)
 sp<ProcessState> ProcessState::selfOrNull()
 {
     return init(nullptr, false /*requireDefault*/);
+}
+
+sp<ProcessState> ProcessState::selfIfKernelBinderEnabled() {
+    if (access(kDefaultDriver, R_OK) == -1) return nullptr;
+    return init(kDefaultDriver, false /*requireDefault*/);
 }
 
 [[clang::no_destroy]] static sp<ProcessState> gProcess;
@@ -311,6 +339,7 @@ extern sp<BBinder> the_context_object;
 sp<IBinder> ProcessState::getStrongProxyForHandle(int32_t handle)
 {
     sp<IBinder> result;
+    std::function<void()> postTask;
 
     std::unique_lock<std::mutex> _l(mLock);
 
@@ -358,10 +387,10 @@ sp<IBinder> ProcessState::getStrongProxyForHandle(int32_t handle)
                    return nullptr;
             }
 
-            sp<BpBinder> b = BpBinder::PrivateAccessor::create(handle);
-            e->binder = b.get();
-            if (b) e->refs = b->getWeakRefs();
-            result = b;
+            sp<BpBinder> bp = BpBinder::PrivateAccessor::create(handle, &postTask);
+            e->binder = bp.get();
+            if (bp) e->refs = bp->getWeakRefs();
+            result = bp;
         } else {
             // This little bit of nastyness is to allow us to add a primary
             // reference to the remote proxy when this team doesn't have one
@@ -370,6 +399,10 @@ sp<IBinder> ProcessState::getStrongProxyForHandle(int32_t handle)
             e->refs->decWeak(this);
         }
     }
+
+    _l.unlock();
+
+    if (postTask) postTask();
 
     return result;
 }
@@ -387,7 +420,7 @@ void ProcessState::expungeHandle(int32_t handle, IBinder* binder)
 }
 
 String8 ProcessState::makeBinderThreadName() {
-    int32_t s = android_atomic_add(1, &mThreadPoolSeq);
+    int32_t s = mThreadPoolSeq.fetch_add(1, std::memory_order_release);
     pid_t pid = getpid();
 
     std::string_view driverName = mDriverName.c_str();
@@ -429,8 +462,17 @@ status_t ProcessState::setThreadPoolMaxThreadCount(size_t maxThreads) {
 }
 
 size_t ProcessState::getThreadPoolMaxTotalThreadCount() const {
+    // Need to read `mKernelStartedThreads` before `mThreadPoolStarted` (with
+    // non-relaxed memory ordering) to avoid a race like the following:
+    //
+    // thread A: if (mThreadPoolStarted) { // evaluates false
+    // thread B: mThreadPoolStarted = true;
+    // thread B: mKernelStartedThreads++;
+    // thread A: size_t kernelStarted = mKernelStartedThreads;
+    // thread A: LOG_ALWAYS_FATAL_IF(kernelStarted != 0, ...);
+    size_t kernelStarted = mKernelStartedThreads;
+
     if (mThreadPoolStarted) {
-        size_t kernelStarted = mKernelStartedThreads;
         size_t max = mMaxThreads;
         size_t current = mCurrentThreads;
 
@@ -460,7 +502,6 @@ size_t ProcessState::getThreadPoolMaxTotalThreadCount() const {
 
     // must not be initialized or maybe has poll thread setup, we
     // currently don't track this in libbinder
-    size_t kernelStarted = mKernelStartedThreads;
     LOG_ALWAYS_FATAL_IF(kernelStarted != 0, "Expecting 0 kernel started threads but have %zu",
                         kernelStarted);
     return mCurrentThreads;
@@ -470,29 +511,37 @@ bool ProcessState::isThreadPoolStarted() const {
     return mThreadPoolStarted;
 }
 
+void ProcessState::checkExpectingThreadPoolStart() const {
+    if (mThreadPoolStarted) return;
+
+    // this is also racey, but you should setup the threadpool in the main thread. If that is an
+    // issue, we can check if we are the process leader, but haven't seen the issue in practice.
+    size_t requestedThreads = mMaxThreads.load();
+
+    // if it's manually set to the default, we do ignore it here...
+    if (requestedThreads == DEFAULT_MAX_BINDER_THREADS) return;
+    if (requestedThreads == 0) return;
+
+    ALOGW("Thread pool configuration of size %zu requested, but startThreadPool was not called.",
+          requestedThreads);
+}
+
 #define DRIVER_FEATURES_PATH "/dev/binderfs/features/"
 bool ProcessState::isDriverFeatureEnabled(const DriverFeature feature) {
-    static const char* const names[] = {
-        [static_cast<int>(DriverFeature::ONEWAY_SPAM_DETECTION)] =
-            DRIVER_FEATURES_PATH "oneway_spam_detection",
-        [static_cast<int>(DriverFeature::EXTENDED_ERROR)] =
-            DRIVER_FEATURES_PATH "extended_error",
-    };
-    int fd = open(names[static_cast<int>(feature)], O_RDONLY | O_CLOEXEC);
-    char on;
-    if (fd == -1) {
-        ALOGE_IF(errno != ENOENT, "%s: cannot open %s: %s", __func__,
-                 names[static_cast<int>(feature)], strerror(errno));
-        return false;
+    // Use static variable to cache the results.
+    if (feature == DriverFeature::ONEWAY_SPAM_DETECTION) {
+        static bool enabled = readDriverFeatureFile(DRIVER_FEATURES_PATH "oneway_spam_detection");
+        return enabled;
     }
-    if (read(fd, &on, sizeof(on)) == -1) {
-        ALOGE("%s: error reading to %s: %s", __func__,
-                 names[static_cast<int>(feature)], strerror(errno));
-        close(fd);
-        return false;
+    if (feature == DriverFeature::EXTENDED_ERROR) {
+        static bool enabled = readDriverFeatureFile(DRIVER_FEATURES_PATH "extended_error");
+        return enabled;
     }
-    close(fd);
-    return on == '1';
+    if (feature == DriverFeature::FREEZE_NOTIFICATION) {
+        static bool enabled = readDriverFeatureFile(DRIVER_FEATURES_PATH "freeze_notification");
+        return enabled;
+    }
+    return false;
 }
 
 status_t ProcessState::enableOnewaySpamDetection(bool enable) {
@@ -574,15 +623,23 @@ ProcessState::ProcessState(const char* driver)
         }
     }
 
-#ifdef __ANDROID__
+#if defined(EXPECT_BINDER_OPEN_SUCCESS)
     LOG_ALWAYS_FATAL_IF(!opened.ok(),
                         "Binder driver '%s' could not be opened. Error: %s. Terminating.",
-                        error.c_str(), driver);
+                        driver, error.c_str());
+#else
+    if (!opened.ok()) {
+        ALOGE("Binder driver '%s' could not be opened. Error: %s. There may be future issues.",
+              driver, error.c_str());
+    }
 #endif
 
     if (opened.ok()) {
         mDriverFD = opened.release();
     }
+#ifdef BINDER_WITH_OBSERVERS
+    mBinderObserver = std::make_unique<BinderObserver>();
+#endif
 }
 
 ProcessState::~ProcessState()

@@ -24,8 +24,10 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <libgen.h>
+#include <signal.h>
 #include <ziparchive/zip_archive.h>
 
+#include <cstdio>
 #include <fstream>
 #include <regex>
 
@@ -507,7 +509,7 @@ TEST_F(DumpstateBinderTest, Baseline) {
         ds_binder->startBugreport(123, "com.example.package", std::move(bugreport_fd),
                                   std::move(screenshot_fd),
                                   Dumpstate::BugreportMode::BUGREPORT_INTERACTIVE, flags, listener,
-                                  true);
+                                  true, false);
     // startBugreport is an async call. Verify binder call succeeded first, then wait till listener
     // gets expected callbacks.
     EXPECT_TRUE(status.isOk());
@@ -545,7 +547,7 @@ TEST_F(DumpstateBinderTest, ServiceDies_OnInvalidInput) {
     android::binder::Status status =
         ds_binder->startBugreport(123, "com.example.package", std::move(bugreport_fd),
                                   std::move(screenshot_fd), 2000,  // invalid bugreport mode
-                                  flags, listener, false);
+                                  flags, listener, false, false);
     EXPECT_EQ(listener->getErrorCode(), IDumpstateListener::BUGREPORT_ERROR_INVALID_INPUT);
 
     // The service should have died, freeing itself up for a new invocation.
@@ -579,7 +581,7 @@ TEST_F(DumpstateBinderTest, SimultaneousBugreportsNotAllowed) {
         ds_binder->startBugreport(123, "com.example.package", std::move(bugreport_fd),
                                   std::move(screenshot_fd),
                                   Dumpstate::BugreportMode::BUGREPORT_INTERACTIVE, flags, listener1,
-                                  true);
+                                  true, false);
     EXPECT_TRUE(status.isOk());
 
     // try to make another call to startBugreport. This should fail.
@@ -587,7 +589,7 @@ TEST_F(DumpstateBinderTest, SimultaneousBugreportsNotAllowed) {
     status = ds_binder->startBugreport(123, "com.example.package", std::move(bugreport_fd2),
                                         std::move(screenshot_fd2),
                                        Dumpstate::BugreportMode::BUGREPORT_INTERACTIVE, flags,
-                                       listener2, true);
+                                       listener2, true, false);
     EXPECT_FALSE(status.isOk());
     WaitTillExecutionComplete(listener2.get());
     EXPECT_EQ(listener2->getErrorCode(),
@@ -601,6 +603,93 @@ TEST_F(DumpstateBinderTest, SimultaneousBugreportsNotAllowed) {
     EXPECT_TRUE(
         listener1->getErrorCode() == IDumpstateListener::BUGREPORT_ERROR_USER_DENIED_CONSENT ||
         listener1->getErrorCode() == IDumpstateListener::BUGREPORT_ERROR_USER_CONSENT_TIMED_OUT);
+}
+
+class DumpstateTracingTest : public Test {
+  protected:
+    void TearDown() override {
+        for (int pid : bg_process_pids) {
+            kill(pid, SIGKILL);
+        }
+    }
+
+    void StartTracing(const std::string& config) {
+        // Write the perfetto config into a file.
+        const int id = static_cast<int>(bg_process_pids.size());
+        char cfg[64];
+        snprintf(cfg, sizeof(cfg), "/data/misc/perfetto-configs/br-%d", id);
+        unlink(cfg);  // Remove the config file if it exists already.
+        FILE* f = fopen(cfg, "w");
+        ASSERT_NE(f, nullptr);
+        fputs(config.c_str(), f);
+        fclose(f);
+
+        // Invoke perfetto to start tracing.
+        char cmd[255];
+        snprintf(cmd, sizeof(cmd), "perfetto --background-wait --txt -o /dev/null -c %s", cfg);
+        FILE* proc = popen(cmd, "r");
+        ASSERT_NE(proc, nullptr);
+
+        // Read back the PID of the background process. We will use it to kill
+        // all tracing sessions when the test ends or fails.
+        char pid_str[32]{};
+        ASSERT_NE(fgets(pid_str, sizeof(pid_str), proc), nullptr);
+        int pid = atoi(pid_str);
+        bg_process_pids.push_back(pid);
+
+        pclose(proc);
+        unlink(cfg);
+    }
+
+    std::vector<int> bg_process_pids;
+};
+
+TEST_F(DumpstateTracingTest, ManyTracesInBugreport) {
+    // Note the trace duration is irrelevant and is only an upper bound.
+    // Tracing is stopped as soon as the bugreport.zip creation ends.
+    StartTracing(R"(
+buffers { size_kb: 4096 }
+data_sources {
+  config {
+    name: "linux.ftrace"
+  }
+}
+
+duration_ms: 120000
+bugreport_filename: "sys.pftrace"
+bugreport_score: 100
+)");
+
+    StartTracing(R"(
+buffers { size_kb: 4096 }
+data_sources {
+  config {
+    name: "linux.ftrace"
+  }
+}
+
+duration_ms: 120000
+bugreport_score: 50
+bugreport_filename: "mem.pftrace"
+)");
+
+    ZippedBugreportGenerationTest::GenerateBugreport();
+    std::string zip_path = ZippedBugreportGenerationTest::getZipFilePath();
+    ZipArchiveHandle handle;
+    ASSERT_EQ(OpenArchive(zip_path.c_str(), &handle), 0);
+
+    const char* kExpectedEntries[]{
+        "FS/data/misc/perfetto-traces/bugreport/sys.pftrace",
+        "FS/data/misc/perfetto-traces/bugreport/mem.pftrace",
+    };
+
+    // Check that the bugreport contains both traces.
+    for (const char* file_path : kExpectedEntries) {
+        ZipEntry entry{};
+        GetEntry(handle, file_path, &entry);
+        EXPECT_GT(entry.uncompressed_length, 100);
+    }
+    CloseArchive(handle);
 }
 
 }  // namespace dumpstate

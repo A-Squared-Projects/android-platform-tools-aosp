@@ -1,0 +1,87 @@
+/*
+ * Copyright (C) 2025 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import {base64Decode} from 'common/string_helpers';
+import {ErrorListener, WebSocketStream} from './websocket_stream';
+
+interface AdbResponse {
+  error?: {
+    type: string;
+    message: string;
+  };
+  response?: string; // base64-encoded
+}
+
+export type DataListener = (data: Uint8Array) => void;
+
+export abstract class AdbWebSocketStream extends WebSocketStream {
+  protected onData: DataListener = () => {};
+
+  constructor(
+    sock: WebSocket,
+    private deviceSerialNumber: string,
+    private service: string,
+    errorListener: ErrorListener,
+  ) {
+    super(sock);
+    this.onError = async (msg: string) => {
+      await errorListener(msg);
+      this.close();
+    };
+    sock.onmessage = async (e: MessageEvent) => {
+      let adbResponse: AdbResponse | undefined;
+      try {
+        if (e.data instanceof ArrayBuffer) {
+          this.onData(new Uint8Array(e.data));
+        } else if (e.data instanceof Blob) {
+          this.onData(new Uint8Array(await e.data.arrayBuffer()));
+        } else if (typeof e.data === 'string') {
+          try {
+            adbResponse = JSON.parse(e.data);
+          } catch (e) {
+            throw new Error('Failed to decode ADB JSON response');
+          }
+          if (adbResponse?.response !== undefined) {
+            this.onData(base64Decode(adbResponse.response));
+          } else {
+            throw new Error('Received empty ADB response');
+          }
+        } else {
+          throw new Error('Expected message data to be ArrayBuffer or Blob');
+        }
+      } catch (error) {
+        console.debug('WebSocket failed, state: ' + sock.readyState);
+        const errMsg = adbResponse?.error?.message;
+        this.onError(
+          `Could not parse data:\nReceived: ${e.data}` +
+            `\nError: ${(error as Error).message}.` +
+            (errMsg ? `\nADB Error: ` + errMsg : ''),
+        );
+      }
+    };
+  }
+
+  override async connect(args = '') {
+    await this.write(
+      JSON.stringify({
+        header: {
+          serialNumber: this.deviceSerialNumber,
+          command: this.service + ':' + args,
+        },
+      }),
+    );
+  }
+}

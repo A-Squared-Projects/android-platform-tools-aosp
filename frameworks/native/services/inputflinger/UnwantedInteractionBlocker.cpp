@@ -20,6 +20,7 @@
 #include <android-base/stringprintf.h>
 #include <com_android_input_flags.h>
 #include <ftl/enum.h>
+#include <input/Input.h>
 #include <input/PrintTools.h>
 #include <inttypes.h>
 #include <linux/input-event-codes.h>
@@ -342,12 +343,6 @@ UnwantedInteractionBlocker::UnwantedInteractionBlocker(InputListenerInterface& l
                                                        bool enablePalmRejection)
       : mQueuedListener(listener), mEnablePalmRejection(enablePalmRejection) {}
 
-void UnwantedInteractionBlocker::notifyConfigurationChanged(
-        const NotifyConfigurationChangedArgs& args) {
-    mQueuedListener.notifyConfigurationChanged(args);
-    mQueuedListener.flush();
-}
-
 void UnwantedInteractionBlocker::notifyKey(const NotifyKeyArgs& args) {
     mQueuedListener.notifyKey(args);
     mQueuedListener.flush();
@@ -445,7 +440,7 @@ void UnwantedInteractionBlocker::onInputDevicesChanged(
 
     // Let's see which of the existing devices didn't change, so that we can keep them
     // and prevent event stream disruption
-    std::set<int32_t /*deviceId*/> devicesToKeep;
+    std::set<DeviceId> devicesToKeep;
     for (const InputDeviceInfo& device : inputDevices) {
         std::optional<AndroidPalmFilterDeviceInfo> info = createPalmFilterDeviceInfo(device);
         if (!info) {
@@ -733,7 +728,7 @@ std::vector<NotifyMotionArgs> PalmRejector::processMotion(const NotifyMotionArgs
     if (!std::includes(oldSuppressedIds.begin(), oldSuppressedIds.end(),
                        mSuppressedPointerIds.begin(), mSuppressedPointerIds.end())) {
         ALOGI("Palm detected, removing pointer ids %s after %" PRId64 "ms from %s",
-              dumpSet(mSuppressedPointerIds).c_str(), ns2ms(args.eventTime - args.downTime),
+              dumpContainer(mSuppressedPointerIds).c_str(), ns2ms(args.eventTime - args.downTime),
               args.dump().c_str());
     }
 
@@ -754,7 +749,7 @@ std::string PalmRejector::dump() const {
     out += "mSlotState:\n";
     out += addLinePrefix(mSlotState.dump(), "  ");
     out += "mSuppressedPointerIds: ";
-    out += dumpSet(mSuppressedPointerIds) + "\n";
+    out += dumpContainer(mSuppressedPointerIds) + "\n";
     std::stringstream state;
     state << *mSharedPalmState;
     out += "mSharedPalmState: " + state.str() + "\n";

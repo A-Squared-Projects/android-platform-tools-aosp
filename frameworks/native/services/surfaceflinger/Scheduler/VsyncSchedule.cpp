@@ -18,8 +18,8 @@
 
 #include <common/FlagManager.h>
 
+#include <common/trace.h>
 #include <ftl/fake_guard.h>
-#include <gui/TraceUtils.h>
 #include <scheduler/Fps.h>
 #include <scheduler/Timer.h>
 
@@ -82,10 +82,7 @@ Period VsyncSchedule::period() const {
 }
 
 Period VsyncSchedule::minFramePeriod() const {
-    if (FlagManager::getInstance().vrr_config()) {
-        return mTracker->minFramePeriod();
-    }
-    return period();
+    return mTracker->minFramePeriod();
 }
 
 TimePoint VsyncSchedule::vsyncDeadlineAfter(TimePoint timePoint,
@@ -182,16 +179,20 @@ void VsyncSchedule::enableHardwareVsync() {
 }
 
 void VsyncSchedule::enableHardwareVsyncLocked() {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     if (mHwVsyncState == HwVsyncState::Disabled) {
-        getTracker().resetModel();
+        if (FlagManager::getInstance().reset_model_flushes_fence()) {
+            mController->resetModel();
+        } else {
+            getTracker().resetModel();
+        }
         mRequestHardwareVsync(mId, true);
         mHwVsyncState = HwVsyncState::Enabled;
     }
 }
 
 void VsyncSchedule::disableHardwareVsync(bool disallow) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     std::lock_guard<std::mutex> lock(mHwVsyncLock);
     switch (mHwVsyncState) {
         case HwVsyncState::Enabled:

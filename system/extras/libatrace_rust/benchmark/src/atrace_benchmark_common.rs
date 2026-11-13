@@ -46,7 +46,7 @@ pub fn turn_tracing_on() {
 pub fn new_criterion() -> Criterion {
     let path = "/data/local/tmp/criterion/benchmarks";
     std::fs::create_dir_all(path).unwrap_or_else(|e| {
-        panic!("The criterion folder should be possible to create at {}: {}", path, e)
+        panic!("The criterion folder should be possible to create at {path}: {e}")
     });
     std::env::set_var("CRITERION_HOME", path);
     Criterion::default()

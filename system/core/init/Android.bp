@@ -18,6 +18,14 @@ package {
     default_applicable_licenses: ["system_core_init_license"],
 }
 
+// LINT.IfChange
+// N.B. keep this in sync with EXPORT_GLOBAL_HWASAN_OPTIONS in system/core/rootdir/Android.bp
+GLOBAL_HWASAN_OPTIONS = select(soong_config_variable("ANDROID", "HWASAN_ENABLED"), {
+    true: ["-DHWASAN_OPTIONS=heap_history_size=1023,stack_history_size=512,export_memory_stats=0,max_malloc_fill_size=131072,malloc_fill_byte=0"],
+    default: [],
+})
+// LINT.ThenChange(/rootdir/Android.bp)
+
 // Added automatically by a large-scale-change
 // See: http://go/android-license-faq
 license {
@@ -38,7 +46,6 @@ init_common_sources = [
     "capabilities.cpp",
     "epoll.cpp",
     "import_parser.cpp",
-    "interface_utils.cpp",
     "interprocess_fifo.cpp",
     "keychords.cpp",
     "parser.cpp",
@@ -58,6 +65,9 @@ init_device_sources = [
     "block_dev_initializer.cpp",
     "bootchart.cpp",
     "builtins.cpp",
+    "coldboot.cpp",
+    "coldboot_runner_subprocess.cpp",
+    "coldboot_runner_thread_pool.cpp",
     "devices.cpp",
     "firmware_handler.cpp",
     "first_stage_console.cpp",
@@ -81,13 +91,12 @@ init_device_sources = [
     "sigchld_handler.cpp",
     "snapuserd_transition.cpp",
     "switch_root.cpp",
+    "tradeinmode.cpp",
+    "thread_pool.cpp",
     "uevent_listener.cpp",
+    "uevent_dependency_graph.cpp",
     "ueventd.cpp",
     "ueventd_parser.cpp",
-]
-init_host_sources = [
-    "check_builtins.cpp",
-    "host_import_parser.cpp",
 ]
 
 soong_config_module_type {
@@ -141,6 +150,8 @@ libinit_cc_defaults {
                 "-DWORLD_WRITABLE_KMSG=1",
                 "-UDUMP_ON_UMOUNT_FAILURE",
                 "-DDUMP_ON_UMOUNT_FAILURE=1",
+                "-UALLOW_REMOUNT_OVERLAYS",
+                "-DALLOW_REMOUNT_OVERLAYS=1",
             ],
         },
         eng: {
@@ -165,10 +176,10 @@ libinit_cc_defaults {
         },
     },
     static_libs: [
+        "libapexd_flags",
         "libavb",
         "libavf_cc_flags",
         "libbootloader_message",
-        "libcgrouprc_format",
         "liblmkd_utils",
         "liblz4",
         "libzstd",
@@ -180,8 +191,8 @@ libinit_cc_defaults {
         "libsnapshot_cow",
         "libsnapshot_init",
         "libxml2",
-        "lib_apex_manifest_proto_lite",
         "update_metadata-protos",
+        "libgenfslabelsversion.ffi",
     ],
     shared_libs: [
         "libbase",
@@ -190,7 +201,6 @@ libinit_cc_defaults {
         "libext4_utils",
         "libfs_mgr",
         "libgsi",
-        "libhidl-gen-utils",
         "liblog",
         "liblogwrap",
         "liblp",
@@ -226,13 +236,15 @@ cc_defaults {
     ],
     whole_static_libs: [
         "libcap",
-        "libcom.android.sysprop.init",
     ],
     header_libs: ["bootimg_headers"],
     proto: {
         type: "lite",
         export_proto_headers: true,
     },
+    static_libs: [
+        "libueventd_flags",
+    ],
 
     target: {
         recovery: {
@@ -264,18 +276,24 @@ cc_library_static {
     ],
     recovery_available: false,
     cflags: ["-DMICRODROID=1"],
+    cppflags: [
+        "-UWORLD_WRITABLE_KMSG",
+        "-DWORLD_WRITABLE_KMSG=1",
+    ],
 }
 
 phony {
     name: "init",
     required: [
         "init_second_stage",
-    ],
+    ] + select(product_variable("debuggable"), {
+        true: ["overlay_remounter"],
+        false: [],
+    }),
 }
 
 cc_defaults {
     name: "init_second_stage_defaults",
-    recovery_available: true,
     stem: "init",
     defaults: ["init_defaults"],
     srcs: ["main.cpp"],
@@ -287,37 +305,38 @@ cc_binary {
     defaults: ["init_second_stage_defaults"],
     static_libs: ["libinit"],
     visibility: ["//visibility:any_system_partition"],
-    target: {
-        platform: {
-            required: [
-                "init.rc",
-                "ueventd.rc",
-                "e2fsdroid",
-                "extra_free_kbytes",
-                "make_f2fs",
-                "mke2fs",
-                "sload_f2fs",
-            ],
-        },
-        recovery: {
-            cflags: ["-DRECOVERY"],
-            exclude_static_libs: [
-                "libxml2",
-            ],
-            exclude_shared_libs: [
-                "libbinder",
-                "libutils",
-            ],
-            required: [
-                "init_recovery.rc",
-                "ueventd.rc.recovery",
-                "e2fsdroid.recovery",
-                "make_f2fs.recovery",
-                "mke2fs.recovery",
-                "sload_f2fs.recovery",
-            ],
-        },
-    },
+    required: [
+        "init.rc",
+        "ueventd.rc",
+        "e2fsdroid",
+        "extra_free_kbytes",
+        "make_f2fs",
+        "mke2fs",
+        "sload_f2fs",
+    ],
+}
+
+cc_binary {
+    name: "init_second_stage.recovery",
+    defaults: ["init_second_stage_defaults"],
+    static_libs: ["libinit"],
+    recovery: true,
+    cflags: ["-DRECOVERY"],
+    exclude_static_libs: [
+        "libxml2",
+    ],
+    exclude_shared_libs: [
+        "libbinder",
+        "libutils",
+    ],
+    required: [
+        "init_recovery.rc",
+        "ueventd.rc.recovery",
+        "e2fsdroid.recovery",
+        "make_f2fs.recovery",
+        "mke2fs.recovery",
+        "sload_f2fs.recovery",
+    ],
 }
 
 cc_binary {
@@ -326,9 +345,12 @@ cc_binary {
         "avf_build_flags_cc",
         "init_second_stage_defaults",
     ],
-    recovery_available: false,
     static_libs: ["libinit.microdroid"],
     cflags: ["-DMICRODROID=1"],
+    cppflags: [
+        "-UWORLD_WRITABLE_KMSG",
+        "-DWORLD_WRITABLE_KMSG=1",
+    ],
     no_full_install: true,
     visibility: ["//packages/modules/Virtualization/build/microdroid"],
 }
@@ -370,6 +392,7 @@ init_first_stage_cc_defaults {
     ],
 
     static_libs: [
+        "libapexd_flags",
         "libfs_avb",
         "libavf_cc_flags",
         "libfs_mgr",
@@ -397,6 +420,7 @@ init_first_stage_cc_defaults {
         "libsnapshot_init",
         "update_metadata-protos",
         "libprocinfo",
+        "libbootloader_message",
     ],
 
     static_executable: true,
@@ -406,6 +430,7 @@ init_first_stage_cc_defaults {
         "-Wall",
         "-Wextra",
         "-Wno-unused-parameter",
+        "-Wexit-time-destructors",
         "-Werror",
         "-DALLOW_FIRST_STAGE_CONSOLE=0",
         "-DALLOW_LOCAL_PROP_OVERRIDE=0",
@@ -416,7 +441,7 @@ init_first_stage_cc_defaults {
         "-DSHUTDOWN_ZERO_TIMEOUT=0",
         "-DLOG_UEVENTS=0",
         "-DSEPOLICY_VERSION=30", // TODO(jiyong): externalize the version number
-    ],
+    ] + GLOBAL_HWASAN_OPTIONS,
 
     product_variables: {
         debuggable: {
@@ -477,7 +502,11 @@ cc_binary {
         "avf_build_flags_cc",
         "init_first_stage_defaults",
     ],
-    cflags: ["-DMICRODROID=1"],
+    cflags: [
+        "-DMICRODROID=1",
+        "-UWORLD_WRITABLE_KMSG",
+        "-DWORLD_WRITABLE_KMSG=1",
+    ],
     no_full_install: true,
 }
 
@@ -512,7 +541,10 @@ cc_test {
         "rlimit_parser_test.cpp",
         "service_test.cpp",
         "subcontext_test.cpp",
+        "thread_pool_test.cpp",
         "tokenizer_test.cpp",
+        "uevent_dependency_graph.cpp",
+        "uevent_dependency_graph_test.cpp",
         "ueventd_parser_test.cpp",
         "ueventd_test.cpp",
         "util_test.cpp",
@@ -600,26 +632,22 @@ cc_defaults {
         "-Werror",
     ],
     static_libs: [
-        "libbase",
-        "libselinux",
+        "libfstab",
         "libpropertyinfoserializer",
         "libpropertyinfoparser",
     ],
     whole_static_libs: ["libcap"],
     shared_libs: [
+        "libbase",
         "libcutils",
-        "libhidl-gen-utils",
-        "libhidlmetadata",
         "liblog",
         "libprocessgroup",
         "libprotobuf-cpp-lite",
+        "libselinux",
     ],
     proto: {
         type: "lite",
     },
-    generated_headers: [
-        "generated_stub_builtin_function_map",
-    ],
     target: {
         android: {
             enabled: false,
@@ -638,17 +666,43 @@ cc_defaults {
 cc_binary {
     name: "host_init_verifier",
     defaults: ["init_host_defaults"],
-    srcs: ["host_init_verifier.cpp"] + init_common_sources + init_host_sources,
+    srcs: [
+        "check_builtins.cpp",
+        "host_import_parser.cpp",
+        "host_init_verifier.cpp",
+        "interface_utils.cpp",
+    ] + init_common_sources,
     generated_headers: [
         "generated_android_ids",
+        "generated_stub_builtin_function_map",
     ],
+    shared_libs: [
+        "libhidl-gen-utils",
+        "libhidlmetadata",
+    ],
+}
+
+genrule {
+    name: "noop_builtin_function_map",
+    tool_files: ["host_builtin_map.py"],
+    out: ["noop_builtin_function_map.h"],
+    srcs: [
+        "builtins.cpp",
+        "noop_builtins.cpp",
+    ],
+    cmd: "$(location host_builtin_map.py) --builtins $(location builtins.cpp) --check_builtins $(location noop_builtins.cpp) > $(out)",
 }
 
 cc_library_host_static {
     name: "libinit_host",
     defaults: ["init_host_defaults"],
-    srcs: init_common_sources + init_host_sources,
+    srcs: [
+        "noop_builtins.cpp",
+    ] + init_common_sources,
     export_include_dirs: ["."],
+    generated_headers: [
+        "noop_builtin_function_map",
+    ],
     proto: {
         export_proto_headers: true,
     },
@@ -670,4 +724,16 @@ phony {
         true: [],
         default: ["init_first_stage"],
     }),
+}
+
+aconfig_declarations {
+    name: "ueventd_flags",
+    package: "com.android.ueventd.flags",
+    srcs: ["ueventd.aconfig"],
+    container: "system",
+}
+
+cc_aconfig_library {
+    name: "libueventd_flags",
+    aconfig_declarations: "ueventd_flags",
 }

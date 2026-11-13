@@ -170,4 +170,10 @@ static inline int HwTimeoutMultiplier() {
 extern "C" int __system_property_set(const char*, const char*);
 /** Implementation detail. */
 extern "C" int __system_property_get(const char*, char*);
+/** Implementation detail. */
+extern "C" const prop_info* __system_property_find(const char*);
+/** Implementation detail. */
+extern "C" void __system_property_read_callback(const prop_info*,
+                                                void (*)(void*, const char*, const char*, uint32_t),
+                                                void*);
 #endif

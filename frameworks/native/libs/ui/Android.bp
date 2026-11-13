@@ -122,8 +122,8 @@ cc_library_shared {
 
     srcs: [
         "DebugUtils.cpp",
+        "DependencyMonitor.cpp",
         "DeviceProductInfo.cpp",
-        "DisplayIdentification.cpp",
         "DynamicDisplayInfo.cpp",
         "Fence.cpp",
         "FenceTime.cpp",
@@ -136,6 +136,7 @@ cc_library_shared {
         "GraphicBuffer.cpp",
         "GraphicBufferAllocator.cpp",
         "GraphicBufferMapper.cpp",
+        "PictureProfileHandle.cpp",
         "PixelFormat.cpp",
         "PublicFormat.cpp",
         "StaticAsserts.cpp",
@@ -277,13 +278,3 @@ subdirs = [
     "tests",
     "tools",
 ]
-
-filegroup {
-    name: "libui_host_common",
-    srcs: [
-        "Rect.cpp",
-        "Region.cpp",
-        "PixelFormat.cpp",
-        "Transform.cpp",
-    ],
-}

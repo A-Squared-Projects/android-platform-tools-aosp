@@ -33,8 +33,7 @@ cc_defaults {
         "frameworks/native/services/inputflinger",
     ],
     shared_libs: [
-        "libinputreader",
-        "libinputflinger_base",
+        "libinputflinger",
     ],
     sanitize: {
         hwaddress: true,
@@ -178,7 +177,12 @@ cc_fuzz {
     shared_libs: [
         "libinputreporter",
     ],
+    static_libs: [
+        "libgmock",
+        "libgtest",
+    ],
     srcs: [
+        ":inputdispatcher_common_test_sources",
         "InputDispatcherFuzzer.cpp",
     ],
 }

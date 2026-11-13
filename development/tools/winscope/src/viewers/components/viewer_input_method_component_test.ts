@@ -13,53 +13,48 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {CUSTOM_ELEMENTS_SCHEMA, NO_ERRORS_SCHEMA} from '@angular/core';
-import {
-  ComponentFixture,
-  ComponentFixtureAutoDetect,
-  TestBed,
-} from '@angular/core/testing';
-import {MatDividerModule} from '@angular/material/divider';
-import {MatIconModule} from '@angular/material/icon';
-import {HierarchyComponent} from './hierarchy_component';
-import {PropertiesComponent} from './properties_component';
+
+import {DOMTestHelper} from 'test/unit/dom_test_helpers';
+import {AbstractHierarchyViewerComponentTest} from 'viewers/common/abstract_hierarchy_viewer_component_test';
+import {ImeAdditionalPropertiesComponent} from './ime_additional_properties_component';
 import {ViewerInputMethodComponent} from './viewer_input_method_component';
 
+class ViewerInputMethodComponentTest extends AbstractHierarchyViewerComponentTest<ViewerInputMethodComponent> {
+  protected override readonly testRects = false;
+  protected override readonly hierarchyTitle = 'HIERARCHY';
+  protected override readonly propertiesTitle = 'PROPERTIES';
+
+  protected override executeSpecializedTests() {
+    describe('Specialized tests', () => {
+      let dom: DOMTestHelper<ViewerInputMethodComponent>;
+      let component: ViewerInputMethodComponent;
+
+      beforeEach(async () => {
+        [dom, component] = await this.setUpTestEnvironment();
+      });
+
+      it('creates additional properties view', () => {
+        expect(dom.find('.ime-additional-properties')).toBeDefined();
+      });
+
+      it('handles ime additional properties section collapse/expand', () => {
+        dom.checkSectionCollapseAndExpand(
+          '.ime-additional-properties',
+          'WM & SF PROPERTIES',
+        );
+      });
+    });
+  }
+
+  protected async setUpTestEnvironment(): Promise<
+    [DOMTestHelper<ViewerInputMethodComponent>, ViewerInputMethodComponent]
+  > {
+    return this.initializeTestEnvironment(ViewerInputMethodComponent, [
+      ImeAdditionalPropertiesComponent,
+    ]);
+  }
+}
+
 describe('ViewerInputMethodComponent', () => {
-  let fixture: ComponentFixture<ViewerInputMethodComponent>;
-  let component: ViewerInputMethodComponent;
-  let htmlElement: HTMLElement;
-
-  beforeAll(async () => {
-    await TestBed.configureTestingModule({
-      providers: [{provide: ComponentFixtureAutoDetect, useValue: true}],
-      imports: [MatIconModule, MatDividerModule],
-      declarations: [
-        ViewerInputMethodComponent,
-        HierarchyComponent,
-        PropertiesComponent,
-      ],
-      schemas: [CUSTOM_ELEMENTS_SCHEMA, NO_ERRORS_SCHEMA],
-    }).compileComponents();
-  });
-
-  beforeEach(() => {
-    fixture = TestBed.createComponent(ViewerInputMethodComponent);
-    component = fixture.componentInstance;
-    htmlElement = fixture.nativeElement;
-  });
-
-  it('can be created', () => {
-    expect(component).toBeTruthy();
-  });
-
-  it('creates hierarchy view', () => {
-    const hierarchyView = htmlElement.querySelector('.hierarchy-view');
-    expect(hierarchyView).toBeTruthy();
-  });
-
-  it('creates properties view', () => {
-    const propertiesView = htmlElement.querySelector('.properties-view');
-    expect(propertiesView).toBeTruthy();
-  });
+  new ViewerInputMethodComponentTest().execute();
 });

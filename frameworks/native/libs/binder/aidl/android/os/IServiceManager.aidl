@@ -49,6 +49,8 @@ interface IServiceManager {
              DUMP_FLAG_PRIORITY_CRITICAL | DUMP_FLAG_PRIORITY_HIGH
              | DUMP_FLAG_PRIORITY_NORMAL | DUMP_FLAG_PRIORITY_DEFAULT;
 
+    const int FLAG_IS_LAZY_SERVICE = 1 << 30;
+
     /* Allows services to dump sections in protobuf format. */
     const int DUMP_FLAG_PROTO = 1 << 4;
 
@@ -61,7 +63,8 @@ interface IServiceManager {
      *
      * Returns null if the service does not exist.
      *
-     * @deprecated TODO(b/355394904): Use getService2 instead.
+     * @deprecated TODO(b/355394904): Use getService2 instead. This does not return metadata
+     * that is included in ServiceWithMetadata
      */
     @UnsupportedAppUsage
     @nullable IBinder getService(@utf8InCpp String name);
@@ -80,11 +83,20 @@ interface IServiceManager {
 
     /**
      * Retrieve an existing service called @a name from the service
+     * manager. Non-blocking. Returns null if the service does not exist.
+     *
+     * @deprecated TODO(b/355394904): Use checkService2 instead. This does not
+     * return metadata that is included in ServiceWithMetadata
+     */
+    @UnsupportedAppUsage
+    @nullable IBinder checkService(@utf8InCpp String name);
+
+    /**
+     * Retrieve an existing service called @a name from the service
      * manager. Non-blocking. Returns null if the service does not
      * exist.
      */
-    @UnsupportedAppUsage
-    Service checkService(@utf8InCpp String name);
+    Service checkService2(@utf8InCpp String name);
 
     /**
      * Place a new @a service called @a name into the service
@@ -154,4 +166,27 @@ interface IServiceManager {
      * Get debug information for all currently registered services.
      */
     ServiceDebugInfo[] getServiceDebugInfo();
+
+    /**
+     * Caller context used when delegating access checks to service manager.
+     * This may not be the same context as the caller of this method.
+     */
+    parcelable CallerContext {
+        @utf8InCpp String sidName;
+        int debugPid;
+        int uid;
+    }
+
+    /**
+     * Check if this 'callerCtx' has access for the 'permission' for a given service 'name'.
+     *
+     * This is useful when a process will be making calls to servicemanager on behalf of another
+     * process (callerCtx).
+     *
+     * @param callerCtx - context of the process that is being checked.
+     * @param name - name of the service that the caller wants to interact with
+     * @param permission - the servicemanager SELinux permission that the process is
+     *                     interested in for the service. This is either "find", "list", or "add".
+     */
+    boolean checkServiceAccess(in CallerContext callerCtx, @utf8InCpp String name, @utf8InCpp String permission);
 }

@@ -22,7 +22,6 @@
 #include <compositionengine/mock/Output.h>
 #include <gmock/gmock.h>
 #include <system/window.h>
-#include <ui/DisplayIdentification.h>
 
 namespace android::compositionengine::mock {
 
@@ -32,6 +31,7 @@ public:
     virtual ~Display();
 
     MOCK_CONST_METHOD0(getId, DisplayId());
+    MOCK_CONST_METHOD0(hasSecureLayers, bool());
     MOCK_CONST_METHOD0(isSecure, bool());
     MOCK_METHOD1(setSecure, void(bool));
     MOCK_CONST_METHOD0(isVirtual, bool());

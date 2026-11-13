@@ -180,7 +180,10 @@ class ScopedJmpBuf final {
 
 class SignalHandler final {
  public:
-  static SignalHandler& instance();
+  static SignalHandler& instance() {
+    static SignalHandler self;
+    return self;
+  }
 
  private:
   SignalHandler();

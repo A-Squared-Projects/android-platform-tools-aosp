@@ -29,34 +29,33 @@
 #include <SkString.h>
 #include <SkSurface.h>
 #include <SkTileMode.h>
+#include <common/trace.h>
 #include <include/gpu/GpuTypes.h>
 #include <include/gpu/ganesh/SkSurfaceGanesh.h>
 #include <log/log.h>
-#include <utils/Trace.h>
+
+#include "RuntimeEffectManager.h"
 
 namespace android {
 namespace renderengine {
 namespace skia {
 
-KawaseBlurFilter::KawaseBlurFilter(): BlurFilter() {
-    SkString blurString(
+const SkString kEffectSource_KawaseBlurEffect(
         "uniform shader child;"
         "uniform float in_blurOffset;"
 
         "half4 main(float2 xy) {"
-            "half4 c = child.eval(xy);"
-            "c += child.eval(xy + float2(+in_blurOffset, +in_blurOffset));"
-            "c += child.eval(xy + float2(+in_blurOffset, -in_blurOffset));"
-            "c += child.eval(xy + float2(-in_blurOffset, -in_blurOffset));"
-            "c += child.eval(xy + float2(-in_blurOffset, +in_blurOffset));"
-            "return half4(c.rgb * 0.2, 1.0);"
+        "half4 c = child.eval(xy);"
+        "c += child.eval(xy + float2(+in_blurOffset, +in_blurOffset));"
+        "c += child.eval(xy + float2(+in_blurOffset, -in_blurOffset));"
+        "c += child.eval(xy + float2(-in_blurOffset, -in_blurOffset));"
+        "c += child.eval(xy + float2(-in_blurOffset, +in_blurOffset));"
+        "return half4(c.rgb * 0.2, 1.0);"
         "}");
 
-    auto [blurEffect, error] = SkRuntimeEffect::MakeForShader(blurString);
-    if (!blurEffect) {
-        LOG_ALWAYS_FATAL("RuntimeShader error: %s", error.c_str());
-    }
-    mBlurEffect = std::move(blurEffect);
+KawaseBlurFilter::KawaseBlurFilter(RuntimeEffectManager& effectManager)
+      : BlurFilter(effectManager) {
+    mBlurEffect = effectManager.mKnownEffects[kKawaseBlurEffect];
 }
 
 // Draws the given runtime shader on a GPU (Ganesh) surface and returns the result as an
@@ -70,11 +69,10 @@ static sk_sp<SkImage> makeImage(SkSurface* surface, SkRuntimeShaderBuilder* buil
     paint.setShader(std::move(shader));
     paint.setBlendMode(SkBlendMode::kSrc);
     surface->getCanvas()->drawPaint(paint);
-    return surface->makeImageSnapshot();
+    return surface->makeTemporaryImage();
 }
 
-sk_sp<SkImage> KawaseBlurFilter::generate(GrRecordingContext* context,
-                                          const uint32_t blurRadius,
+sk_sp<SkImage> KawaseBlurFilter::generate(SkiaGpuContext* context, const uint32_t blurRadius,
                                           const sk_sp<SkImage> input,
                                           const SkRect& blurRect) const {
     LOG_ALWAYS_FATAL_IF(context == nullptr, "%s: Needs GPU context", __func__);
@@ -108,12 +106,7 @@ sk_sp<SkImage> KawaseBlurFilter::generate(GrRecordingContext* context,
             input->makeShader(SkTileMode::kClamp, SkTileMode::kClamp, linear, blurMatrix);
     blurBuilder.uniform("in_blurOffset") = radiusByPasses * kInputScale;
 
-    constexpr int kSampleCount = 1;
-    constexpr bool kMipmapped = false;
-    constexpr SkSurfaceProps* kProps = nullptr;
-    sk_sp<SkSurface> surface = SkSurfaces::RenderTarget(context, skgpu::Budgeted::kNo, scaledInfo,
-                                                        kSampleCount, kTopLeft_GrSurfaceOrigin,
-                                                        kProps, kMipmapped, input->isProtected());
+    sk_sp<SkSurface> surface = context->createRenderTarget(scaledInfo);
     LOG_ALWAYS_FATAL_IF(!surface, "%s: Failed to create surface for blurring!", __func__);
     sk_sp<SkImage> tmpBlur = makeImage(surface.get(), &blurBuilder);
 

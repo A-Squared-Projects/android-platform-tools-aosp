@@ -38,6 +38,9 @@ cc_defaults {
         "-Werror",
         "-Wextra",
     ],
+    sanitize: {
+        misc_undefined: ["integer"],
+    },
     target: {
         android: {
             cflags: [
@@ -86,7 +89,6 @@ cc_defaults {
     name: "libbase_defaults",
     defaults: ["libbase_cflags_defaults"],
     srcs: [
-        "abi_compatibility.cpp",
         "chrono_utils.cpp",
         "cmsg.cpp",
         "file.cpp",
@@ -108,12 +110,6 @@ cc_defaults {
     cppflags: ["-Wexit-time-destructors"],
     shared_libs: ["liblog"],
     target: {
-        android: {
-            sanitize: {
-                misc_undefined: ["integer"],
-            },
-
-        },
         linux: {
             srcs: [
                 "errors_unix.cpp",
@@ -173,6 +169,7 @@ cc_library_static {
     whole_static_libs: ["fmtlib_ndk"],
     apex_available: [
         "//apex_available:platform",
+        "com.android.media",
         "com.android.mediaprovider",
     ],
 }
@@ -205,17 +202,13 @@ cc_test {
         "properties_test.cpp",
         "result_test.cpp",
         "scopeguard_test.cpp",
+        "stringify_test.cpp",
         "stringprintf_test.cpp",
         "strings_test.cpp",
         "test_main.cpp",
         "test_utils_test.cpp",
     ],
     target: {
-        android: {
-            sanitize: {
-                misc_undefined: ["integer"],
-            },
-        },
         linux: {
             srcs: ["chrono_utils_test.cpp"],
         },
@@ -257,40 +250,10 @@ cc_test {
     test_suites: ["device_tests"],
 }
 
-// Can be removed when we move to c++20
-cc_test {
-    name: "libbase_result_constraint_test",
-    defaults: ["libbase_cflags_defaults"],
-    host_supported: true,
-    srcs: [
-        "result_test_constraint.cpp",
-    ],
-    target: {
-        android: {
-            sanitize: {
-                misc_undefined: ["integer"],
-            },
-        },
-    },
-    cpp_std: "gnu++20",
-    local_include_dirs: ["."],
-    shared_libs: ["libbase"],
-    static_libs: ["libgmock"],
-    compile_multilib: "both",
-    multilib: {
-        lib32: {
-            suffix: "32",
-        },
-        lib64: {
-            suffix: "64",
-        },
-    },
-    test_suites: ["device-tests"],
-}
-
 cc_benchmark {
     name: "libbase_benchmark",
     defaults: ["libbase_cflags_defaults"],
+    host_supported: true,
 
     srcs: [
         "file_benchmark.cpp",
@@ -323,4 +286,10 @@ cc_fuzz {
         ],
         componentid: 128577,
     },
+}
+
+dirgroup {
+    name: "trusty_dirgroup_system_libbase",
+    dirs: ["."],
+    visibility: ["//trusty/vendor/google/aosp/scripts"],
 }

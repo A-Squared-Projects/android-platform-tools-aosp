@@ -13,21 +13,99 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-export const ViewerEvents = {
-  HierarchyPinnedChange: 'HierarchyPinnedChange',
-  HighlightedChange: 'HighlightedChange',
-  HighlightedPropertyChange: 'HighlightedPropertyChange',
-  HierarchyUserOptionsChange: 'HierarchyUserOptionsChange',
-  HierarchyFilterChange: 'HierarchyFilterChange',
-  SelectedTreeChange: 'SelectedTreeChange',
-  PropertiesUserOptionsChange: 'PropertiesUserOptionsChange',
-  PropertiesFilterChange: 'PropertiesFilterChange',
-  AdditionalPropertySelected: 'AdditionalPropertySelected',
-  RectsDblClick: 'RectsDblClick',
-  MiniRectsDblClick: 'MiniRectsDblClick',
-  TimestampClick: 'TimestampClick',
-};
+
+import {Timestamp} from 'common/time/time';
+import {TraceEntry} from 'trace_api/trace';
+import {TextFilter} from 'viewers/common/text_filter';
+import {ListedSearch} from 'viewers/viewer_search/ui_data';
+import {LogHeader} from './ui_data_log';
+
+export enum ViewerEvents {
+  HighlightedNodeChange = 'HighlightedNodeChange',
+  HighlightedIdChange = 'HighlightedIdChange',
+
+  HierarchyPinnedChange = 'HierarchyPinnedChange',
+  HierarchyUserOptionsChange = 'HierarchyUserOptionsChange',
+  HierarchyFilterChange = 'HierarchyFilterChange',
+  RectShowStateChange = 'RectShowStateChange',
+
+  PropertiesUserOptionsChange = 'PropertiesUserOptionsChange',
+  PropertiesFilterChange = 'PropertiesFilterChange',
+  DispatchPropertiesFilterChange = 'DispatchPropertiesFilterChange',
+  HighlightedPropertyChange = 'HighlightedPropertyChange',
+
+  RectsUserOptionsChange = 'RectsUserOptionsChange',
+  RectsDblClick = 'RectsDblClick',
+  MiniRectsDblClick = 'MiniRectsDblClick',
+  RectTypeButtonClick = 'RectTypeButtonClick',
+
+  OverlayDblClick = 'OverlayDblClick',
+
+  AdditionalPropertySelected = 'AdditionalPropertySelected',
+  PropagatePropertyClick = 'PropagatePropertyClick',
+
+  TimestampClick = 'TimestampClick',
+  LogEntryClick = 'LogEntryClick',
+  LogFilterChange = 'LogFilterChange',
+  LogTextFilterChange = 'LogTextFilterChange',
+  ArrowDownPress = 'ArrowDownPress',
+  ArrowUpPress = 'ArrowUpPress',
+
+  GlobalSearchSectionClick = 'GlobalSearchSectionClick',
+  SearchQueryClick = 'SearchQueryClick',
+  SaveQueryClick = 'SaveQueryClick',
+  DeleteSavedQueryClick = 'DeleteSavedQueryClick',
+  AddQueryClick = 'AddQueryClick',
+  ClearQueryClick = 'ClearQueryClick',
+}
 
 export class RectDblClickDetail {
   constructor(public clickedRectId: string) {}
+}
+
+export class TimestampClickDetail {
+  constructor(
+    public entry?: TraceEntry<object>,
+    public timestamp?: Timestamp,
+  ) {}
+}
+
+export class LogFilterChangeDetail {
+  constructor(
+    public header: LogHeader,
+    public value: string[],
+  ) {}
+}
+
+export class LogTextFilterChangeDetail {
+  constructor(
+    public header: LogHeader,
+    public filter: TextFilter,
+  ) {}
+}
+
+export class SearchQueryClickDetail {
+  constructor(
+    public query: string,
+    public uid: number,
+  ) {}
+}
+
+export class AddQueryClickDetail {
+  constructor(public query: string) {}
+}
+
+export class ClearQueryClickDetail {
+  constructor(public uid: number) {}
+}
+
+export class SaveQueryClickDetail {
+  constructor(
+    public query: string,
+    public name: string,
+  ) {}
+}
+
+export class DeleteSavedQueryClickDetail {
+  constructor(public search: ListedSearch) {}
 }

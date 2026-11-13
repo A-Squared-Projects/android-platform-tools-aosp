@@ -34,6 +34,9 @@ license {
 cc_defaults {
     name: "mdnsresponder_default_cflags",
 
+    // This code has a variety of C23 issues,
+    // and is likely to be removed soon anyway.
+    c_std: "gnu17",
     cflags: [
         "-O2",
         "-g",

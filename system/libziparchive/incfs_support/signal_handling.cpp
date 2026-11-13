@@ -31,11 +31,6 @@ static void enableSignal(int code) {
 
 ScopedJmpBuf::~ScopedJmpBuf() { SignalHandler::mJmpBuf = mPrev; }
 
-SignalHandler& SignalHandler::instance() {
-  static SignalHandler self;
-  return self;
-}
-
 SignalHandler::SignalHandler() {
   const struct sigaction action = {
       .sa_sigaction = &handler,

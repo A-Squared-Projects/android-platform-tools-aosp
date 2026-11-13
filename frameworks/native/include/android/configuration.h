@@ -26,6 +26,7 @@
 #ifndef ANDROID_CONFIGURATION_H
 #define ANDROID_CONFIGURATION_H
 
+#include <stdint.h>
 #include <sys/cdefs.h>
 
 #include <android/asset_manager.h>
@@ -132,10 +133,14 @@ enum {
      * resource qualifier.
      */
     ACONFIGURATION_DENSITY_XXXHIGH = 640,
+    // If adding additional special density values, also update ACONFIGURATION_MAX_SUPPORTED_DENSITY
+    // in CursorInputMapper.
+    // LINT.IfChange
     /** Density: any density. */
     ACONFIGURATION_DENSITY_ANY = 0xfffe,
     /** Density: no density specified. */
     ACONFIGURATION_DENSITY_NONE = 0xffff,
+    // LINT.ThenChange(/services/inputflinger/reader/mapper/CursorInputMapper.cpp)
 
     /** Keyboard: not specified. */
     ACONFIGURATION_KEYBOARD_ANY  = 0x0000,

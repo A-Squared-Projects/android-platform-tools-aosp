@@ -17,6 +17,7 @@ const {merge} = require('webpack-merge');
 const configCommon = require('./webpack.config.common');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyPlugin = require('copy-webpack-plugin');
+const AngularWebpackPlugin = require('@ngtools/webpack').AngularWebpackPlugin;
 
 const configDev = {
   mode: 'development',
@@ -39,7 +40,22 @@ const configDev = {
     __dirname: false,
   },
 
+  devServer: {
+    client: {
+      overlay: {
+        runtimeErrors: (error) => {
+          console.error(error);
+          return false;
+        },
+      },
+    },
+  },
+
   plugins: [
+    new AngularWebpackPlugin({
+      tsconfig: 'tsconfig.dev.json',
+      jitMode: '@angular/compiler',
+    }),
     new HtmlWebpackPlugin({
       template: 'src/index.html',
       inject: 'body',
@@ -48,8 +64,31 @@ const configDev = {
     new CopyPlugin({
       patterns: [
         'deps_build/trace_processor/to_be_served/trace_processor.wasm',
+        'deps_build/trace_processor/to_be_served/trace_processor_memory64.wasm',
         'deps_build/trace_processor/to_be_served/engine_bundle.js',
         {from: 'src/adb/winscope_proxy.py', to: 'winscope_proxy.py'},
+        {from: 'src/logo_light_mode.svg', to: 'logo_light_mode.svg'},
+        {from: 'src/logo_dark_mode.svg', to: 'logo_dark_mode.svg'},
+        {
+          from: 'src/viewers/components/rects/cube_partial_shade.svg',
+          to: 'cube_partial_shade.svg',
+        },
+        {
+          from: 'src/viewers/components/rects/cube_full_shade.svg',
+          to: 'cube_full_shade.svg',
+        },
+        {
+          from: 'src/app/components/trackpad_right_click.svg',
+          to: 'trackpad_right_click.svg',
+        },
+        {
+          from: 'src/app/components/trackpad_vertical_scroll.svg',
+          to: 'trackpad_vertical_scroll.svg',
+        },
+        {
+          from: 'src/app/components/trackpad_horizontal_scroll.svg',
+          to: 'trackpad_horizontal_scroll.svg',
+        },
       ],
     }),
   ],

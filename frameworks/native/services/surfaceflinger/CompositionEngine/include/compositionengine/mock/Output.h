@@ -34,7 +34,8 @@ public:
     virtual ~Output();
 
     MOCK_CONST_METHOD0(isValid, bool());
-    MOCK_CONST_METHOD0(getDisplayId, std::optional<DisplayId>());
+    MOCK_CONST_METHOD0(getDisplayId, ftl::Optional<DisplayId>());
+    MOCK_CONST_METHOD0(getDisplayIdVariant, ftl::Optional<DisplayIdVariant>());
 
     MOCK_METHOD1(setCompositionEnabled, void(bool));
     MOCK_METHOD1(setLayerCachingEnabled, void(bool));
@@ -44,9 +45,10 @@ public:
     MOCK_METHOD1(setDisplaySize, void(const ui::Size&));
     MOCK_CONST_METHOD0(getTransformHint, ui::Transform::RotationFlags());
 
-    MOCK_METHOD(void, setLayerFilter, (ui::LayerFilter));
-    MOCK_METHOD(bool, includesLayer, (ui::LayerFilter), (const));
+    MOCK_METHOD(void, setLayerFilter, (LayerFilter));
+    MOCK_METHOD(bool, includesLayer, (LayerFilter), (const));
     MOCK_METHOD(bool, includesLayer, (const sp<compositionengine::LayerFE>&), (const));
+    MOCK_METHOD(bool, includesLayer, (compositionengine::LayerFE*), (const));
 
     MOCK_METHOD1(setColorTransform, void(const compositionengine::CompositionRefreshArgs&));
     MOCK_METHOD1(setColorProfile, void(const ColorProfile&));
@@ -121,9 +123,10 @@ public:
                                                 base::unique_fd&));
     MOCK_CONST_METHOD0(getSkipColorTransform, bool());
 
-    MOCK_METHOD0(presentFrameAndReleaseLayers, void());
+    MOCK_METHOD(void, presentFrameAndReleaseLayers, (bool flushEvenWhenDisabled));
     MOCK_METHOD1(renderCachedSets, void(const CompositionRefreshArgs&));
     MOCK_METHOD0(presentFrame, compositionengine::Output::FrameFences());
+    MOCK_METHOD(void, executeCommands, ());
 
     MOCK_METHOD3(generateClientCompositionRequests,
                  std::vector<LayerFE::LayerSettings>(bool, ui::Dataspace, std::vector<compositionengine::LayerFE*>&));
@@ -134,8 +137,17 @@ public:
     MOCK_METHOD1(canPredictCompositionStrategy, bool(const CompositionRefreshArgs&));
     MOCK_METHOD1(setPredictCompositionStrategy, void(bool));
     MOCK_METHOD1(setTreat170mAsSrgb, void(bool));
+    MOCK_METHOD(bool, plannerTexturePoolEnabled, (), (const));
+    MOCK_METHOD(void, setHintSessionGpuStart, (TimePoint startTime));
     MOCK_METHOD(void, setHintSessionGpuFence, (std::unique_ptr<FenceTime> && gpuFence));
+    MOCK_METHOD(void, setHintSessionRequiresRenderEngine, (bool requiresRenderEngine));
     MOCK_METHOD(bool, isPowerHintSessionEnabled, ());
+    MOCK_METHOD(bool, isPowerHintSessionGpuReportingEnabled, ());
+    MOCK_METHOD((const aidl::android::hardware::graphics::composer3::OverlayProperties*),
+                getOverlaySupport, ());
+    MOCK_METHOD(bool, hasPictureProcessing, (), (const));
+    MOCK_METHOD(int32_t, getMaxLayerPictureProfiles, (), (const));
+    MOCK_METHOD(void, applyPictureProfile, ());
 };
 
 } // namespace android::compositionengine::mock

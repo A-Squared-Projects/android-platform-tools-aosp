@@ -6,8 +6,9 @@ rust_library {
     name: "liblogger",
     host_supported: true,
     crate_name: "logger",
-    srcs: ["logger.rs"],
+    srcs: ["src/lib.rs"],
     rustlibs: [
+        "libenv_filter",
         "libenv_logger",
         "liblog_rust",
     ],
@@ -18,6 +19,9 @@ rust_library {
             rustlibs: [
                 "libandroid_logger",
             ],
+        },
+        windows: {
+            enabled: true,
         },
     },
     apex_available: [
@@ -31,7 +35,7 @@ rust_library {
 rust_library {
     name: "liblog_event_list",
     crate_name: "log_event_list",
-    srcs: ["liblog_event_list.rs"],
+    srcs: ["src/liblog_event_list.rs"],
     rustlibs: ["liblog_event_list_bindgen"],
     shared_libs: ["liblog"],
     vendor_available: true,
@@ -53,7 +57,7 @@ rust_library {
     name: "libstructured_log",
     crate_name: "structured_log",
     srcs: [
-        "structured_logger.rs",
+        "src/structured_logger.rs",
     ],
     rustlibs: [
         "liblog_event_list",
@@ -79,8 +83,9 @@ rust_defaults {
 rust_test {
     name: "logger_device_unit_tests",
     defaults: ["liblogger_test_defaults"],
-    srcs: ["logger.rs"],
+    srcs: ["src/lib.rs"],
     rustlibs: [
+        "libenv_filter",
         "libenv_logger",
         "libandroid_logger",
     ],
@@ -89,8 +94,11 @@ rust_test {
 rust_test_host {
     name: "logger_host_unit_tests",
     defaults: ["liblogger_test_defaults"],
-    srcs: ["logger.rs"],
-    rustlibs: ["libenv_logger"],
+    srcs: ["src/lib.rs"],
+    rustlibs: [
+        "libenv_filter",
+        "libenv_logger",
+    ],
 }
 
 // The following tests are each run as separate targets because they all require a clean init state.

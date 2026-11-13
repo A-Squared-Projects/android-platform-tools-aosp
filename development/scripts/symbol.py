@@ -105,12 +105,14 @@ class ProcessCache:
     return pipe
 
   def SpawnProcess(self, cmd):
-     return subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, universal_newlines=True)
+    return subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, universal_newlines=True)
 
   def TerminateProcess(self, pipe):
-    pipe.stdin.close()
-    pipe.stdout.close()
-    pipe.terminate()
+    if pipe.poll() is None:
+      # Process is still running.
+      pipe.stdin.close()
+      pipe.stdout.close()
+      pipe.terminate()
     pipe.wait()
 
   def KillAllProcesses(self):
@@ -241,6 +243,88 @@ def SymbolInformationForSet(lib, unique_addrs):
   return result
 
 
+def _OptionalStackRecordField(json_result, field):
+  """Fix up bizarre formatting of llvm-symbolizer output
+
+  Some parts of the FRAME output are output as a string containing a hex
+  integer, or the empty string when it's missing.
+
+  Args:
+    json_result: dictionary containing the Frame response
+    field: name of the field we want to read
+
+  Returns:
+    integer of field value, or None if missing
+  """
+  value = json_result.get(field, "")
+  if isinstance(value, int):
+    # Leaving this here in case someone decides to fix the types of the
+    # symbolizer output, so it's easier to roll out.
+    return value
+  if value != "":
+    return int(value, 16)
+  return None
+
+
+def _GetJSONSymbolizerForLib(lib, args=None):
+  """ Find symbol file for lib, and return a llvm-symbolizer instance for it.
+
+  Args:
+    lib: library (or executable) pathname containing symbols
+    args: (optional) list of arguments to pass to llvm-symbolizer
+
+  Returns:
+    child process, or None if lib not found
+  """
+  if args is None:
+    args = []
+  symbols = SYMBOLS_DIR + lib
+  if not os.path.exists(symbols):
+    symbols = lib
+    if not os.path.exists(symbols):
+      return None
+
+  # Make sure the symbols path is not a directory.
+  if os.path.isdir(symbols):
+    return None
+
+  cmd = [ToolPath("llvm-symbolizer"), "--output-style=JSON"] + args + ["--obj=" + symbols]
+  return _PIPE_ADDR2LINE_CACHE.GetProcess(cmd)
+
+
+def GetStackRecordsForSet(lib, unique_addrs):
+  """Look up stack record information for a set of addresses
+
+  Args:
+    lib: library (or executable) pathname containing symbols
+    unique_addrs: set of integer addresses look up.
+
+  Returns:
+    A list of tuples
+    (addr, function_name, local_name, file_line, frame_offset, size, tag_offset)
+    describing the local variables of the stack frame.
+    frame_offset, size, tag_offset may be None.
+  """
+  child = _GetJSONSymbolizerForLib(lib)
+  if child is None or child.poll() is not None:
+    return None
+  records = []
+  for addr in unique_addrs:
+    child.stdin.write("FRAME 0x%x\n" % addr)
+    child.stdin.flush()
+    json_result = json.loads(child.stdout.readline().strip())
+    for frame in json_result["Frame"]:
+      records.append(
+        (addr,
+        frame["FunctionName"],
+        frame["Name"],
+        frame["DeclFile"] + ":" + str(frame["DeclLine"]),
+        frame.get("FrameOffset"),
+        _OptionalStackRecordField(frame, "Size"),
+        _OptionalStackRecordField(frame, "TagOffset")))
+  return records
+
+
 def CallLlvmSymbolizerForSet(lib, unique_addrs):
   """Look up line and symbol information for a set of addresses.
 
@@ -282,31 +366,22 @@ def CallLlvmSymbolizerForSet(lib, unique_addrs):
     addr_cache = {}
     _SYMBOL_INFORMATION_ADDR2LINE_CACHE[lib] = addr_cache
 
-  symbols = SYMBOLS_DIR + lib
-  if not os.path.exists(symbols):
-    symbols = lib
-    if not os.path.exists(symbols):
-      return None
-
-  # Make sure the symbols path is not a directory.
-  if os.path.isdir(symbols):
+  child = _GetJSONSymbolizerForLib(
+    lib, ["--functions", "--inlines", "--demangle"])
+  if child is None:
     return None
-
-  cmd = [ToolPath("llvm-symbolizer"), "--functions", "--inlines",
-      "--demangle", "--obj=" + symbols, "--output-style=JSON"]
-  child = _PIPE_ADDR2LINE_CACHE.GetProcess(cmd)
-
   for addr in addrs:
     try:
       child.stdin.write("0x%s\n" % addr)
       child.stdin.flush()
       records = []
       json_result = json.loads(child.stdout.readline().strip())
-      for symbol in json_result["Symbol"]:
-        function_name = symbol["FunctionName"]
-        # GNU style location: file_name:line_num
-        location = ("%s:%s" % (symbol["FileName"], symbol["Line"]))
-        records.append((function_name, location))
+      if "Symbol" in json_result:
+        for symbol in json_result["Symbol"]:
+          function_name = symbol["FunctionName"]
+          # GNU style location: file_name:line_num
+          location = ("%s:%s" % (symbol["FileName"], symbol["Line"]))
+          records.append((function_name, location))
     except IOError as e:
       # Remove the / in front of the library name to match other output.
       records = [(None, lib[1:] + "  ***Error: " + str(e))]

@@ -18,34 +18,44 @@
 
 #include <android-base/logging.h>
 
+#include "adb_trace.h"
+
 namespace openscreen {
 
 bool IsLoggingOn(LogLevel level, const char* file) {
     return true;
 }
 
-void LogWithLevel(LogLevel level, const char* file, int line, std::stringstream message) {
+static android::base::LogSeverity OpenScreenLogLevelToAndroid(LogLevel level) {
     switch (level) {
+        case LogLevel::kVerbose:
+            return android::base::VERBOSE;
         case LogLevel::kInfo:
-            LOG(INFO) << message.str();
-            break;
+            return android::base::INFO;
         case LogLevel::kWarning:
-            LOG(WARNING) << message.str();
-            break;
+            return android::base::WARNING;
         case LogLevel::kError:
-            LOG(ERROR) << message.str();
-            break;
+            return android::base::ERROR;
         case LogLevel::kFatal:
-            LOG(FATAL) << message.str();
-            break;
-        default:
-            LOG(VERBOSE) << message.str();
-            break;
+            return android::base::FATAL;
+    }
+}
+
+void LogWithLevel(LogLevel level, const char* file, int line, std::stringstream desc) {
+    auto severity = OpenScreenLogLevelToAndroid(level);
+    std::string msg = std::string("(") + file + ":" + std::to_string(line) + ") " + desc.str();
+
+    // We never ignore a warning or worse (error and fatals).
+    if (severity >= android::base::WARNING) {
+        LOG(severity) << msg;
+    } else {
+        VLOG(MDNS_STACK) << msg;
     }
 }
 
 [[noreturn]] void Break() {
-    std::abort();
+    LOG(FATAL) << "openscreen Break() called";
+    abort(); // LOG(FATAL) isn't [[noreturn]].
 }
 
 }  // namespace openscreen

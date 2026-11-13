@@ -13,75 +13,88 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {CUSTOM_ELEMENTS_SCHEMA} from '@angular/core';
-import {
-  ComponentFixture,
-  ComponentFixtureAutoDetect,
-  TestBed,
-} from '@angular/core/testing';
-import {FormsModule} from '@angular/forms';
-import {MatCheckboxModule} from '@angular/material/checkbox';
-import {MatDividerModule} from '@angular/material/divider';
-import {MatFormFieldModule} from '@angular/material/form-field';
-import {MatIconModule} from '@angular/material/icon';
-import {MatInputModule} from '@angular/material/input';
-import {MatSliderModule} from '@angular/material/slider';
-import {BrowserAnimationsModule} from '@angular/platform-browser/animations';
-import {HierarchyComponent} from 'viewers/components/hierarchy_component';
-import {PropertiesComponent} from 'viewers/components/properties_component';
-import {RectsComponent} from 'viewers/components/rects/rects_component';
+import {Component} from '@angular/core';
+import {DOMTestHelper} from 'test/unit/dom_test_helpers';
+import {AbstractHierarchyViewerComponentTest} from 'viewers/common/abstract_hierarchy_viewer_component_test';
+import {TraceRectType} from 'viewers/components/rects/rect_spec';
+import {SurfaceFlingerPropertyGroupsComponent} from 'viewers/components/surface_flinger_property_groups_component';
+import {UiData} from './ui_data';
 import {ViewerSurfaceFlingerComponent} from './viewer_surface_flinger_component';
 
+@Component({
+  imports: [ViewerSurfaceFlingerComponent],
+  selector: 'host-component',
+  template:
+    '<viewer-surface-flinger [inputData]="inputData"></viewer-surface-flinger>',
+})
+class TestHostComponent {
+  inputData: UiData | undefined;
+}
+
+class ViewerSurfaceFlingerComponentTest extends AbstractHierarchyViewerComponentTest<TestHostComponent> {
+  protected override readonly testRects = true;
+  protected override readonly hierarchyTitle = 'HIERARCHY';
+  protected override readonly propertiesTitle = 'PROTO DUMP';
+  protected override readonly rectsTitle = 'LAYERS';
+
+  protected override executeSpecializedTests() {
+    describe('Specialized tests', () => {
+      let dom: DOMTestHelper<TestHostComponent>;
+      let component: TestHostComponent;
+
+      beforeEach(async () => {
+        [dom, component] = await this.setUpTestEnvironment();
+      });
+
+      it('creates property groups view', () => {
+        expect(dom.find('.property-groups')).toBeDefined();
+      });
+
+      it('handles property groups section collapse/expand', () => {
+        dom.checkSectionCollapseAndExpand('.property-groups', 'PROPERTIES');
+      });
+
+      it('handles rect type change', () => {
+        let uiData = new UiData(undefined);
+        uiData.rectSpec = {
+          type: TraceRectType.LAYERS,
+          icon: '',
+          legend: [],
+        };
+        component.inputData = uiData;
+        dom.detectChanges();
+
+        dom.checkSectionCollapseAndExpand(
+          '.rects-view',
+          TraceRectType.LAYERS.toUpperCase(),
+        );
+
+        uiData = new UiData(undefined);
+        uiData.rectSpec = {
+          type: TraceRectType.INPUT_WINDOWS,
+          icon: '',
+          legend: [],
+        };
+        component.inputData = uiData;
+        dom.detectChanges();
+        dom.checkSectionCollapseAndExpand(
+          '.rects-view',
+          TraceRectType.INPUT_WINDOWS.toUpperCase(),
+        );
+      });
+    });
+  }
+
+  protected async setUpTestEnvironment(): Promise<
+    [DOMTestHelper<TestHostComponent>, TestHostComponent]
+  > {
+    return this.initializeTestEnvironment(TestHostComponent, [
+      ViewerSurfaceFlingerComponent,
+      SurfaceFlingerPropertyGroupsComponent,
+    ]);
+  }
+}
+
 describe('ViewerSurfaceFlingerComponent', () => {
-  let fixture: ComponentFixture<ViewerSurfaceFlingerComponent>;
-  let component: ViewerSurfaceFlingerComponent;
-  let htmlElement: HTMLElement;
-
-  beforeAll(async () => {
-    await TestBed.configureTestingModule({
-      providers: [{provide: ComponentFixtureAutoDetect, useValue: true}],
-      declarations: [
-        ViewerSurfaceFlingerComponent,
-        HierarchyComponent,
-        PropertiesComponent,
-        RectsComponent,
-      ],
-      imports: [
-        MatIconModule,
-        MatDividerModule,
-        MatCheckboxModule,
-        MatSliderModule,
-        MatFormFieldModule,
-        MatInputModule,
-        BrowserAnimationsModule,
-        FormsModule,
-      ],
-      schemas: [CUSTOM_ELEMENTS_SCHEMA],
-    }).compileComponents();
-  });
-
-  beforeEach(() => {
-    fixture = TestBed.createComponent(ViewerSurfaceFlingerComponent);
-    component = fixture.componentInstance;
-    htmlElement = fixture.nativeElement;
-  });
-
-  it('can be created', () => {
-    expect(component).toBeTruthy();
-  });
-
-  it('creates rects view', () => {
-    const rectsView = htmlElement.querySelector('.rects-view');
-    expect(rectsView).toBeTruthy();
-  });
-
-  it('creates hierarchy view', () => {
-    const hierarchyView = htmlElement.querySelector('.hierarchy-view');
-    expect(hierarchyView).toBeTruthy();
-  });
-
-  it('creates properties view', () => {
-    const propertiesView = htmlElement.querySelector('.properties-view');
-    expect(propertiesView).toBeTruthy();
-  });
+  new ViewerSurfaceFlingerComponentTest().execute();
 });

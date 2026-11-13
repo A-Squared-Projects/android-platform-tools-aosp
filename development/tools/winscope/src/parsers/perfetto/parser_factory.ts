@@ -14,60 +14,64 @@
  * limitations under the License.
  */
 
-import {globalConfig} from 'common/global_config';
-import {TimestampFactory} from 'common/timestamp_factory';
-import {UrlUtils} from 'common/url_utils';
+import {ParserTimestampConverter} from 'common/time/timestamp_converter';
+import {Analytics} from 'logging/analytics';
 import {ProgressListener} from 'messaging/progress_listener';
-import {InvalidPerfettoTrace} from 'messaging/winscope_error';
-import {WinscopeErrorListener} from 'messaging/winscope_error_listener';
-import {Parser} from 'trace/parser';
+import {InvalidPerfettoTrace} from 'messaging/user_warnings';
+import {ParserCujs} from 'parsers/events/perfetto/parser_cujs';
+import {ParserKeyEvent} from 'parsers/input/perfetto/parser_key_event';
+import {ParserMotionEvent} from 'parsers/input/perfetto/parser_motion_event';
+import {ParserInputMethodClients} from 'parsers/input_method/perfetto/parser_input_method_clients';
+import {ParserInputMethodManagerService} from 'parsers/input_method/perfetto/parser_input_method_manager_service';
+import {ParserInputMethodService} from 'parsers/input_method/perfetto/parser_input_method_service';
+import {ParserProtolog} from 'parsers/protolog/perfetto/parser_protolog';
+import {ParserSurfaceFlinger} from 'parsers/surface_flinger/perfetto/parser_surface_flinger';
+import {TraceGeometryData} from 'parsers/trace_geometry_data';
+import {ParserTransactions} from 'parsers/transactions/perfetto/parser_transactions';
+import {ParserTransitions} from 'parsers/transitions/perfetto/parser_transitions';
+import {ParserViewCapture} from 'parsers/view_capture/perfetto/parser_view_capture';
+import {ParserWindowManager} from 'parsers/window_manager/perfetto/parser_window_manager';
+import {UserNotifier} from 'services/user_notifier';
 import {TraceFile} from 'trace/trace_file';
-import {
-  initWasm,
-  resetEngineWorker,
-  WasmEngineProxy,
-} from 'trace_processor/wasm_engine_proxy';
-import {ParserProtolog} from './parser_protolog';
-import {ParserSurfaceFlinger} from './parser_surface_flinger';
-import {ParserTransactions} from './parser_transactions';
-import {ParserTransitions} from './parser_transitions';
+import {Parser} from 'trace_api/parser';
+import {TraceProcessor} from 'trace_processor/trace_processor';
+import {TraceProcessorFactory} from 'trace_processor/trace_processor_factory';
+
+interface ProcessedFile {
+  parsers: Array<Parser<object>>;
+  isPerfettoTrace: boolean;
+}
 
 export class ParserFactory {
   private static readonly PARSERS = [
+    ParserInputMethodClients,
+    ParserInputMethodManagerService,
+    ParserInputMethodService,
+    ParserProtolog,
     ParserSurfaceFlinger,
     ParserTransactions,
     ParserTransitions,
-    ParserProtolog,
+    ParserViewCapture,
+    ParserWindowManager,
+    ParserMotionEvent,
+    ParserKeyEvent,
+    ParserCujs,
   ];
   private static readonly CHUNK_SIZE_BYTES = 50 * 1024 * 1024;
-  private static traceProcessor?: WasmEngineProxy;
+  private static readonly NO_ENTRIES_ERROR_REGEX =
+    /Perfetto trace has no \w+(\w|\s)* entries/;
 
-  async createParsers(
+  async processFile(
     traceFile: TraceFile,
-    timestampFactory: TimestampFactory,
+    timestampConverter: ParserTimestampConverter,
     progressListener?: ProgressListener,
-    errorListener?: WinscopeErrorListener,
-  ): Promise<Array<Parser<object>>> {
+  ): Promise<ProcessedFile> {
     const traceProcessor = await this.initializeTraceProcessor();
-    for (
-      let chunkStart = 0;
-      chunkStart < traceFile.file.size;
-      chunkStart += ParserFactory.CHUNK_SIZE_BYTES
-    ) {
-      progressListener?.onProgressUpdate(
-        'Loading perfetto trace...',
-        (chunkStart / traceFile.file.size) * 100,
-      );
-      const chunkEnd = chunkStart + ParserFactory.CHUNK_SIZE_BYTES;
-      const data = await traceFile.file
-        .slice(chunkStart, chunkEnd)
-        .arrayBuffer();
-      try {
-        await traceProcessor.parse(new Uint8Array(data));
-      } catch (e) {
-        console.error('Trace processor failed to parse data:', e);
-        return [];
-      }
+    try {
+      await this.loadFileInTp(traceFile.file, traceProcessor, progressListener);
+    } catch (e) {
+      console.error('Trace processor failed to parse data:', e);
+      return {parsers: [], isPerfettoTrace: false};
     }
     await traceProcessor.notifyEof();
 
@@ -75,55 +79,112 @@ export class ParserFactory {
       'Reading from trace processor...',
       undefined,
     );
+
+    await this.processGeometryTables(traceProcessor);
+    let traceGeometryData: TraceGeometryData | undefined;
+    try {
+      traceGeometryData = new TraceGeometryData(traceProcessor);
+      await traceGeometryData.fetchAndBuild();
+    } catch (e) {
+      traceGeometryData = undefined;
+    }
+
     const parsers: Array<Parser<object>> = [];
-
     let hasFoundParser = false;
-
     const errors: string[] = [];
+
     for (const ParserType of ParserFactory.PARSERS) {
       try {
         const parser = new ParserType(
           traceFile,
           traceProcessor,
-          timestampFactory,
+          timestampConverter,
+          traceGeometryData,
         );
         await parser.parse();
-        parsers.push(parser);
+        if (parser instanceof ParserViewCapture) {
+          parsers.push(...parser.getWindowParsers());
+        } else {
+          parsers.push(parser);
+        }
         hasFoundParser = true;
       } catch (error) {
         // skip current parser
-        errors.push((error as Error).message);
+        const msg = (error as Error).message;
+        if (!ParserFactory.NO_ENTRIES_ERROR_REGEX.test(msg)) {
+          // If TP contains no entries for a particular trace type, the resulting
+          // error message matches ParserFactory.NO_ENTRIES_ERROR_REGEX. These
+          // messages are discarded, and if no parser is found, one representative
+          // message is reported to the user below.
+          errors.push(msg);
+        }
       }
     }
 
     if (!hasFoundParser) {
-      errorListener?.onError(
+      if (errors.length === 0) {
+        errors.push('Perfetto trace has no Winscope trace entries');
+      }
+    }
+    if (errors.length > 0) {
+      UserNotifier.add(
         new InvalidPerfettoTrace(traceFile.getDescriptor(), errors),
       );
     }
-
-    return parsers;
+    return {parsers, isPerfettoTrace: true};
   }
 
-  private async initializeTraceProcessor(): Promise<WasmEngineProxy> {
-    if (!ParserFactory.traceProcessor) {
-      const traceProcessorRootUrl =
-        globalConfig.MODE === 'KARMA_TEST'
-          ? UrlUtils.getRootUrl() +
-            'base/deps_build/trace_processor/to_be_served/'
-          : UrlUtils.getRootUrl();
-      initWasm(traceProcessorRootUrl);
-      const engineId = 'random-id';
-      const enginePort = resetEngineWorker();
-      ParserFactory.traceProcessor = new WasmEngineProxy(engineId, enginePort);
-    }
+  private async initializeTraceProcessor(): Promise<TraceProcessor> {
+    const traceProcessor = TraceProcessorFactory.getSingleInstance();
 
-    await ParserFactory.traceProcessor.resetTraceProcessor({
+    await traceProcessor.resetTraceProcessor({
       cropTrackEvents: false,
       ingestFtraceInRawTable: false,
       analyzeTraceProtoContent: false,
+      ftraceDropUntilAllCpusValid: false,
     });
+    Analytics.Memory.logUsage('tp_initialized');
 
-    return ParserFactory.traceProcessor;
+    return traceProcessor;
+  }
+
+  private async processGeometryTables(traceProcessor: TraceProcessor) {
+    await traceProcessor.query('INCLUDE PERFETTO MODULE android.winscope.rect');
+    await traceProcessor.query(`CREATE PERFETTO TABLE winscope_rect AS
+      SELECT
+        tr.id as trace_rect_id,
+        tr.group_id,
+        tr.depth,
+        tr.is_spy,
+        tr.is_visible,
+        tr.opacity,
+        tr.transform_id,
+        rr.x,
+        rr.y,
+        rr.w,
+        rr.h
+      FROM android_winscope_trace_rect AS tr
+      INNER JOIN android_winscope_rect AS rr
+        ON tr.rect_id = rr.id`);
+  }
+
+  private async loadFileInTp(
+    file: File,
+    traceProcessor: TraceProcessor,
+    progressListener?: ProgressListener,
+  ) {
+    for (
+      let chunkStart = 0;
+      chunkStart < file.size;
+      chunkStart += ParserFactory.CHUNK_SIZE_BYTES
+    ) {
+      progressListener?.onProgressUpdate(
+        'Loading perfetto trace...',
+        (chunkStart / file.size) * 100,
+      );
+      const chunkEnd = chunkStart + ParserFactory.CHUNK_SIZE_BYTES;
+      const data = await file.slice(chunkStart, chunkEnd).arrayBuffer();
+      await traceProcessor.parse(new Uint8Array(data));
+    }
   }
 }

@@ -229,7 +229,8 @@ int main(int argc, char **argv)
 		LogMsg("ExitCallback: udsserver_exit failed");
  
  #if MDNS_DEBUGMSGS > 0
-	printf("mDNSResponder exiting normally with %ld\n", err);
+ 	//ANDROID customization.
+	printf("mDNSResponder exiting normally with %d\n", err);
  #endif
  
 	return err;

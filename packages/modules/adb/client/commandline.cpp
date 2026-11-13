@@ -36,6 +36,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+using namespace std::string_literals;
 
 #include <android-base/file.h>
 #include <android-base/logging.h>
@@ -43,15 +44,15 @@
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
 
-#if !defined(_WIN32)
-#include <sys/ioctl.h>
-#include <termios.h>
-#else
+#include "client/host_services.h"
+
+#if defined(_WIN32)
 #define _POSIX
 #include <signal.h>
+#else
+#include <sys/ioctl.h>
+#include <termios.h>
 #endif
-
-#include <google/protobuf/text_format.h>
 
 #include "adb.h"
 #include "adb_auth.h"
@@ -81,6 +82,8 @@ static std::string product_file(const std::string& file) {
     }
     return std::string{ANDROID_PRODUCT_OUT} + OS_PATH_SEPARATOR_STR + file;
 }
+
+static constexpr int kDefaultServerPort = 5037;
 
 static void help() {
     fprintf(stdout, "%s\n", adb_version().c_str());
@@ -302,15 +305,15 @@ int read_and_dump_protocol(borrowed_fd fd, StandardStreamsCallbackInterface* cal
     }
     while (protocol->Read()) {
       if (protocol->id() == ShellProtocol::kIdStdout) {
-        if (!callback->OnStdout(protocol->data(), protocol->data_length())) {
-          exit_code = SIGPIPE + 128;
-          break;
-        }
+          if (!callback->OnStdoutReceived(protocol->data(), protocol->data_length())) {
+              exit_code = SIGPIPE + 128;
+              break;
+          }
       } else if (protocol->id() == ShellProtocol::kIdStderr) {
-        if (!callback->OnStderr(protocol->data(), protocol->data_length())) {
-          exit_code = SIGPIPE + 128;
-          break;
-        }
+          if (!callback->OnStderrReceived(protocol->data(), protocol->data_length())) {
+              exit_code = SIGPIPE + 128;
+              break;
+          }
       } else if (protocol->id() == ShellProtocol::kIdExit) {
         // data() returns a char* which doesn't have defined signedness.
         // Cast to uint8_t to prevent 255 from being sign extended to INT_MIN,
@@ -338,8 +341,8 @@ int read_and_dump(borrowed_fd fd, bool use_shell_protocol,
         if (length <= 0) {
           break;
         }
-        if (!callback->OnStdout(buffer_ptr, length)) {
-          break;
+        if (!callback->OnStdoutReceived(buffer_ptr, length)) {
+            break;
         }
       }
     }
@@ -807,7 +810,7 @@ static int adb_abb(int argc, const char** argv) {
     constexpr bool empty_command = false;
 
     std::vector<const char*> args(argv + optind, argv + argc);
-    std::string service_string = "abb:" + android::base::Join(args, ABB_ARG_DELIMETER);
+    std::string service_string = "abb:" + android::base::Join(args, ABB_ARG_DELIMITER);
 
     D("abb -e 0x%x [%*.s]\n", escape_char, static_cast<int>(service_string.size()),
       service_string.data());
@@ -1150,7 +1153,7 @@ static int logcat(int argc, const char** argv) {
     char* log_tags = getenv("ANDROID_LOG_TAGS");
     std::string quoted = escape_arg(log_tags == nullptr ? "" : log_tags);
 
-    std::string cmd = "export ANDROID_LOG_TAGS=\"" + quoted + "\"; exec logcat";
+    std::string cmd = "export ANDROID_LOG_TAGS=" + quoted + "; exec logcat";
 
     if (!strcmp(argv[0], "longcat")) {
         cmd += " -v long";
@@ -1377,13 +1380,13 @@ class AdbServerStateStreamsCallback : public DefaultStandardStreamsCallback {
   public:
     AdbServerStateStreamsCallback() : DefaultStandardStreamsCallback(nullptr, nullptr) {}
 
-    bool OnStdout(const char* buffer, size_t length) override {
-        return OnStream(&output_, nullptr, buffer, length, false);
+    bool OnStdoutReceived(const char* buffer, size_t length) override {
+        return SendTo(&output_, nullptr, buffer, length, false);
     }
 
     int Done(int status) {
         if (output_.size() < 4) {
-            return OnStream(nullptr, stdout, output_.data(), output_.length(), false);
+            return SendTo(nullptr, stdout, output_.data(), output_.length(), false);
         }
 
         // Skip the 4-hex prefix
@@ -1395,41 +1398,12 @@ class AdbServerStateStreamsCallback : public DefaultStandardStreamsCallback {
         std::string string_proto;
         google::protobuf::TextFormat::PrintToString(binary_proto, &string_proto);
 
-        return OnStream(nullptr, stdout, string_proto.data(), string_proto.length(), false);
+        return SendTo(nullptr, stdout, string_proto.data(), string_proto.length(), false);
     }
 
   private:
     std::string output_;
     DISALLOW_COPY_AND_ASSIGN(AdbServerStateStreamsCallback);
-};
-
-// A class that prints out human readable form of the protobuf message for "track-app" service
-// (received in binary format).
-class TrackAppStreamsCallback : public DefaultStandardStreamsCallback {
-  public:
-    TrackAppStreamsCallback() : DefaultStandardStreamsCallback(nullptr, nullptr) {}
-
-    // Assume the buffer contains at least 4 bytes of valid data.
-    bool OnStdout(const char* buffer, size_t length) override {
-        if (length < 4) return true;  // Unexpected length received. Do nothing.
-
-        adb::proto::AppProcesses binary_proto;
-        // The first 4 bytes are the length of remaining content in hexadecimal format.
-        binary_proto.ParseFromString(std::string(buffer + 4, length - 4));
-        char summary[24];  // The following string includes digits and 16 fixed characters.
-        int written = snprintf(summary, sizeof(summary), "Process count: %d\n",
-                               binary_proto.process_size());
-        if (!OnStream(nullptr, stdout, summary, written, false)) {
-          return false;
-        }
-
-        std::string string_proto;
-        google::protobuf::TextFormat::PrintToString(binary_proto, &string_proto);
-        return OnStream(nullptr, stdout, string_proto.data(), string_proto.length(), false);
-    }
-
-  private:
-    DISALLOW_COPY_AND_ASSIGN(TrackAppStreamsCallback);
 };
 
 static int adb_connect_command_bidirectional(const std::string& command) {
@@ -1671,7 +1645,7 @@ int adb_commandline(int argc, const char** argv) {
         // tcp:1234 and tcp:localhost:1234 are different with -a, so don't default to localhost
         server_host_str = server_host_str ? server_host_str : getenv("ANDROID_ADB_SERVER_ADDRESS");
 
-        int server_port = DEFAULT_ADB_PORT;
+        int server_port = kDefaultServerPort;
         server_port_str = server_port_str ? server_port_str : getenv("ANDROID_ADB_SERVER_PORT");
         if (server_port_str && strlen(server_port_str) > 0) {
             if (!android::base::ParseInt(server_port_str, &server_port, 1, 65535)) {
@@ -1973,19 +1947,34 @@ int adb_commandline(int argc, const char** argv) {
             error_exit("failed to check server version: %s", error.c_str());
         }
 
-        std::string query = "host:mdns:";
         if (!strcmp(argv[0], "check")) {
-            if (argc != 1) error_exit("mdns %s doesn't take any arguments", argv[0]);
-            query += "check";
+            if (argc != 1) {
+                error_exit("mdns %s doesn't take any arguments", argv[0]);
+            }
+            return adb_query_command("host:mdns:check");
         } else if (!strcmp(argv[0], "services")) {
-            if (argc != 1) error_exit("mdns %s doesn't take any arguments", argv[0]);
-            query += "services";
+            if (argc != 1) {
+                error_exit("mdns %s doesn't take any arguments", argv[0]);
+            }
             printf("List of discovered mdns services\n");
+            return adb_query_command("host:mdns:services");
+        } else if (!strcmp(argv[0], "track-services")) {
+            if (argc != 2) {
+                error_exit("mdns %s take two arguments", argv[0]);
+            }
+
+            std::string service = "host:"s + HostServices::kTrackMdnsServices;
+            if (!strcmp(argv[1], "--proto-binary")) {
+                return adb_connect_command(service);
+            } else if (!strcmp(argv[1], "--proto-text")) {
+                ProtoBinaryToText<adb::proto::MdnsServices> callback("\nServices:\n");
+                return adb_connect_command(service, nullptr, &callback);
+            } else {
+                error_exit("unknown mdns command [%s] flag '%s'", argv[0], argv[1]);
+            }
         } else {
             error_exit("unknown mdns command [%s]", argv[0]);
         }
-
-        return adb_query_command(query);
     }
     /* do_sync_*() commands */
     else if (!strcmp(argv[0], "ls")) {
@@ -2076,7 +2065,7 @@ int adb_commandline(int argc, const char** argv) {
                                             "system", "system_ext", "vendor"};
         bool found = false;
         for (const auto& partition : partitions) {
-            if (src == "all" || src == partition) {
+            if (src == "all" || src == partition || (src == "/" + partition)) {
                 std::string src_dir{product_file(partition)};
                 if (!directory_exists(src_dir)) continue;
                 found = true;
@@ -2125,7 +2114,7 @@ int adb_commandline(int argc, const char** argv) {
         if (!CanUseFeature(*features, kFeatureTrackApp)) {
             error_exit("track-app is not supported by the device");
         }
-        TrackAppStreamsCallback callback;
+        ProtoBinaryToText<adb::proto::AppProcesses> callback("\nProcesses:\n");
         if (argc == 1) {
             return adb_connect_command("track-app", nullptr, &callback);
         } else if (argc == 2) {
@@ -2196,11 +2185,11 @@ int adb_commandline(int argc, const char** argv) {
             }
         }
     } else if (!strcmp(argv[0], "inc-server")) {
-        if (argc < 4) {
+        if (argc < 3) {
 #ifdef _WIN32
-            error_exit("usage: adb inc-server CONNECTION_HANDLE OUTPUT_HANDLE FILE1 FILE2 ...");
+            error_exit("usage: adb inc-server CONNECTION_HANDLE OUTPUT_HANDLE [FILE1 FILE2 ...]");
 #else
-            error_exit("usage: adb inc-server CONNECTION_FD OUTPUT_FD FILE1 FILE2 ...");
+            error_exit("usage: adb inc-server CONNECTION_FD OUTPUT_FD [FILE1 FILE2 ...]");
 #endif
         }
         int connection_fd = atoi(argv[1]);

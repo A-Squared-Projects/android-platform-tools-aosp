@@ -11,6 +11,7 @@ package {
 cc_benchmark {
     name: "inputflinger_benchmarks",
     srcs: [
+        ":inputdispatcher_common_test_sources",
         "InputDispatcher_benchmarks.cpp",
     ],
     defaults: [
@@ -23,14 +24,16 @@ cc_benchmark {
         "libbinder_ndk",
         "libcrypto",
         "libcutils",
-        "libinputflinger_base",
+        "libinputflinger",
         "libinputreporter",
         "liblog",
-        "libstatslog",
+        "libstatslog_inputflinger",
         "libutils",
     ],
     static_libs: [
         "libattestation",
+        "libgmock",
+        "libgtest",
         "libinputdispatcher",
     ],
 }

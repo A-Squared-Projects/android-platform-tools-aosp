@@ -16,6 +16,8 @@
 //!
 //! These constants must match the values used to create the images in Android.bp.
 
+use core::ffi::CStr;
+
 pub const TEST_IMAGE_PATH: &str = "test_image.img";
 pub const TEST_IMAGE_SIZE: usize = 16 * 1024;
 pub const TEST_IMAGE_SALT_HEX: &str = "1000";
@@ -41,10 +43,12 @@ pub const TEST_PARTITION_PERSISTENT_DIGEST_NAME: &str = "test_part_persistent_di
 pub const TEST_PARTITION_HASH_TREE_NAME: &str = "test_part_hashtree";
 pub const TEST_VBMETA_ROLLBACK_LOCATION: usize = 0; // Default value, we don't explicitly set this.
 pub const TEST_PROPERTY_KEY: &str = "test_prop_key";
+pub const TEST_PROPERTY_KEY_CSTR: &CStr = c"test_prop_key";
 pub const TEST_PROPERTY_VALUE: &[u8] = b"test_prop_value";
 pub const TEST_KERNEL_COMMANDLINE: &str = "test_cmdline_key=test_cmdline_value";
 pub const TEST_CHAINED_PARTITION_ROLLBACK_LOCATION: usize = 4;
 pub const TEST_CHAINED_PARTITION_ROLLBACK_INDEX: u64 = 7;
+pub const TEST_HASHTREE_ALGORITHM: &str = "sha1";
 
 // Expected values determined by examining the vbmeta image with `avbtool info_image`.
 // Images can be found in <out>/soong/.intermediates/external/avb/rust/.
@@ -52,7 +56,6 @@ pub const TEST_IMAGE_DIGEST_HEX: &str =
     "89e6fd3142917b8c34ac7d30897a907a71bd3bf5d9b39d00bf938b41dcf3b84f";
 pub const TEST_IMAGE_HASH_ALGO: &str = "sha256";
 pub const TEST_HASHTREE_DIGEST_HEX: &str = "5373fc4ee3dd898325eeeffb5a1dbb041900c5f1";
-pub const TEST_HASHTREE_ALGORITHM: &str = "sha1";
 
 // Certificate test data.
 pub const TEST_CERT_PERMANENT_ATTRIBUTES_PATH: &str = "data/cert_permanent_attributes.bin";

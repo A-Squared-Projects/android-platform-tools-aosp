@@ -18,17 +18,20 @@
 
 #include "incremental_utils.h"
 
+#include <algorithm>
+#include <array>
+#include <cstring>
+#include <format>
+#include <numeric>
+#include <optional>
+#include <unordered_set>
+#include <utility>
+
 #include <android-base/endian.h>
 #include <android-base/mapped_file.h>
 #include <android-base/strings.h>
 #include <ziparchive/zip_archive.h>
 #include <ziparchive/zip_writer.h>
-
-#include <algorithm>
-#include <array>
-#include <cinttypes>
-#include <numeric>
-#include <unordered_set>
 
 #include "adb_io.h"
 #include "adb_trace.h"
@@ -64,30 +67,44 @@ Size verity_tree_size_for_file(Size fileSize) {
     return verity_tree_blocks_for_file(fileSize) * kBlockSize;
 }
 
-static inline int32_t read_int32(borrowed_fd fd) {
+static inline std::optional<int32_t> read_int32(borrowed_fd fd, std::string* error) {
     int32_t result;
-    return ReadFdExactly(fd, &result, sizeof(result)) ? result : -1;
+    if (!ReadFdExactly(fd, &result, sizeof(result))) {
+        *error =
+                std::format("Failed to read int: {}", errno == 0 ? "End of file" : strerror(errno));
+        return {};
+    }
+    return result;
 }
 
-static inline int32_t skip_int(borrowed_fd fd) {
-    return adb_lseek(fd, 4, SEEK_CUR);
-}
-
-static inline void append_int(borrowed_fd fd, std::vector<char>* bytes) {
-    int32_t le_val = read_int32(fd);
-    auto old_size = bytes->size();
-    bytes->resize(old_size + sizeof(le_val));
-    memcpy(bytes->data() + old_size, &le_val, sizeof(le_val));
-}
-
-static inline bool append_bytes_with_size(borrowed_fd fd, std::vector<char>* bytes,
-                                          int* bytes_left) {
-    int32_t le_size = read_int32(fd);
-    if (le_size < 0) {
+static inline bool skip_int(borrowed_fd fd, std::string* error) {
+    if (adb_lseek(fd, 4, SEEK_CUR) < 0) {
+        *error = std::format("Failed to seek: {}", strerror(errno));
         return false;
     }
-    int32_t size = int32_t(le32toh(le_size));
+    return true;
+}
+
+static inline bool append_int(borrowed_fd fd, std::vector<char>* bytes, std::string* error) {
+    std::optional<int32_t> le_val = read_int32(fd, error);
+    if (!le_val.has_value()) {
+        return false;
+    }
+    auto old_size = bytes->size();
+    bytes->resize(old_size + sizeof(*le_val));
+    memcpy(bytes->data() + old_size, &le_val.value(), sizeof(*le_val));
+    return true;
+}
+
+static inline bool append_bytes_with_size(borrowed_fd fd, std::vector<char>* bytes, int* bytes_left,
+                                          std::string* error) {
+    std::optional<int32_t> le_size = read_int32(fd, error);
+    if (!le_size.has_value()) {
+        return false;
+    }
+    int32_t size = int32_t(le32toh(*le_size));
     if (size < 0 || size > *bytes_left) {
+        *error = std::format("Invalid size {}", size);
         return false;
     }
     if (size == 0) {
@@ -95,42 +112,75 @@ static inline bool append_bytes_with_size(borrowed_fd fd, std::vector<char>* byt
     }
     *bytes_left -= size;
     auto old_size = bytes->size();
-    bytes->resize(old_size + sizeof(le_size) + size);
-    memcpy(bytes->data() + old_size, &le_size, sizeof(le_size));
-    ReadFdExactly(fd, bytes->data() + old_size + sizeof(le_size), size);
+    bytes->resize(old_size + sizeof(*le_size) + size);
+    memcpy(bytes->data() + old_size, &le_size.value(), sizeof(*le_size));
+    if (!ReadFdExactly(fd, bytes->data() + old_size + sizeof(*le_size), size)) {
+        *error = std::format("Failed to read data: {}",
+                             errno == 0 ? "End of file" : strerror(errno));
+        return false;
+    }
     return true;
 }
 
-static inline int32_t skip_bytes_with_size(borrowed_fd fd) {
-    int32_t le_size = read_int32(fd);
-    if (le_size < 0) {
-        return -1;
+static inline bool skip_bytes_with_size(borrowed_fd fd, std::string* error) {
+    std::optional<int32_t> le_size = read_int32(fd, error);
+    if (!le_size.has_value()) {
+        return false;
     }
-    int32_t size = int32_t(le32toh(le_size));
-    return (int32_t)adb_lseek(fd, size, SEEK_CUR);
+    int32_t size = int32_t(le32toh(*le_size));
+    if (size < 0) {
+        *error = std::format("Invalid size {}", size);
+        return false;
+    }
+    if (adb_lseek(fd, size, SEEK_CUR) < 0) {
+        *error = "Failed to seek";
+        return false;
+    }
+    return true;
 }
 
-std::pair<std::vector<char>, int32_t> read_id_sig_headers(borrowed_fd fd) {
+std::optional<std::pair<std::vector<char>, int32_t>> read_id_sig_headers(borrowed_fd fd,
+                                                                         std::string* error) {
     std::vector<char> signature;
-    append_int(fd, &signature);  // version
-    int max_size = kMaxSignatureSize - sizeof(int32_t);
-    // hashingInfo and signingInfo
-    if (!append_bytes_with_size(fd, &signature, &max_size) ||
-        !append_bytes_with_size(fd, &signature, &max_size)) {
+    if (!append_int(fd, &signature, error)) {  // version
         return {};
     }
-    auto le_tree_size = read_int32(fd);
-    auto tree_size = int32_t(le32toh(le_tree_size));  // size of the verity tree
-    return {std::move(signature), tree_size};
+    int max_size = kMaxSignatureSize - sizeof(int32_t);
+    if (!append_bytes_with_size(fd, &signature, &max_size, error)) {  // hashingInfo
+        return {};
+    }
+    if (!append_bytes_with_size(fd, &signature, &max_size, error)) {  // signingInfo
+        return {};
+    }
+    std::optional<int32_t> le_tree_size = read_int32(fd, error);
+    if (!le_tree_size.has_value()) {
+        return {};
+    }
+    auto tree_size = int32_t(le32toh(*le_tree_size));  // size of the verity tree
+    return std::make_pair(std::move(signature), tree_size);
 }
 
-std::pair<off64_t, ssize_t> skip_id_sig_headers(borrowed_fd fd) {
-    skip_int(fd);                            // version
-    skip_bytes_with_size(fd);                // hashingInfo
-    auto offset = skip_bytes_with_size(fd);  // signingInfo
-    auto le_tree_size = read_int32(fd);
-    auto tree_size = int32_t(le32toh(le_tree_size));  // size of the verity tree
-    return {offset + sizeof(le_tree_size), tree_size};
+std::optional<std::pair<off64_t, ssize_t>> skip_id_sig_headers(borrowed_fd fd, std::string* error) {
+    if (!skip_int(fd, error)) {  // version
+        return {};
+    }
+    if (!skip_bytes_with_size(fd, error)) {  // hashingInfo
+        return {};
+    }
+    if (!skip_bytes_with_size(fd, error)) {  // signingInfo
+        return {};
+    }
+    std::optional<int32_t> le_tree_size = read_int32(fd, error);
+    if (!le_tree_size.has_value()) {
+        return {};
+    }
+    int32_t tree_size = int32_t(le32toh(*le_tree_size));  // size of the verity tree
+    off_t offset = adb_lseek(fd, 0, SEEK_CUR);
+    if (offset < 0) {
+        *error = std::format("Failed to get offset: {}", strerror(errno));
+        return {};
+    }
+    return std::make_pair(offset, tree_size);
 }
 
 template <class T>
@@ -295,17 +345,16 @@ static std::vector<int32_t> ZipPriorityBlocks(off64_t signerBlockOffset, Size fi
     return zip;
 }
 
-static std::pair<ZipArchiveHandle, std::unique_ptr<android::base::MappedFile>> openZipArchive(
+static std::pair<ZipArchiveHandle, std::optional<android::base::MappedFile>> openZipArchive(
         borrowed_fd fd, Size fileSize) {
 #ifndef __LP64__
     if (fileSize >= INT_MAX) {
-        return {openZipArchiveFd(fd), nullptr};
+        return {openZipArchiveFd(fd), std::nullopt};
     }
 #endif
-    auto mapping =
-            android::base::MappedFile::FromOsHandle(adb_get_os_handle(fd), 0, fileSize, PROT_READ);
+    auto mapping = android::base::MappedFile::Create(adb_get_os_handle(fd), 0, fileSize, PROT_READ);
     if (!mapping) {
-        D("%s failed at FromOsHandle: %d", __func__, errno);
+        D("%s failed at MappedFile::Create: %d", __func__, errno);
         return {};
     }
     ZipArchiveHandle zip;

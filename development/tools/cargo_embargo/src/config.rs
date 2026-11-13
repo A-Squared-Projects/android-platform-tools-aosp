@@ -83,7 +83,7 @@ impl Config {
     /// Parses an instance of this config from the given JSON file.
     pub fn from_file(filename: &Path) -> Result<Self> {
         let json_string = std::fs::read_to_string(filename)
-            .with_context(|| format!("failed to read file: {:?}", filename))?;
+            .with_context(|| format!("failed to read file: {filename:?}"))?;
         Self::from_json_str(&json_string)
     }
 
@@ -275,30 +275,33 @@ pub struct VariantConfig {
     /// Value to use for every generated module's `defaults` field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub global_defaults: Option<String>,
-    /// Value to use for every generated library module's `apex_available` field.
+    /// Value to use for every generated non-test module's `apex_available` field.
     #[serde(default = "default_apex_available", skip_serializing_if = "is_default_apex_available")]
     pub apex_available: Vec<String>,
-    /// Value to use for every generated library module's `native_bridge_supported` field.
+    /// Value to use for every generated non-test module's `native_bridge_supported` field.
     #[serde(default, skip_serializing_if = "is_false")]
     pub native_bridge_supported: bool,
-    /// Value to use for every generated library module's `product_available` field.
+    /// Value to use for every generated non-test module's `product_available` field.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub product_available: bool,
-    /// Value to use for every generated library module's `ramdisk_available` field.
+    /// Value to use for every generated non-test module's `ramdisk_available` field.
     #[serde(default, skip_serializing_if = "is_false")]
     pub ramdisk_available: bool,
-    /// Value to use for every generated library module's `recovery_available` field.
+    /// Value to use for every generated non-test module's `recovery_available` field.
     #[serde(default, skip_serializing_if = "is_false")]
     pub recovery_available: bool,
-    /// Value to use for every generated library module's `vendor_available` field.
+    /// Value to use for every generated non-test module's `vendor_available` field.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub vendor_available: bool,
-    /// Value to use for every generated library module's `vendor_ramdisk_available` field.
+    /// Value to use for every generated non-test module's `vendor_ramdisk_available` field.
     #[serde(default, skip_serializing_if = "is_false")]
     pub vendor_ramdisk_available: bool,
     /// Minimum SDK version.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_sdk_version: Option<String>,
+    /// SDK version.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sdk_version: Option<String>,
     /// Map of renames for modules. For example, if a "libfoo" would be generated and there is an
     /// entry ("libfoo", "libbar"), the generated module will be called "libbar" instead.
     ///
@@ -325,10 +328,10 @@ pub struct VariantConfig {
     /// from the cargo metadata.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub run_cargo: bool,
-    /// Generate an Android.bp build file for this variant if true.
+    /// Generate Android build rules at Android.bp for this variant if true.
     #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub generate_androidbp: bool,
-    /// Generate a rules.mk build file for this variant if true.
+    /// Generate Trusty build rules at rules.mk and Android.bp if true.
     #[serde(default, skip_serializing_if = "is_false")]
     pub generate_rulesmk: bool,
 }
@@ -349,6 +352,7 @@ impl Default for VariantConfig {
             vendor_available: true,
             vendor_ramdisk_available: false,
             min_sdk_version: None,
+            sdk_version: None,
             module_name_overrides: Default::default(),
             package: Default::default(),
             cfg_blocklist: Default::default(),
@@ -376,11 +380,16 @@ pub struct PackageConfig {
     /// Patch file to apply after rules.mk is generated.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rulesmk_patch: Option<PathBuf>,
+    /// `license_text` to use for `license` module, overriding the `license_file` given by the
+    /// package or the default "LICENSE".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub license_text: Option<Vec<String>>,
 }
 
 impl PackageConfig {
     /// Names of all the fields on `PackageConfig`.
-    const FIELD_NAMES: [&'static str; 3] = ["add_toplevel_block", "patch", "rulesmk_patch"];
+    const FIELD_NAMES: [&'static str; 4] =
+        ["add_toplevel_block", "license_text", "patch", "rulesmk_patch"];
 }
 
 /// Options that apply to everything in a package (i.e. everything associated with a particular
@@ -435,6 +444,12 @@ pub struct PackageVariantConfig {
     /// Directories with headers to export for C usage.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exported_c_header_dir: Vec<PathBuf>,
+    /// Additional sources that should be listed as inputs in `srcs`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_srcs: Vec<PathBuf>,
+    /// Add a `target: { windows: { enabled: true } }` property to modules.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub target_windows: bool,
 }
 
 impl Default for PackageVariantConfig {
@@ -454,6 +469,8 @@ impl Default for PackageVariantConfig {
             test_data: Default::default(),
             whole_static_libs: Default::default(),
             exported_c_header_dir: Default::default(),
+            extra_srcs: Default::default(),
+            target_windows: false,
         }
     }
 }
@@ -474,7 +491,8 @@ mod tests {
                 "another": {
                     "add_toplevel_block": "block.bp",
                     "device_supported": false,
-                    "force_rlib": true
+                    "force_rlib": true,
+                    "target_windows": true
                 },
                 "rulesmk": {
                     "rulesmk_patch": "patches/rules.mk.patch"
@@ -520,6 +538,7 @@ mod tests {
                                 PackageVariantConfig {
                                     device_supported: false,
                                     force_rlib: true,
+                                    target_windows: true,
                                     ..Default::default()
                                 },
                             ),
@@ -543,6 +562,7 @@ mod tests {
                                     alloc: false,
                                     device_supported: false,
                                     force_rlib: false,
+                                    target_windows: true,
                                     ..Default::default()
                                 },
                             ),
@@ -602,6 +622,7 @@ mod tests {
                         "argh".to_string(),
                         PackageVariantConfig {
                             dep_blocklist: vec!["bad_dep".to_string()],
+                            target_windows: true,
                             ..Default::default()
                         },
                     )]
@@ -622,6 +643,7 @@ mod tests {
                         PackageVariantConfig {
                             dep_blocklist: vec!["bad_dep".to_string()],
                             no_std: true,
+                            target_windows: true,
                             ..Default::default()
                         },
                     )]
@@ -647,7 +669,8 @@ mod tests {
       "add_toplevel_block": "block.bp",
       "dep_blocklist": [
         "bad_dep"
-      ]
+      ],
+      "target_windows": true
     }
   },
   "tests": true,

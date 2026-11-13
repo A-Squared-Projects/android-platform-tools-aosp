@@ -32,7 +32,7 @@ AidlKeyEvent notifyKeyArgsToKeyEvent(const NotifyKeyArgs& args) {
     event.eventTime = args.eventTime;
     event.deviceId = args.deviceId;
     event.source = static_cast<Source>(args.source);
-    event.displayId = args.displayId;
+    event.displayId = args.displayId.val();
     event.policyFlags = args.policyFlags;
     event.action = static_cast<KeyEventAction>(args.action);
     event.flags = args.flags;
@@ -45,9 +45,9 @@ AidlKeyEvent notifyKeyArgsToKeyEvent(const NotifyKeyArgs& args) {
 }
 
 InputFilter::InputFilter(InputListenerInterface& listener, IInputFlingerRust& rust,
-                         InputFilterPolicyInterface& policy)
+                         InputFilterPolicyInterface& policy, JNIEnv* env)
       : mNextListener(listener),
-        mCallbacks(ndk::SharedRefBase::make<InputFilterCallbacks>(listener, policy)),
+        mCallbacks(ndk::SharedRefBase::make<InputFilterCallbacks>(listener, policy, env)),
         mPolicy(policy) {
     LOG_ALWAYS_FATAL_IF(!rust.createInputFilter(mCallbacks, &mInputFilterRust).isOk());
     LOG_ALWAYS_FATAL_IF(!mInputFilterRust);
@@ -56,18 +56,16 @@ InputFilter::InputFilter(InputListenerInterface& listener, IInputFlingerRust& ru
 void InputFilter::notifyInputDevicesChanged(const NotifyInputDevicesChangedArgs& args) {
     mDeviceInfos.clear();
     mDeviceInfos.reserve(args.inputDeviceInfos.size());
-    for (auto info : args.inputDeviceInfos) {
+    for (const auto& info : args.inputDeviceInfos) {
         AidlDeviceInfo& aidlInfo = mDeviceInfos.emplace_back();
         aidlInfo.deviceId = info.getId();
         aidlInfo.external = info.isExternal();
+        aidlInfo.keyboardType = info.getKeyboardType();
+        aidlInfo.isVirtual = info.getId() < 0 || info.isVirtualDevice();
     }
     if (isFilterEnabled()) {
         LOG_ALWAYS_FATAL_IF(!mInputFilterRust->notifyInputDevicesChanged(mDeviceInfos).isOk());
     }
-    mNextListener.notify(args);
-}
-
-void InputFilter::notifyConfigurationChanged(const NotifyConfigurationChangedArgs& args) {
     mNextListener.notify(args);
 }
 
@@ -149,6 +147,12 @@ void InputFilter::notifyConfigurationChangedLocked() {
 
 void InputFilter::dump(std::string& dump) {
     dump += "InputFilter:\n";
+    if (isFilterEnabled()) {
+        std::string result;
+        LOG_ALWAYS_FATAL_IF(!mInputFilterRust->dumpFilter(&result).isOk());
+        dump += result;
+        dump += "\n";
+    }
 }
 
 } // namespace android

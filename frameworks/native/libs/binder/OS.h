@@ -27,12 +27,13 @@ namespace android::binder::os {
 LIBBINDER_EXPORTED void trace_begin(uint64_t tag, const char* name);
 LIBBINDER_EXPORTED void trace_end(uint64_t tag);
 LIBBINDER_EXPORTED void trace_int(uint64_t tag, const char* name, int32_t value);
+LIBBINDER_EXPORTED uint64_t get_trace_enabled_tags();
 
 status_t setNonBlocking(borrowed_fd fd);
 
 status_t getRandomBytes(uint8_t* data, size_t size);
 
-status_t dupFileDescriptor(int oldFd, int* newFd);
+LIBBINDER_INTERNAL_EXPORTED status_t dupFileDescriptor(int oldFd, int* newFd);
 
 std::unique_ptr<RpcTransportCtxFactory> makeDefaultRpcTransportCtxFactory();
 

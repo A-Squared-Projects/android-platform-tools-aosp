@@ -117,13 +117,13 @@ cc_defaults {
 }
 
 cc_defaults {
-    name: "avb_crypto_ops_impl_sha",
+    name: "avb_crypto_ops_impl_crypto",
     srcs: [
-        "libavb/sha/sha256_impl.c",
-        "libavb/sha/sha512_impl.c",
+        "libavb/crypto/sha256_impl.c",
+        "libavb/crypto/sha512_impl.c",
     ],
     local_include_dirs: [
-        "libavb/sha",
+        "libavb/crypto",
     ],
 }
 
@@ -137,11 +137,6 @@ python_binary_host {
     srcs: ["avbtool.py"],
     main: "avbtool.py",
     required: ["fec"],
-    version: {
-        py3: {
-            embedded_launcher: true,
-        },
-    },
     compile_multilib: "first",
 }
 
@@ -218,12 +213,21 @@ cc_library_static {
 // implementation.
 cc_defaults {
     name: "libavb_baremetal_defaults",
-    defaults: ["libavb_base_defaults"],
+    defaults: [
+        "cc_baremetal_defaults",
+        "libavb_base_defaults",
+    ],
     cflags: ["-UAVB_ENABLE_DEBUG"],
     static_libs: [
         "libcrypto_baremetal",
     ],
     srcs: ["libavb/avb_sysdeps_posix.c"],
+
+    // b/336916369: This library gets linked into a rust rlib.  Disable LTO
+    // until cross-language lto is supported.
+    lto: {
+        never: true,
+    },
 }
 
 // Baremetal libavb
@@ -345,7 +349,6 @@ cc_defaults {
         "test/data/*",
     ],
     test_config: "test/libavb_host_unittest.xml",
-    test_suites: ["general-tests"],
     static_libs: [
         "libavb_ab_host",
         "libgmock_host",
@@ -389,9 +392,9 @@ cc_test_host {
 }
 
 cc_test_host {
-    name: "libavb_host_unittest_sha",
+    name: "libavb_host_unittest_crypto",
     defaults: [
-        "avb_crypto_ops_impl_sha",
+        "avb_crypto_ops_impl_crypto",
         "libavb_host_unittest_core",
     ],
     data: [

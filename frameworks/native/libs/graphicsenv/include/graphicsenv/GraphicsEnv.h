@@ -17,6 +17,7 @@
 #ifndef ANDROID_UI_GRAPHICS_ENV_H
 #define ANDROID_UI_GRAPHICS_ENV_H 1
 
+#include <graphicsenv/FeatureOverrides.h>
 #include <graphicsenv/GpuStatsInfo.h>
 
 #include <mutex>
@@ -89,6 +90,8 @@ public:
     // Set which device extensions are enabled for the app.
     void setVulkanDeviceExtensions(uint32_t enabledExtensionCount,
                                    const char* const* ppEnabledExtensionNames);
+    // Add the engine name passed in VkApplicationInfo during CreateInstance
+    void addVulkanEngineName(const char* engineName);
 
     /*
      * Api for Vk/GL layer injection.  Presently, drivers enable certain
@@ -112,14 +115,19 @@ public:
     // If shouldUseNativeDriver is true, it means native GLES drivers must be used for the process.
     // If path is set to nonempty and shouldUseNativeDriver is true, ANGLE will be used regardless.
     void setAngleInfo(const std::string& path, const bool shouldUseNativeDriver,
-                      const std::string& packageName, const std::vector<std::string> eglFeatures);
+                      const std::string& packageName, const std::vector<std::string>& eglFeatures);
     // Get the ANGLE driver namespace.
     android_namespace_t* getAngleNamespace();
     // Get the app package name.
     std::string& getPackageName();
     const std::vector<std::string>& getAngleEglFeatures();
+    void updateAngleFeatureOverrides();
+    void getAngleFeatureOverrides(std::vector<const char*>& enabled,
+                                  std::vector<const char*>& disabled);
     // Set the persist.graphics.egl system property value.
     void nativeToggleAngleAsSystemDriver(bool enabled);
+    // Get the persist.graphics.egl system property value.
+    std::string nativeGetPersistGraphicsEgl();
     bool shouldUseSystemAngle();
     bool shouldUseNativeDriver();
 
@@ -175,6 +183,7 @@ private:
     std::string mPackageName;
     // ANGLE EGL features;
     std::vector<std::string> mAngleEglFeatures;
+    FeatureOverrides mFeatureOverrides;
     // Whether ANGLE should be used.
     bool mShouldUseAngle = false;
     // Whether loader should load system ANGLE.

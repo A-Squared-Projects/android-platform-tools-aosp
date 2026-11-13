@@ -34,7 +34,9 @@
 #include <vector>
 
 #include "PointerControllerInterface.h"
+#include "TouchpadHardwareState.h"
 #include "VibrationElement.h"
+#include "include/gestures.h"
 
 // Maximum supported size of a vibration pattern.
 // Must be at least 2.
@@ -60,9 +62,6 @@ struct InputReaderConfiguration {
 
         // The display size or orientation changed.
         DISPLAY_INFO = 1u << 2,
-
-        // The visible touches option changed.
-        SHOW_TOUCHES = 1u << 3,
 
         // The keyboard layouts must be reloaded.
         KEYBOARD_LAYOUTS = 1u << 4,
@@ -94,6 +93,16 @@ struct InputReaderConfiguration {
         // The touchpad settings changed.
         TOUCHPAD_SETTINGS = 1u << 13,
 
+        // The key remapping has changed.
+        KEY_REMAPPING = 1u << 14,
+
+        // The mouse settings changed, this includes mouse reverse vertical scrolling and swap
+        // primary button.
+        MOUSE_SETTINGS = 1u << 15,
+
+        // The virtual devices list is updated
+        VIRTUAL_DEVICES = 1u << 16,
+
         // All devices must be reopened.
         MUST_REOPEN = 1u << 31,
     };
@@ -109,11 +118,15 @@ struct InputReaderConfiguration {
 
     // The associations between input ports and display ports.
     // Used to determine which DisplayViewport should be tied to which InputDevice.
-    std::unordered_map<std::string, uint8_t> portAssociations;
+    std::unordered_map<std::string, uint8_t> inputPortToDisplayPortAssociations;
 
-    // The associations between input device physical port locations and display unique ids.
+    // The associations between input device ports and display unique ids.
     // Used to determine which DisplayViewport should be tied to which InputDevice.
-    std::unordered_map<std::string, std::string> uniqueIdAssociations;
+    std::unordered_map<std::string, std::string> inputPortToDisplayUniqueIdAssociations;
+
+    // The associations between input device descriptor and display unique ids.
+    // Used to determine which DisplayViewport should be tied to which InputDevice.
+    std::unordered_map<std::string, std::string> inputDeviceDescriptorToDisplayUniqueIdAssociations;
 
     // The associations between input device ports device types.
     // This is used to determine which device type and source should be tied to which InputDevice.
@@ -123,95 +136,37 @@ struct InputReaderConfiguration {
     // Can be used to determine the layout of the keyboard device.
     std::unordered_map<std::string, KeyboardLayoutInfo> keyboardLayoutAssociations;
 
+    // List of input device physical port locations of devices that are marked as virtual and should
+    // not be treated as physically connected peripheral (e.g. created using VDM in userspace)
+    std::set<std::string> virtualDevicePorts;
+
     // The suggested display ID to show the cursor.
-    int32_t defaultPointerDisplayId;
+    ui::LogicalDisplayId defaultPointerDisplayId;
 
     // The mouse pointer speed, as a number from -7 (slowest) to 7 (fastest).
-    //
-    // Currently only used when the enable_new_mouse_pointer_ballistics flag is enabled.
     int32_t mousePointerSpeed;
 
-    // Displays on which an acceleration curve shouldn't be applied for pointer movements from mice.
-    //
-    // Currently only used when the enable_new_mouse_pointer_ballistics flag is enabled.
-    std::set<int32_t> displaysWithMousePointerAccelerationDisabled;
+    // Displays on which all pointer scaling, including linear scaling based on the
+    // user's pointer speed setting, should be disabled for mice. This differs from
+    // disabling acceleration via the 'mousePointerAccelerationEnabled' setting, where
+    // the pointer speed setting still influences the scaling factor.
+    std::set<ui::LogicalDisplayId> displaysWithMouseScalingDisabled;
 
-    // Velocity control parameters for mouse pointer movements.
-    //
-    // If the enable_new_mouse_pointer_ballistics flag is enabled, these are ignored and the values
-    // of mousePointerSpeed and mousePointerAccelerationEnabled used instead.
-    VelocityControlParameters pointerVelocityControlParameters;
+    // True if the connected mouse should exhibit pointer acceleration. If false,
+    // a flat acceleration curve (linear scaling) is used, but the user's pointer
+    // speed setting still affects the scaling factor.
+    bool mousePointerAccelerationEnabled;
+
+    // True if the touchpad should exhibit pointer acceleration. If false,
+    // a flat acceleration curve (linear scaling) is used, but the user's pointer
+    // speed setting still affects the scaling factor.
+    bool touchpadAccelerationEnabled;
 
     // Velocity control parameters for mouse wheel movements.
     VelocityControlParameters wheelVelocityControlParameters;
 
     // True if pointer gestures are enabled.
     bool pointerGesturesEnabled;
-
-    // Quiet time between certain pointer gesture transitions.
-    // Time to allow for all fingers or buttons to settle into a stable state before
-    // starting a new gesture.
-    nsecs_t pointerGestureQuietInterval;
-
-    // The minimum speed that a pointer must travel for us to consider switching the active
-    // touch pointer to it during a drag.  This threshold is set to avoid switching due
-    // to noise from a finger resting on the touch pad (perhaps just pressing it down).
-    float pointerGestureDragMinSwitchSpeed; // in pixels per second
-
-    // Tap gesture delay time.
-    // The time between down and up must be less than this to be considered a tap.
-    nsecs_t pointerGestureTapInterval;
-
-    // Tap drag gesture delay time.
-    // The time between the previous tap's up and the next down must be less than
-    // this to be considered a drag.  Otherwise, the previous tap is finished and a
-    // new tap begins.
-    //
-    // Note that the previous tap will be held down for this entire duration so this
-    // interval must be shorter than the long press timeout.
-    nsecs_t pointerGestureTapDragInterval;
-
-    // The distance in pixels that the pointer is allowed to move from initial down
-    // to up and still be called a tap.
-    float pointerGestureTapSlop; // in pixels
-
-    // Time after the first touch points go down to settle on an initial centroid.
-    // This is intended to be enough time to handle cases where the user puts down two
-    // fingers at almost but not quite exactly the same time.
-    nsecs_t pointerGestureMultitouchSettleInterval;
-
-    // The transition from PRESS to SWIPE or FREEFORM gesture mode is made when
-    // at least two pointers have moved at least this far from their starting place.
-    float pointerGestureMultitouchMinDistance; // in pixels
-
-    // The transition from PRESS to SWIPE gesture mode can only occur when the
-    // cosine of the angle between the two vectors is greater than or equal to than this value
-    // which indicates that the vectors are oriented in the same direction.
-    // When the vectors are oriented in the exactly same direction, the cosine is 1.0.
-    // (In exactly opposite directions, the cosine is -1.0.)
-    float pointerGestureSwipeTransitionAngleCosine;
-
-    // The transition from PRESS to SWIPE gesture mode can only occur when the
-    // fingers are no more than this far apart relative to the diagonal size of
-    // the touch pad.  For example, a ratio of 0.5 means that the fingers must be
-    // no more than half the diagonal size of the touch pad apart.
-    float pointerGestureSwipeMaxWidthRatio;
-
-    // The gesture movement speed factor relative to the size of the display.
-    // Movement speed applies when the fingers are moving in the same direction.
-    // Without acceleration, a full swipe of the touch pad diagonal in movement mode
-    // will cover this portion of the display diagonal.
-    float pointerGestureMovementSpeedRatio;
-
-    // The gesture zoom speed factor relative to the size of the display.
-    // Zoom speed applies when the fingers are mostly moving relative to each other
-    // to execute a scale gesture or similar.
-    // Without acceleration, a full swipe of the touch pad diagonal in zoom mode
-    // will cover this portion of the display diagonal.
-    float pointerGestureZoomSpeedRatio;
-
-    // True to show the location of touches on the touch screen as spots.
-    bool showTouches;
 
     // The latest request to enable or disable Pointer Capture.
     PointerCaptureRequest pointerCaptureRequest;
@@ -229,12 +184,24 @@ struct InputReaderConfiguration {
     // True to enable tap dragging on touchpads.
     bool touchpadTapDraggingEnabled;
 
+    // True if hardware state update notifications should be sent to the policy.
+    bool shouldNotifyTouchpadHardwareState;
+
     // True to enable a zone on the right-hand side of touchpads where clicks will be turned into
     // context (a.k.a. "right") clicks.
     bool touchpadRightClickZoneEnabled;
 
+    // True to use three-finger tap as a customizable shortcut; false to use it as a middle-click.
+    bool touchpadThreeFingerTapShortcutEnabled;
+
+    // True to enable system gestures (three- and four-finger swipes) on touchpads.
+    bool touchpadSystemGesturesEnabled;
+
+    // True to enable touchpads.
+    bool touchpadsEnabled;
+
     // The set of currently disabled input devices.
-    std::set<int32_t> disabledDevices;
+    std::set<DeviceId> disabledDevices;
 
     // True if stylus button reporting through motion events should be enabled, in which case
     // stylus button state changes are reported through motion events.
@@ -243,42 +210,50 @@ struct InputReaderConfiguration {
     // True if a pointer icon should be shown for direct stylus pointers.
     bool stylusPointerIconEnabled;
 
+    // Keycodes to be remapped.
+    std::map<int32_t /* fromKeyCode */, int32_t /* toKeyCode */> keyRemapping;
+
+    // True if the external mouse should have its vertical scrolling reversed, so that rotating the
+    // wheel downwards scrolls the content upwards.
+    bool mouseReverseVerticalScrollingEnabled;
+
+    // True if the connected mouse should have its primary button (default: left click) swapped,
+    // so that the right click will be the primary action button and the left click will be the
+    // secondary action.
+    bool mouseSwapPrimaryButtonEnabled;
+
     InputReaderConfiguration()
           : virtualKeyQuietTime(0),
+            defaultPointerDisplayId(ui::LogicalDisplayId::DEFAULT),
             mousePointerSpeed(0),
-            displaysWithMousePointerAccelerationDisabled(),
-            pointerVelocityControlParameters(1.0f, 500.0f, 3000.0f,
-                                             static_cast<float>(
-                                                     android::os::IInputConstants::
-                                                             DEFAULT_POINTER_ACCELERATION)),
-            wheelVelocityControlParameters(1.0f, 15.0f, 50.0f, 4.0f),
+            displaysWithMouseScalingDisabled(),
+            mousePointerAccelerationEnabled(true),
+            touchpadAccelerationEnabled(true),
+            wheelVelocityControlParameters(1.0f, 15.0f, 50.0f,
+                                           static_cast<float>(
+                                                   android::os::IInputConstants::
+                                                           DEFAULT_MOUSE_WHEEL_ACCELERATION)),
             pointerGesturesEnabled(true),
-            pointerGestureQuietInterval(100 * 1000000LL),            // 100 ms
-            pointerGestureDragMinSwitchSpeed(50),                    // 50 pixels per second
-            pointerGestureTapInterval(150 * 1000000LL),              // 150 ms
-            pointerGestureTapDragInterval(150 * 1000000LL),          // 150 ms
-            pointerGestureTapSlop(10.0f),                            // 10 pixels
-            pointerGestureMultitouchSettleInterval(100 * 1000000LL), // 100 ms
-            pointerGestureMultitouchMinDistance(15),                 // 15 pixels
-            pointerGestureSwipeTransitionAngleCosine(0.2588f),       // cosine of 75 degrees
-            pointerGestureSwipeMaxWidthRatio(0.25f),
-            pointerGestureMovementSpeedRatio(0.8f),
-            pointerGestureZoomSpeedRatio(0.3f),
-            showTouches(false),
             pointerCaptureRequest(),
             touchpadPointerSpeed(0),
             touchpadNaturalScrollingEnabled(true),
             touchpadTapToClickEnabled(true),
             touchpadTapDraggingEnabled(false),
+            shouldNotifyTouchpadHardwareState(false),
             touchpadRightClickZoneEnabled(false),
+            touchpadThreeFingerTapShortcutEnabled(false),
+            touchpadSystemGesturesEnabled(true),
+            touchpadsEnabled(true),
             stylusButtonMotionEventsEnabled(true),
-            stylusPointerIconEnabled(false) {}
+            stylusPointerIconEnabled(false),
+            mouseReverseVerticalScrollingEnabled(false),
+            mouseSwapPrimaryButtonEnabled(false) {}
 
     std::optional<DisplayViewport> getDisplayViewportByType(ViewportType type) const;
     std::optional<DisplayViewport> getDisplayViewportByUniqueId(const std::string& uniqueDisplayId)
             const;
     std::optional<DisplayViewport> getDisplayViewportByPort(uint8_t physicalPort) const;
-    std::optional<DisplayViewport> getDisplayViewportById(int32_t displayId) const;
+    std::optional<DisplayViewport> getDisplayViewportById(ui::LogicalDisplayId displayId) const;
     void setDisplayViewports(const std::vector<DisplayViewport>& viewports);
 
     void dump(std::string& dump) const;
@@ -312,9 +287,6 @@ public:
     /* Called by the heartbeat to ensures that the reader has not deadlocked. */
     virtual void monitor() = 0;
 
-    /* Returns true if the input device is enabled. */
-    virtual bool isInputDeviceEnabled(int32_t deviceId) = 0;
-
     /* Makes the reader start processing events from the kernel. */
     virtual status_t start() = 0;
 
@@ -328,20 +300,20 @@ public:
     virtual std::vector<InputDeviceInfo> getInputDevices() const = 0;
 
     /* Query current input state. */
-    virtual int32_t getScanCodeState(int32_t deviceId, uint32_t sourceMask, int32_t scanCode) = 0;
-    virtual int32_t getKeyCodeState(int32_t deviceId, uint32_t sourceMask, int32_t keyCode) = 0;
-    virtual int32_t getSwitchState(int32_t deviceId, uint32_t sourceMask, int32_t sw) = 0;
+    virtual int32_t getScanCodeState(DeviceId deviceId, uint32_t sourceMask, int32_t scanCode) = 0;
+    virtual int32_t getKeyCodeState(DeviceId deviceId, uint32_t sourceMask, int32_t keyCode) = 0;
+    virtual int32_t getSwitchState(DeviceId deviceId, uint32_t sourceMask, int32_t sw) = 0;
 
-    virtual void addKeyRemapping(int32_t deviceId, int32_t fromKeyCode,
-                                 int32_t toKeyCode) const = 0;
-
-    virtual int32_t getKeyCodeForKeyLocation(int32_t deviceId, int32_t locationKeyCode) const = 0;
+    virtual int32_t getKeyCodeForKeyLocation(DeviceId deviceId, int32_t locationKeyCode) const = 0;
 
     /* Toggle Caps Lock */
-    virtual void toggleCapsLockState(int32_t deviceId) = 0;
+    virtual void toggleCapsLockState(DeviceId deviceId) = 0;
+
+    /* Resets locked modifier state */
+    virtual void resetLockedModifierState() = 0;
 
     /* Determine whether physical keys exist for the given framework-domain key codes. */
-    virtual bool hasKeys(int32_t deviceId, uint32_t sourceMask,
+    virtual bool hasKeys(DeviceId deviceId, uint32_t sourceMask,
                          const std::vector<int32_t>& keyCodes, uint8_t* outFlags) = 0;
 
     /* Requests that a reconfiguration of all input devices.
@@ -350,52 +322,78 @@ public:
     virtual void requestRefreshConfiguration(ConfigurationChanges changes) = 0;
 
     /* Controls the vibrator of a particular input device. */
-    virtual void vibrate(int32_t deviceId, const VibrationSequence& sequence, ssize_t repeat,
+    virtual void vibrate(DeviceId deviceId, const VibrationSequence& sequence, ssize_t repeat,
                          int32_t token) = 0;
-    virtual void cancelVibrate(int32_t deviceId, int32_t token) = 0;
+    virtual void cancelVibrate(DeviceId deviceId, int32_t token) = 0;
 
-    virtual bool isVibrating(int32_t deviceId) = 0;
+    virtual bool isVibrating(DeviceId deviceId) = 0;
 
-    virtual std::vector<int32_t> getVibratorIds(int32_t deviceId) = 0;
+    virtual std::vector<int32_t> getVibratorIds(DeviceId deviceId) = 0;
     /* Get battery level of a particular input device. */
-    virtual std::optional<int32_t> getBatteryCapacity(int32_t deviceId) = 0;
+    virtual std::optional<int32_t> getBatteryCapacity(DeviceId deviceId) = 0;
     /* Get battery status of a particular input device. */
-    virtual std::optional<int32_t> getBatteryStatus(int32_t deviceId) = 0;
+    virtual std::optional<int32_t> getBatteryStatus(DeviceId deviceId) = 0;
     /* Get the device path for the battery of an input device. */
-    virtual std::optional<std::string> getBatteryDevicePath(int32_t deviceId) = 0;
+    virtual std::optional<std::string> getBatteryDevicePath(DeviceId deviceId) = 0;
 
-    virtual std::vector<InputDeviceLightInfo> getLights(int32_t deviceId) = 0;
+    virtual std::vector<InputDeviceLightInfo> getLights(DeviceId deviceId) = 0;
 
-    virtual std::vector<InputDeviceSensorInfo> getSensors(int32_t deviceId) = 0;
+    virtual std::vector<InputDeviceSensorInfo> getSensors(DeviceId deviceId) = 0;
+
+    virtual std::optional<HardwareProperties> getTouchpadHardwareProperties(DeviceId deviceId) = 0;
 
     /* Return true if the device can send input events to the specified display. */
-    virtual bool canDispatchToDisplay(int32_t deviceId, int32_t displayId) = 0;
+    virtual bool canDispatchToDisplay(DeviceId deviceId, ui::LogicalDisplayId displayId) = 0;
 
     /* Enable sensor in input reader mapper. */
-    virtual bool enableSensor(int32_t deviceId, InputDeviceSensorType sensorType,
+    virtual bool enableSensor(DeviceId deviceId, InputDeviceSensorType sensorType,
                               std::chrono::microseconds samplingPeriod,
                               std::chrono::microseconds maxBatchReportLatency) = 0;
 
     /* Disable sensor in input reader mapper. */
-    virtual void disableSensor(int32_t deviceId, InputDeviceSensorType sensorType) = 0;
+    virtual void disableSensor(DeviceId deviceId, InputDeviceSensorType sensorType) = 0;
 
     /* Flush sensor data in input reader mapper. */
-    virtual void flushSensor(int32_t deviceId, InputDeviceSensorType sensorType) = 0;
+    virtual void flushSensor(DeviceId deviceId, InputDeviceSensorType sensorType) = 0;
 
     /* Set color for the light */
-    virtual bool setLightColor(int32_t deviceId, int32_t lightId, int32_t color) = 0;
+    virtual bool setLightColor(DeviceId deviceId, int32_t lightId, int32_t color) = 0;
     /* Set player ID for the light */
-    virtual bool setLightPlayerId(int32_t deviceId, int32_t lightId, int32_t playerId) = 0;
+    virtual bool setLightPlayerId(DeviceId deviceId, int32_t lightId, int32_t playerId) = 0;
     /* Get light color */
-    virtual std::optional<int32_t> getLightColor(int32_t deviceId, int32_t lightId) = 0;
+    virtual std::optional<int32_t> getLightColor(DeviceId deviceId, int32_t lightId) = 0;
     /* Get light player ID */
-    virtual std::optional<int32_t> getLightPlayerId(int32_t deviceId, int32_t lightId) = 0;
+    virtual std::optional<int32_t> getLightPlayerId(DeviceId deviceId, int32_t lightId) = 0;
 
     /* Get the Bluetooth address of an input device, if known. */
-    virtual std::optional<std::string> getBluetoothAddress(int32_t deviceId) const = 0;
+    virtual std::optional<std::string> getBluetoothAddress(DeviceId deviceId) const = 0;
+    /* Get the physical location path ("phys" ID) for an input device, if it is available. */
+    virtual std::optional<std::string> getPhysicalLocationPath(DeviceId deviceId) const = 0;
+
+    /* Gets the sysfs root path for this device. Returns an empty path if there is none. */
+    virtual std::filesystem::path getSysfsRootPath(DeviceId deviceId) const = 0;
 
     /* Sysfs node change reported. Recreate device if required to incorporate the new sysfs nodes */
     virtual void sysfsNodeChanged(const std::string& sysfsNodePath) = 0;
+
+    /* Get the ID of the InputDevice that was used most recently.
+     *
+     * Returns ReservedInputDeviceId::INVALID_INPUT_DEVICE_ID if no device has been used since boot.
+     */
+    virtual DeviceId getLastUsedInputDeviceId() = 0;
+
+    /* Notifies that mouse cursor faded due to typing. */
+    virtual void notifyMouseCursorFadedOnTyping() = 0;
+
+    /* Set whether the given input device can wake up the kernel from sleep
+     * when it generates input events. By default, usually only internal (built-in)
+     * input devices can wake the kernel from sleep. For an external input device
+     * that supports remote wakeup to be able to wake the kernel, this must be called
+     * after each time the device is connected/added.
+     *
+     * Returns true if setting power wakeup was successful.
+     */
+    virtual bool setKernelWakeEnabled(DeviceId deviceId, bool enabled) = 0;
 };
 
 // --- TouchAffineTransformation ---
@@ -445,14 +443,20 @@ public:
     /* Gets the input reader configuration. */
     virtual void getReaderConfiguration(InputReaderConfiguration* outConfig) = 0;
 
-    /* Gets a pointer controller associated with the specified cursor device (ie. a mouse). */
-    virtual std::shared_ptr<PointerControllerInterface> obtainPointerController(
-            int32_t deviceId) = 0;
-
     /* Notifies the input reader policy that some input devices have changed
      * and provides information about all current input devices.
      */
     virtual void notifyInputDevicesChanged(const std::vector<InputDeviceInfo>& inputDevices) = 0;
+
+    /* Sends the hardware state of a connected touchpad */
+    virtual void notifyTouchpadHardwareState(const SelfContainedHardwareState& schs,
+                                             DeviceId deviceId) = 0;
+
+    /* Sends the Info of gestures that happen on the touchpad. */
+    virtual void notifyTouchpadGestureInfo(GestureType type, DeviceId deviceId) = 0;
+
+    /* Notifies the policy that the user has performed a three-finger touchpad tap. */
+    virtual void notifyTouchpadThreeFingerTap() = 0;
 
     /* Gets the keyboard layout for a particular input device. */
     virtual std::shared_ptr<KeyCharacterMap> getKeyboardLayoutOverlay(
@@ -466,7 +470,7 @@ public:
     virtual TouchAffineTransformation getTouchAffineTransformation(
             const std::string& inputDeviceDescriptor, ui::Rotation surfaceRotation) = 0;
     /* Notifies the input reader policy that a stylus gesture has started. */
-    virtual void notifyStylusGestureStarted(int32_t deviceId, nsecs_t eventTime) = 0;
+    virtual void notifyStylusGestureStarted(DeviceId deviceId, nsecs_t eventTime) = 0;
 
     /* Returns true if any InputConnection is currently active. */
     virtual bool isInputMethodConnectionActive() = 0;
@@ -478,7 +482,7 @@ public:
      * be used as the range of possible values for pointing devices, like mice and touchpads.
      */
     virtual std::optional<DisplayViewport> getPointerViewportForAssociatedDisplay(
-            int32_t associatedDisplayId = ADISPLAY_ID_NONE) = 0;
+            ui::LogicalDisplayId associatedDisplayId = ui::LogicalDisplayId::INVALID) = 0;
 };
 
 } // namespace android

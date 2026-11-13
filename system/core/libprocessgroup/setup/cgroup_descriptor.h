@@ -21,10 +21,7 @@
 
 #include <sys/stat.h>
 
-#include <processgroup/format/cgroup_controller.h>
-
-namespace android {
-namespace cgrouprc {
+#include <processgroup/cgroup_controller.h>
 
 // Complete controller description for mounting cgroups
 class CgroupDescriptor {
@@ -33,7 +30,7 @@ class CgroupDescriptor {
                      mode_t mode, const std::string& uid, const std::string& gid, uint32_t flags,
                      uint32_t max_activation_depth);
 
-    const format::CgroupController* controller() const { return &controller_; }
+    const CgroupController* controller() const { return &controller_; }
     mode_t mode() const { return mode_; }
     std::string uid() const { return uid_; }
     std::string gid() const { return gid_; }
@@ -41,11 +38,8 @@ class CgroupDescriptor {
     void set_mounted(bool mounted);
 
   private:
-    format::CgroupController controller_;
+    CgroupController controller_;
     mode_t mode_ = 0;
     std::string uid_;
     std::string gid_;
 };
-
-}  // namespace cgrouprc
-}  // namespace android

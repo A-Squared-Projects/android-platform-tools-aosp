@@ -396,7 +396,7 @@ Status ServiceManager::getService(const std::string& name, sp<IBinder>* outBinde
     SM_PERFETTO_TRACE_FUNC(PERFETTO_TE_PROTO_FIELDS(
             PERFETTO_TE_PROTO_FIELD_CSTR(kProtoServiceName, name.c_str())));
 
-    *outBinder = tryGetBinder(name, true);
+    *outBinder = tryGetBinder(name, true).service;
     // returns ok regardless of result for legacy reasons
     return Status::ok();
 }
@@ -410,7 +410,16 @@ Status ServiceManager::getService2(const std::string& name, os::Service* outServ
     return Status::ok();
 }
 
-Status ServiceManager::checkService(const std::string& name, os::Service* outService) {
+Status ServiceManager::checkService(const std::string& name, sp<IBinder>* outBinder) {
+    SM_PERFETTO_TRACE_FUNC(PERFETTO_TE_PROTO_FIELDS(
+            PERFETTO_TE_PROTO_FIELD_CSTR(kProtoServiceName, name.c_str())));
+
+    *outBinder = tryGetBinder(name, false).service;
+    // returns ok regardless of result for legacy reasons
+    return Status::ok();
+}
+
+Status ServiceManager::checkService2(const std::string& name, os::Service* outService) {
     SM_PERFETTO_TRACE_FUNC(PERFETTO_TE_PROTO_FIELDS(
             PERFETTO_TE_PROTO_FIELD_CSTR(kProtoServiceName, name.c_str())));
 
@@ -430,13 +439,15 @@ os::Service ServiceManager::tryGetService(const std::string& name, bool startIfN
             return os::Service::make<os::Service::Tag::accessor>(nullptr);
         }
         return os::Service::make<os::Service::Tag::accessor>(
-                tryGetBinder(*accessorName, startIfNotFound));
+                tryGetBinder(*accessorName, startIfNotFound).service);
     } else {
-        return os::Service::make<os::Service::Tag::binder>(tryGetBinder(name, startIfNotFound));
+        return os::Service::make<os::Service::Tag::serviceWithMetadata>(
+                tryGetBinder(name, startIfNotFound));
     }
 }
 
-sp<IBinder> ServiceManager::tryGetBinder(const std::string& name, bool startIfNotFound) {
+os::ServiceWithMetadata ServiceManager::tryGetBinder(const std::string& name,
+                                                     bool startIfNotFound) {
     SM_PERFETTO_TRACE_FUNC(PERFETTO_TE_PROTO_FIELDS(
             PERFETTO_TE_PROTO_FIELD_CSTR(kProtoServiceName, name.c_str())));
 
@@ -450,13 +461,13 @@ sp<IBinder> ServiceManager::tryGetBinder(const std::string& name, bool startIfNo
         if (!service->allowIsolated && is_multiuser_uid_isolated(ctx.uid)) {
             LOG(WARNING) << "Isolated app with UID " << ctx.uid << " requested '" << name
                          << "', but the service is not allowed for isolated apps.";
-            return nullptr;
+            return os::ServiceWithMetadata();
         }
         out = service->binder;
     }
 
     if (!mAccess->canFind(ctx, name)) {
-        return nullptr;
+        return os::ServiceWithMetadata();
     }
 
     if (!out && startIfNotFound) {
@@ -473,8 +484,11 @@ sp<IBinder> ServiceManager::tryGetBinder(const std::string& name, bool startIfNo
         CHECK(handleServiceClientCallback(2 /* sm + transaction */, name, false));
         service->guaranteeClient = true;
     }
-
-    return out;
+    os::ServiceWithMetadata serviceWithMetadata = os::ServiceWithMetadata();
+    serviceWithMetadata.service = out;
+    serviceWithMetadata.isLazyService =
+            service ? service->dumpPriority & FLAG_IS_LAZY_SERVICE : false;
+    return serviceWithMetadata;
 }
 
 bool isValidServiceName(const std::string& name) {
@@ -505,8 +519,9 @@ Status ServiceManager::addService(const std::string& name, const sp<IBinder>& bi
         return Status::fromExceptionCode(Status::EX_SECURITY, "App UIDs cannot add services.");
     }
 
-    if (!mAccess->canAdd(ctx, name)) {
-        return Status::fromExceptionCode(Status::EX_SECURITY, "SELinux denied.");
+    std::optional<std::string> accessorName;
+    if (auto status = canAddService(ctx, name, &accessorName); !status.isOk()) {
+        return status;
     }
 
     if (binder == nullptr) {
@@ -888,8 +903,9 @@ Status ServiceManager::registerClientCallback(const std::string& name, const sp<
     }
 
     auto ctx = mAccess->getCallingContext();
-    if (!mAccess->canAdd(ctx, name)) {
-        return Status::fromExceptionCode(Status::EX_SECURITY, "SELinux denied.");
+    std::optional<std::string> accessorName;
+    if (auto status = canAddService(ctx, name, &accessorName); !status.isOk()) {
+        return status;
     }
 
     auto serviceIt = mNameToService.find(name);
@@ -1051,8 +1067,9 @@ Status ServiceManager::tryUnregisterService(const std::string& name, const sp<IB
     }
 
     auto ctx = mAccess->getCallingContext();
-    if (!mAccess->canAdd(ctx, name)) {
-        return Status::fromExceptionCode(Status::EX_SECURITY, "SELinux denied.");
+    std::optional<std::string> accessorName;
+    if (auto status = canAddService(ctx, name, &accessorName); !status.isOk()) {
+        return status;
     }
 
     auto serviceIt = mNameToService.find(name);
@@ -1110,6 +1127,23 @@ Status ServiceManager::tryUnregisterService(const std::string& name, const sp<IB
     return Status::ok();
 }
 
+Status ServiceManager::canAddService(const Access::CallingContext& ctx, const std::string& name,
+                                     std::optional<std::string>* accessor) {
+    if (!mAccess->canAdd(ctx, name)) {
+        return Status::fromExceptionCode(Status::EX_SECURITY, "SELinux denied for service.");
+    }
+#ifndef VENDORSERVICEMANAGER
+    *accessor = getVintfAccessorName(name);
+#endif
+    if (accessor->has_value()) {
+        if (!mAccess->canAdd(ctx, accessor->value())) {
+            return Status::fromExceptionCode(Status::EX_SECURITY,
+                                             "SELinux denied for the accessor of the service.");
+        }
+    }
+    return Status::ok();
+}
+
 Status ServiceManager::canFindService(const Access::CallingContext& ctx, const std::string& name,
                                       std::optional<std::string>* accessor) {
     if (!mAccess->canFind(ctx, name)) {
@@ -1143,6 +1177,65 @@ Status ServiceManager::getServiceDebugInfo(std::vector<ServiceDebugInfo>* outRet
     }
 
     return Status::ok();
+}
+
+Status ServiceManager::checkServiceAccessImpl(const Access::CallingContext& ctx,
+                                              const std::string& name,
+                                              const std::string& permission, bool* outReturn) {
+    *outReturn = false;
+    if (permission == "find") {
+        std::optional<std::string> _accessor;
+        if (auto status = canFindService(ctx, name, &_accessor); !status.isOk()) {
+            return Status::fromExceptionCode(Status::EX_SECURITY, "SELinux denied.");
+        }
+    } else if (permission == "add") {
+        std::optional<std::string> _accessor;
+        if (auto status = canAddService(ctx, name, &_accessor); !status.isOk()) {
+            return Status::fromExceptionCode(Status::EX_SECURITY, "SELinux denied.");
+        }
+    } else if (permission == "list") {
+        if (!mAccess->canList(ctx)) {
+            return Status::fromExceptionCode(Status::EX_SECURITY, "SELinux denied.");
+        }
+    } else {
+        ALOGE("Unknown service_manager permission: %s", permission.c_str());
+        return Status::fromExceptionCode(Status::EX_ILLEGAL_ARGUMENT, "Invalid permission");
+    }
+
+    *outReturn = true;
+    return Status::ok();
+}
+
+Status ServiceManager::checkServiceAccess(const IServiceManager::CallerContext& callerCtx,
+                                          const std::string& name, const std::string& permission,
+                                          bool* outReturn) {
+    if (callerCtx.sidName.empty() || name.empty() || permission.empty()) {
+        return Status::
+                fromExceptionCode(Status::EX_SECURITY,
+                                  String8::format("Call to checkServiceAccess has incomplete "
+                                                  "arguments. "
+                                                  "the caller security context (sid): \"%s\", "
+                                                  "name: \"%s\", permission: \"%s\".",
+                                                  callerCtx.sidName.c_str(), name.c_str(),
+                                                  permission.c_str()));
+    }
+    // The caller must have check_access permission
+    Access::CallingContext directCallerCtx = mAccess->getCallingContext();
+    // TODO add check_access permission in system/sepolicy/private/access_vectors
+    // For now, the only user of this, virtmgr, already has access to these
+    // services because it needs to proxy them.
+    auto status = checkServiceAccessImpl(directCallerCtx, name, permission, outReturn);
+    if (!status.isOk() || !*outReturn) {
+        return Status::fromExceptionCode(Status::EX_SECURITY,
+                                         "Caller is not allowed to delegate this check to "
+                                         "servicemanager.");
+    }
+
+    Access::CallingContext callingCtx;
+    callingCtx.debugPid = callerCtx.debugPid;
+    callingCtx.uid = callerCtx.uid;
+    callingCtx.sid = callerCtx.sidName;
+    return checkServiceAccessImpl(callingCtx, name, permission, outReturn);
 }
 
 void ServiceManager::clear() {

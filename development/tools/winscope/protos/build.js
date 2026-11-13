@@ -26,50 +26,41 @@ async function build() {
     await runCommand(`rm -rf ${OUT_TOP}`);
 
     const promises = [
-        // IME
+        // IME udc
         buildProtos([
-            '../../../../frameworks/base/core/proto/android/view/inputmethod/inputmethodeditortrace.proto'
-        ], 'ime/latest'),
+            'ime/udc/inputmethodeditortrace.proto'
+        ], 'ime/udc'),
 
-        // ProtoLog
+        // ProtoLog udc
         buildProtos([
-            '../../../../frameworks/base/core/proto/android/internal/protolog.proto'
-        ], 'protolog/latest'),
+            'protolog/udc/protolog.proto'
+        ], 'protolog/udc'),
 
-        // SurfaceFlinger
+        // SurfaceFlinger udc
         buildProtos([
             'surfaceflinger/udc/layerstrace.proto',
         ], 'surfaceflinger/udc'),
-        buildProtos([
-            '../../../../external/perfetto/protos/perfetto/trace/android/surfaceflinger_layers.proto',
-        ], 'surfaceflinger/latest'),
 
-        // Transactions
+        // Transactions udc
         buildProtos([
             'surfaceflinger/udc/transactions.proto',
         ], 'transactions/udc'),
-        buildProtos([
-            '../../../../external/perfetto/protos/perfetto/trace/android/surfaceflinger_transactions.proto',
-        ], 'transactions/latest'),
 
-        // Transitions
+        // Transitions udc
         buildProtos([
             'transitions/udc/windowmanagertransitiontrace.proto',
             'transitions/udc/wm_shell_transition_trace.proto'
         ], 'transitions/udc'),
-        buildProtos([
-            '../../../../external/perfetto/protos/perfetto/trace/android/shell_transition.proto',
-        ], 'transitions/latest'),
 
-        // ViewCapture
+        // ViewCapture udc
         buildProtos([
-            '../../../../frameworks/libs/systemui/viewcapturelib/src/com/android/app/viewcapture/proto/view_capture.proto'
-        ], 'viewcapture/latest'),
+            'viewcapture/udc/view_capture.proto'
+        ], 'viewcapture/udc'),
 
-        // WindowManager
+        // WindowManager udc
         buildProtos([
-            '../../../../frameworks/base/core/proto/android/server/windowmanagertrace.proto',
-        ], 'windowmanager/latest'),
+            'windowmanager/udc/windowmanagertrace.proto',
+        ], 'windowmanager/udc'),
 
         // Test proto fields
         buildProtos([
@@ -80,6 +71,12 @@ async function build() {
         buildProtos([
             'test/intdef_translation_test.proto',
         ], 'test/intdef_translation'),
+
+        // Perfetto trace
+        buildProtos([
+            '../../../../external/perfetto/protos/perfetto/trace/trace.proto',
+            '../../../../external/perfetto/protos/perfetto/trace/android/winscope_extensions_impl.proto'
+        ], 'perfetto/trace'),
     ];
 
     await Promise.all(promises);
@@ -102,7 +99,6 @@ async function buildProtos(protoPaths, outSubdir) {
         `--root ${rootName}`,
         `--path ${PERFETTO_TOP}`,
         `--path ${WINSCOPE_TOP}`,
-        `--path ${ANDROID_BUILD_TOP}`,
         protoFullPaths.join(' ')
     ].join(' ');
 
@@ -111,10 +107,10 @@ async function buildProtos(protoPaths, outSubdir) {
         'pbjs',
         '--force-long',
         '--target static-module',
+        `--root ${outSubdir.replace('/', '')}`,
         `--out ${outDir}/static.js`,
         `--path ${PERFETTO_TOP}`,
         `--path ${WINSCOPE_TOP}`,
-        `--path ${ANDROID_BUILD_TOP}`,
         protoFullPaths.join(' '),
     ].join(' ');
 
@@ -129,6 +125,10 @@ async function buildProtos(protoPaths, outSubdir) {
     await runCommand(commandBuildJson);
     await runCommand(commandBuildJs);
     await runCommand(commandBuildTs);
+
+    // Fix proto compilation error because of Winscope extensions
+    await runCommand(`sed -i 's/interface IWinscopeExtensions/class IWinscopeExtensions/g' ${outDir}/static.d.ts`);
+    await runCommand(`sed -i 's/class WinscopeExtensions implements IWinscopeExtensions/class WinscopeExtensions extends IWinscopeExtensions/g' ${outDir}/static.d.ts`);
 }
 
 function runCommand(command) {

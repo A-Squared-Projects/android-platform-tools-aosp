@@ -467,9 +467,9 @@ public:
   static const std::string& ErrorMessage(const V& val) { return val.error().message(); }
 };
 
-// Macros for testing the results of functions that return android::base::Result.
-// These also work with base::android::expected.
-// For advanced matchers and customized error messages, see result-gtest.h.
+// Macros for testing the results of functions that return android::base::Result. These also work
+// with base::android::expected. They assume the user depends on libgmock and includes
+// gtest/gtest.h. For advanced matchers and customized error messages, see result-gmock.h.
 
 #define ASSERT_RESULT_OK(stmt)                            \
   if (const auto& tmp = (stmt); !tmp.ok())                \

@@ -30,7 +30,7 @@ static constexpr uint32_t INVALID_MASK = 0x10;
 class DisplayedContentSamplingTest : public ::testing::Test {
 protected:
     void SetUp() {
-        mComposerClient = new SurfaceComposerClient;
+        mComposerClient = sp<SurfaceComposerClient>::make();
         ASSERT_EQ(OK, mComposerClient->initCheck());
         const auto ids = SurfaceComposerClient::getPhysicalDisplayIds();
         ASSERT_FALSE(ids.empty());
@@ -116,10 +116,10 @@ TEST_F(DisplayedContentSamplingTest, SampleCollectionCoherentWithSupportMask) {
     EXPECT_EQ(OK, status);
     if (stats.numFrames <= 0) return;
 
-    if (componentMask & (0x1 << 0)) EXPECT_NE(0, stats.component_0_sample.size());
-    if (componentMask & (0x1 << 1)) EXPECT_NE(0, stats.component_1_sample.size());
-    if (componentMask & (0x1 << 2)) EXPECT_NE(0, stats.component_2_sample.size());
-    if (componentMask & (0x1 << 3)) EXPECT_NE(0, stats.component_3_sample.size());
+    if (componentMask & (0x1 << 0)) EXPECT_NE(0u, stats.component_0_sample.size());
+    if (componentMask & (0x1 << 1)) EXPECT_NE(0u, stats.component_1_sample.size());
+    if (componentMask & (0x1 << 2)) EXPECT_NE(0u, stats.component_2_sample.size());
+    if (componentMask & (0x1 << 3)) EXPECT_NE(0u, stats.component_3_sample.size());
 }
 
 } // namespace android

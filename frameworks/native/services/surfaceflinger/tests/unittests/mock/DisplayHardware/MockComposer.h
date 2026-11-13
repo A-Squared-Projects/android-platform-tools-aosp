@@ -18,8 +18,11 @@
 
 #include <gmock/gmock.h>
 
+#include <ui/ScreenPartStatus.h>
+
 #include "DisplayHardware/ComposerHal.h"
 #include "DisplayHardware/HWC2.h"
+#include "DisplayHardware/Hal.h"
 
 namespace android {
 
@@ -34,9 +37,9 @@ using android::hardware::graphics::common::V1_2::ColorMode;
 using android::hardware::graphics::common::V1_2::Dataspace;
 using android::hardware::graphics::common::V1_2::PixelFormat;
 
+using android::hardware::graphics::composer::hal::Error;
 using android::hardware::graphics::composer::V2_1::Config;
 using android::hardware::graphics::composer::V2_1::Display;
-using android::hardware::graphics::composer::V2_1::Error;
 using android::hardware::graphics::composer::V2_1::IComposer;
 using android::hardware::graphics::composer::V2_1::Layer;
 using android::hardware::graphics::composer::V2_4::IComposerCallback;
@@ -82,7 +85,8 @@ public:
     MOCK_METHOD1(getPerFrameMetadataKeys,
                  std::vector<IComposerClient::PerFrameMetadataKey>(Display));
     MOCK_METHOD2(getDataspaceSaturationMatrix, Error(Dataspace, mat4*));
-    MOCK_METHOD3(getDisplayIdentificationData, Error(Display, uint8_t*, std::vector<uint8_t>*));
+    MOCK_METHOD4(getDisplayIdentificationData,
+                 Error(Display, uint8_t*, std::vector<uint8_t>*, android::ScreenPartStatus*));
     MOCK_METHOD3(getReleaseFences, Error(Display, std::vector<Layer>*, std::vector<int>*));
     MOCK_METHOD2(presentDisplay, Error(Display, int*));
     MOCK_METHOD2(setActiveConfig, Error(Display, Config));
@@ -142,8 +146,8 @@ public:
                  V2_4::Error(Display, Config, std::vector<VsyncPeriodNanos>*));
     MOCK_METHOD2(getDisplayVsyncPeriod, V2_4::Error(Display, VsyncPeriodNanos*));
     MOCK_METHOD4(setActiveConfigWithConstraints,
-                 V2_4::Error(Display, Config, const IComposerClient::VsyncPeriodChangeConstraints&,
-                             VsyncPeriodChangeTimeline*));
+                 Error(Display, Config, const IComposerClient::VsyncPeriodChangeConstraints&,
+                       VsyncPeriodChangeTimeline*));
     MOCK_METHOD2(setAutoLowLatencyMode, V2_4::Error(Display, bool));
     MOCK_METHOD2(setBootDisplayConfig, Error(Display, Config));
     MOCK_METHOD1(clearBootDisplayConfig, Error(Display));
@@ -180,6 +184,26 @@ public:
     MOCK_METHOD1(onHotplugDisconnect, void(Display));
     MOCK_METHOD(Error, setRefreshRateChangedCallbackDebugEnabled, (Display, bool));
     MOCK_METHOD(Error, notifyExpectedPresent, (Display, nsecs_t, int32_t));
+    MOCK_METHOD(
+            Error, getRequestedLuts,
+            (Display, std::vector<Layer>*,
+             std::vector<aidl::android::hardware::graphics::composer3::DisplayLuts::LayerLut>*));
+    MOCK_METHOD(Error, setLayerLuts,
+                (Display, Layer, aidl::android::hardware::graphics::composer3::Luts&));
+    MOCK_METHOD(Error, getMaxLayerPictureProfiles, (Display, int32_t*));
+    MOCK_METHOD(Error, setDisplayPictureProfileId, (Display, PictureProfileId id));
+    MOCK_METHOD(Error, setLayerPictureProfileId, (Display, Layer, PictureProfileId id));
+    MOCK_METHOD(Error, startHdcpNegotiation,
+                (Display, const aidl::android::hardware::drm::HdcpLevels& levels));
+    MOCK_METHOD(Error, getLuts,
+                (Display, const std::vector<sp<GraphicBuffer>>&,
+                 std::vector<aidl::android::hardware::graphics::composer3::Luts>*));
+    MOCK_METHOD4(getLayerPresentFences,
+                 Error(Display, std::vector<Layer>*, std::vector<int>*, std::vector<int64_t>*));
+    MOCK_METHOD(Error, getReadbackBufferAttributes,
+                (Display, aidl::android::hardware::graphics::composer3::ReadbackBufferAttributes*));
+    MOCK_METHOD(Error, setReadbackBuffer, (Display, const sp<GraphicBuffer>&, int));
+    MOCK_METHOD(Error, getReadbackBufferFence, (Display, int*));
 };
 
 } // namespace Hwc2::mock

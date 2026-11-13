@@ -79,12 +79,15 @@ These options may all be specified at the top level of the config file, or overr
 | `vendor_available`         | boolean                   | `true`                                                      | Value to use for every generated library module's `vendor_available` field.                                                                                                 |
 | `vendor_ramdisk_available` | boolean                   | `false`                                                     | Value to use for every generated library module's `vendor_ramdisk_available` field.                                                                                         |
 | `min_sdk_version`          | string                    | -                                                           | Minimum SDK version for generated modules' `min_sdk_version` field.                                                                                                         |
+| `sdk_version`              | string                    | -                                                           | SDK version for generated modules' `sdk_version` field.                                                                                                                     |
 | `module_name_overrides`    | string => string          | `{}`                                                        | Map of renames for modules. For example, if a "libfoo" would be generated and there is an entry ("libfoo", "libbar"), the generated module will be called "libbar" instead. |
 | `cfg_blocklist`            | list of strings           | `[]`                                                        | `cfg` flags in this list will not be included.                                                                                                                              |
 | `extra_cfg`                | list of strings           | `[]`                                                        | Extra `cfg` flags to enable in output modules.                                                                                                                              |
 | `module_blocklist`         | list of strings           | `[]`                                                        | Modules in this list will not be generated.                                                                                                                                 |
 | `module_visibility`        | string => list of strings | `{}`                                                        | Modules name => Soong "visibility" property.                                                                                                                                |
 | `run_cargo`                | boolean                   | `true`                                                      | Whether to run the cargo build and parse its output, rather than just figuring things out from the cargo metadata.                                                          |
+| `generate_androidbp`       | boolean                   | `true`                                                      | Whether to generate Android build rules in an `Android.bp` file.                                                                                                            |
+| `generate_rulesmk`         | boolean                   | `false`                                                     | Whether to generate Trusty build rules in `rules.mk` and `Android.bp` files.                                                                                                |
 
 Of particular note, it is preferable to set `run_cargo` to `false` where possible as it is
 significantly faster. However, this may miss important details in more complicated cases, such as
@@ -100,6 +103,8 @@ specified outside of a package.
 | ----------------------- | ------------------------- | ------- | ----------- | ------------------------------------------------------------------------------------------------------------------ |
 | `add_toplevel_block`    | path                      | -       | no          | File with content to append to the end of the generated Android.bp.                                                |
 | `patch`                 | path                      | -       | no          | Patch file to apply after Android.bp is generated.                                                                 |
+| `rulesmk_patch`         | path                      | -       | no          | Patch file to apply after rules.mk is generated.                                                                   |
+| `license_text`          | list of paths             | -       | no          | Files to use for `license_text` in `license` module.                                                               |
 | `alloc`                 | boolean                   | `false` | yes         | Link against `alloc`. Only valid if `no_std` is also true.                                                         |
 | `device_supported`      | boolean                   | `true`  | yes         | Whether to compile for device. Defaults to true.                                                                   |
 | `host_supported`        | boolean                   | `true`  | yes         | Whether to compile for host. Defaults to true.                                                                     |
@@ -111,8 +116,10 @@ specified outside of a package.
 | `no_std`                | boolean                   | `false` | yes         | Don't link against `std`, only `core`.                                                                             |
 | `copy_out`              | boolean                   | `false` | yes         | Copy `build.rs` output to `./out/*` and add a genrule to copy `./out/*` to genrule output.                         |
 | `test_data`             | string => list of strings | `{}`    | yes         | Add the given files to the given tests' `data` property. The key is the test source filename relative to the crate |
+| `target_windows`        | boolean                   | `false` | yes         | Add a `target: { windows: { enabled: true } }` property to modules.
 | `whole_static_libs`     | list of strings           | `[]`    | yes         | Static libraries in this list will instead be added as whole_static_libs.                                          |
 | `exported_c_header_dir` | list of paths             | `[]`    | yes         | Directories with headers to export for C usage.                                                                    |
+| `extra_srcs`            | list of paths             | `[]`    | yes         | Additional sources that should be listed as inputs in `srcs`.                                                      |
 
 ## Auto-config
 

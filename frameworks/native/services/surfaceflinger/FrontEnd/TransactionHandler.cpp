@@ -15,23 +15,25 @@
  */
 
 // #define LOG_NDEBUG 0
-#undef LOG_TAG
-#define LOG_TAG "SurfaceFlinger"
+
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
+#include <chrono>
+
+#include <android/gui/TransactionBarrier.h>
+#include <common/trace.h>
 #include <cutils/trace.h>
 #include <utils/Log.h>
-#include <utils/Trace.h>
 #include "FrontEnd/LayerLog.h"
 
 #include "TransactionHandler.h"
 
 namespace android::surfaceflinger::frontend {
 
-void TransactionHandler::queueTransaction(TransactionState&& state) {
+void TransactionHandler::queueTransaction(QueuedTransactionState&& state) {
     mLocklessTransactionQueue.push(std::move(state));
     mPendingTransactionCount.fetch_add(1);
-    ATRACE_INT("TransactionQueue", static_cast<int>(mPendingTransactionCount.load()));
+    SFTRACE_INT("TransactionQueue", static_cast<int>(mPendingTransactionCount.load()));
 }
 
 void TransactionHandler::collectTransactions() {
@@ -40,16 +42,28 @@ void TransactionHandler::collectTransactions() {
         if (!maybeTransaction.has_value()) {
             break;
         }
-        auto transaction = maybeTransaction.value();
-        mPendingTransactionQueues[transaction.applyToken].emplace(std::move(transaction));
+        const auto& token = maybeTransaction->applyToken;
+        mPendingTransactionQueues[token].emplace(std::move(*maybeTransaction));
     }
 }
 
-std::vector<TransactionState> TransactionHandler::flushTransactions() {
+std::vector<QueuedTransactionState> TransactionHandler::flushTransactions() {
     // Collect transaction that are ready to be applied.
-    std::vector<TransactionState> transactions;
+    std::vector<QueuedTransactionState> transactions;
     TransactionFlushState flushState;
     flushState.queueProcessTime = systemTime();
+    // Expire signal tokens.
+    std::erase_if(mSignalledTransactionBarriers,
+                  [ttl = mTransactionBarrierTtl,
+                   queueProcessTime = flushState.queueProcessTime](const auto& pair) {
+                      const bool isExpired =
+                              std::chrono::nanoseconds(queueProcessTime - pair.second) > ttl;
+                      if (isExpired) {
+                          SFTRACE_FORMAT_INSTANT("Transaction barrier signal %s has expired",
+                                                 pair.first.c_str());
+                      }
+                      return isExpired;
+                  });
     // Transactions with a buffer pending on a barrier may be on a different applyToken
     // than the transaction which satisfies our barrier. In fact this is the exact use case
     // that the primitive is designed for. This means we may first process
@@ -71,19 +85,45 @@ std::vector<TransactionState> TransactionHandler::flushTransactions() {
     applyUnsignaledBufferTransaction(transactions, flushState);
 
     mPendingTransactionCount.fetch_sub(transactions.size());
-    ATRACE_INT("TransactionQueue", static_cast<int>(mPendingTransactionCount.load()));
+    SFTRACE_INT("TransactionQueue", static_cast<int>(mPendingTransactionCount.load()));
     return transactions;
 }
 
+TransactionHandler::TransactionReadiness TransactionHandler::isBarrierSignalledOrExpired(
+        const TransactionFlushState& flushState) {
+    const bool isExpired =
+            std::chrono::nanoseconds(flushState.queueProcessTime -
+                                     flushState.transaction->postTime) > mTransactionBarrierTtl;
+
+    for (const auto& barrier : flushState.transaction->transactionBarriers) {
+        if (barrier.kind == android::gui::TransactionBarrier::BarrierKind::KIND_WAIT) {
+            // At least one WAIT barrier has expired, apply the transaction.
+            if (isExpired) {
+                SFTRACE_FORMAT_INSTANT("Transaction id=%" PRIu64
+                                       " was waiting on barrier %s and timed out",
+                                       flushState.transaction->id, barrier.barrierToken.c_str());
+                return TransactionReadiness::Ready;
+            }
+            // At least one WAIT barrier has not been signalled, keep waiting.
+            if (!mSignalledTransactionBarriers.contains(barrier.barrierToken)) {
+                SFTRACE_FORMAT_INSTANT("Transaction id=%" PRIu64 " is waiting on barrier %s",
+                                       flushState.transaction->id, barrier.barrierToken.c_str());
+                return TransactionReadiness::NotReadyBarrier;
+            }
+        }
+    }
+    return TransactionReadiness::Ready;
+}
+
 void TransactionHandler::applyUnsignaledBufferTransaction(
-        std::vector<TransactionState>& transactions, TransactionFlushState& flushState) {
+        std::vector<QueuedTransactionState>& transactions, TransactionFlushState& flushState) {
     if (!flushState.queueWithUnsignaledBuffer) {
         return;
     }
 
     // only apply an unsignaled buffer transaction if it's the first one
     if (!transactions.empty()) {
-        ATRACE_NAME("fence unsignaled");
+        SFTRACE_NAME("fence unsignaled");
         return;
     }
 
@@ -98,9 +138,9 @@ void TransactionHandler::applyUnsignaledBufferTransaction(
     }
 }
 
-void TransactionHandler::popTransactionFromPending(std::vector<TransactionState>& transactions,
-                                                   TransactionFlushState& flushState,
-                                                   std::queue<TransactionState>& queue) {
+void TransactionHandler::popTransactionFromPending(
+        std::vector<QueuedTransactionState>& transactions, TransactionFlushState& flushState,
+        std::queue<QueuedTransactionState>& queue) {
     auto& transaction = queue.front();
     // Transaction is ready move it from the pending queue.
     flushState.firstTransaction = false;
@@ -122,6 +162,13 @@ void TransactionHandler::popTransactionFromPending(std::vector<TransactionState>
                     .emplace_or_replace(state.surface.get(), std::numeric_limits<uint64_t>::max());
         }
     });
+
+    // Update signalled transaction barriers.
+    for (const auto& b : readyToApplyTransaction.transactionBarriers) {
+        if (b.kind == android::gui::TransactionBarrier::BarrierKind::KIND_SIGNAL) {
+            mSignalledTransactionBarriers[b.barrierToken] = flushState.queueProcessTime;
+        }
+    }
 }
 
 TransactionHandler::TransactionReadiness TransactionHandler::applyFilters(
@@ -146,8 +193,8 @@ TransactionHandler::TransactionReadiness TransactionHandler::applyFilters(
     return ready;
 }
 
-int TransactionHandler::flushPendingTransactionQueues(std::vector<TransactionState>& transactions,
-                                                      TransactionFlushState& flushState) {
+int TransactionHandler::flushPendingTransactionQueues(
+        std::vector<QueuedTransactionState>& transactions, TransactionFlushState& flushState) {
     int transactionsPendingBarrier = 0;
     auto it = mPendingTransactionQueues.begin();
     while (it != mPendingTransactionQueues.end()) {

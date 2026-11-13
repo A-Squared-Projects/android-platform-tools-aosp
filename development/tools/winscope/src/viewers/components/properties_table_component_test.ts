@@ -13,26 +13,48 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {ComponentFixture, TestBed} from '@angular/core/testing';
+import {TestBed} from '@angular/core/testing';
 import {PropertiesTableComponent} from './properties_table_component';
+import {CommonModule} from '@angular/common';
+import {DOMTestHelper} from 'test/unit/dom_test_helpers';
 
 describe('PropertiesTableComponent', () => {
-  let fixture: ComponentFixture<PropertiesTableComponent>;
   let component: PropertiesTableComponent;
+  let dom: DOMTestHelper<PropertiesTableComponent>;
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     await TestBed.configureTestingModule({
-      declarations: [PropertiesTableComponent],
-      schemas: [],
+      imports: [PropertiesTableComponent, CommonModule],
     }).compileComponents();
   });
 
   beforeEach(() => {
-    fixture = TestBed.createComponent(PropertiesTableComponent);
+    const fixture = TestBed.createComponent(PropertiesTableComponent);
     component = fixture.componentInstance;
+    dom = new DOMTestHelper(fixture, fixture.nativeElement);
   });
 
   it('can be created', () => {
     expect(component).toBeTruthy();
+  });
+
+  it('renders defined table properties', () => {
+    component.properties = {prop1: 'value1', prop2: 'value2'};
+    dom.detectChanges();
+    const rows = dom.findAll('tr');
+    expect(rows.length).toEqual(2);
+    rows[0].get('.table-cell-name').checkTextExact('prop1');
+    rows[0].get('.table-cell-value').checkTextExact('value1');
+    rows[1].get('.table-cell-name').checkTextExact('prop2');
+    rows[1].get('.table-cell-value').checkTextExact('value2');
+  });
+
+  it('renders undefined table properties', () => {
+    component.properties = {prop: undefined};
+    dom.detectChanges();
+    const rows = dom.findAll('tr');
+    expect(rows.length).toEqual(1);
+    rows[0].get('.table-cell-name').checkTextExact('prop');
+    rows[0].get('.table-cell-value').checkTextExact('undefined');
   });
 });

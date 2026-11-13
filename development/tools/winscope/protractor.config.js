@@ -31,6 +31,7 @@ exports.config = {
     },
   },
   chromeDriver: './deps_build/chromedriver-linux64/chromedriver',
+  rootElement: 'app-root',
 
   allScriptsTimeout: 10000,
   getPageTimeout: 10000,
@@ -39,11 +40,8 @@ exports.config = {
     defaultTimeoutInterval: 10000,
   },
 
-  onPrepare: function () {
-    // allow specifying the file protocol within browser.get(...)
+  onPrepare: async () => {
     browser.ignoreSynchronization = true;
-    browser.waitForAngular();
-    browser.sleep(500);
-    browser.resetUrl = 'file:///';
+    await browser.sleep(500);
   },
 };

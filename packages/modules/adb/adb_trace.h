@@ -17,6 +17,8 @@
 #ifndef __ADB_TRACE_H
 #define __ADB_TRACE_H
 
+#include <string>
+
 #include <android-base/logging.h>
 #include <android-base/stringprintf.h>
 
@@ -40,6 +42,7 @@ enum AdbTrace {
     SHELL,
     INCREMENTAL,
     MDNS,
+    MDNS_STACK,
     NUM_TRACES,
 };
 
@@ -60,5 +63,6 @@ enum AdbTrace {
 extern int adb_trace_mask;
 void adb_trace_init(char**);
 void adb_trace_enable(AdbTrace trace_tag);
+std::string get_trace_setting();
 
 #endif /* __ADB_TRACE_H */

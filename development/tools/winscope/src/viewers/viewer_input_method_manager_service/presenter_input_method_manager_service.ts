@@ -14,17 +14,18 @@
  * limitations under the License.
  */
 
-import {Timestamp} from 'common/time';
-import {HierarchyTreeNode} from 'trace/tree_node/hierarchy_tree_node';
+import {Timestamp} from 'common/time/time';
+import {HierarchyTreeNode} from 'tree_node/hierarchy_tree_node';
+import {AbstractPresenterInputMethod} from 'viewers/common/abstract_presenter_input_method';
 import {ImeAdditionalProperties} from 'viewers/common/ime_additional_properties';
 import {ImeUtils} from 'viewers/common/ime_utils';
-import {PresenterInputMethod} from 'viewers/common/presenter_input_method';
 
-export class PresenterInputMethodManagerService extends PresenterInputMethod {
-  protected updateHierarchyTableProperties() {
-    const inputMethodManagerService = this.entry?.getChildByName(
-      'inputMethodManagerService',
-    );
+export class PresenterInputMethodManagerService extends AbstractPresenterInputMethod {
+  protected getHierarchyTableProperties() {
+    const inputMethodManagerService = this.hierarchyPresenter
+      .getCurrentHierarchyTreesForTrace(this.imeTrace)
+      ?.at(0)
+      ?.getChildByName('inputMethodManagerService');
 
     const curMethodId = inputMethodManagerService
       ?.getEagerPropertyByName('curMethodId')
@@ -38,7 +39,7 @@ export class PresenterInputMethodManagerService extends PresenterInputMethod {
     const inputShown =
       inputMethodManagerService
         ?.getEagerPropertyByName('inputShown')
-        ?.getValue() ?? false;
+        ?.getValue<boolean>() ?? false;
 
     return {
       ...new ImManagerServiceTableProperties(
@@ -50,12 +51,12 @@ export class PresenterInputMethodManagerService extends PresenterInputMethod {
     };
   }
 
-  protected override getAdditionalProperties(
+  protected override async getAdditionalProperties(
     wmEntry: HierarchyTreeNode | undefined,
     sfEntry: HierarchyTreeNode | undefined,
     wmEntryTimestamp: Timestamp | undefined,
     sfEntryTimestamp: Timestamp | undefined,
-  ) {
+  ): Promise<ImeAdditionalProperties> {
     return new ImeAdditionalProperties(
       wmEntry
         ? ImeUtils.processWindowManagerTraceEntry(wmEntry, wmEntryTimestamp)

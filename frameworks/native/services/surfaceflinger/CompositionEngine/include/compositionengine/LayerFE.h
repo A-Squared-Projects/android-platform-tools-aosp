@@ -19,6 +19,7 @@
 #include <optional>
 #include <ostream>
 #include <unordered_set>
+#include "aidl/android/hardware/graphics/composer3/Composition.h"
 #include "ui/LayerStack.h"
 
 // TODO(b/129481165): remove the #pragma below and fix conversion issues
@@ -58,8 +59,7 @@ public:
     // Called before composition starts. Should return true if this layer has
     // pending updates which would require an extra display refresh cycle to
     // process.
-    virtual bool onPreComposition(nsecs_t refreshStartTime,
-                                  bool updatingOutputGeometryThisFrame) = 0;
+    virtual bool onPreComposition(bool updatingOutputGeometryThisFrame) = 0;
 
     struct ClientCompositionTargetSettings {
         enum class BlurSetting {
@@ -122,6 +122,8 @@ public:
 
         // True if layers with 170M dataspace should be overridden to sRGB.
         const bool treat170mAsSrgb;
+
+        std::shared_ptr<gui::DisplayLuts> luts;
     };
 
     // A superset of LayerSettings required by RenderEngine to compose a layer
@@ -132,6 +134,18 @@ public:
 
         // Currently latched frame number, 0 if invalid.
         uint64_t frameNumber = 0;
+
+        // layer serial number, -1 if invalid.
+        int32_t sequence = -1;
+    };
+
+    // Describes the states of the release fence. Checking the states allows checks
+    // to ensure that set_value() is not called on the same promise multiple times,
+    // and can indicate if the promise has been fulfilled.
+    enum class ReleaseFencePromiseStatus {
+        UNINITIALIZED, // Promise not created
+        INITIALIZED,   // Promise created, fence has not been set
+        FULFILLED      // Promise fulfilled, fence is set
     };
 
     // Returns the LayerSettings to pass to RenderEngine::drawLayers. The state may contain shadows
@@ -140,8 +154,27 @@ public:
     virtual std::optional<LayerSettings> prepareClientComposition(
             ClientCompositionTargetSettings&) const = 0;
 
-    // Called after the layer is displayed to update the presentation fence
-    virtual void onLayerDisplayed(ftl::SharedFuture<FenceResult>, ui::LayerStack layerStack) = 0;
+    // Initializes a promise for a buffer release fence and provides the future for that
+    // fence. This should only be called when a promise has not yet been created, or
+    // after the previous promise has already been fulfilled. Attempting to call this
+    // when an existing promise is INITIALIZED will fail because the promise has not
+    // yet been fulfilled.
+    virtual ftl::Future<FenceResult> createReleaseFenceFuture() = 0;
+
+    // Sets promise with its buffer's release fence
+    virtual void setReleaseFence(const FenceResult& releaseFence) = 0;
+
+    virtual void setLastClientTargetAcquireFence(const FenceResult&) = 0;
+
+    virtual sp<Fence> getAndClearLastClientTargetAcquireFence() = 0;
+
+    // Checks if the buffer's release fence has been set
+    virtual LayerFE::ReleaseFencePromiseStatus getReleaseFencePromiseStatus() = 0;
+
+    virtual void setReleasedBuffer(sp<GraphicBuffer> buffer) = 0;
+
+    // Indicates that the picture profile request was applied to this layer.
+    virtual void onPictureProfileCommitted() = 0;
 
     // Gets some kind of identifier for the layer for debug purposes.
     virtual const char* getDebugName() const = 0;
@@ -152,6 +185,28 @@ public:
     // Whether the layer should be rendered with rounded corners.
     virtual bool hasRoundedCorners() const = 0;
     virtual void setWasClientComposed(const sp<Fence>&) {}
+
+    // These fields are all copied from the last written HWC state.
+    // This state is only used for debugging purposes.
+    struct HwcLayerDebugState {
+        aidl::android::hardware::graphics::composer3::Composition lastCompositionType =
+                aidl::android::hardware::graphics::composer3::Composition::INVALID;
+        // Corresponds to passing an alpha of 0 to HWC2::Layer::setPlaneAlpha.
+        bool wasSkipped = false;
+
+        // Indicates whether the compositionengine::OutputLayer had properties overwritten.
+        // Not directly passed to HWC.
+        bool wasOverridden = false;
+
+        // Corresponds to the GraphicBuffer ID of the buffer passed to HWC2::Layer::setBuffer.
+        // This buffer corresponds to a CachedSet that the LayerFE was flattened to.
+        uint64_t overrideBufferId = 0;
+    };
+
+    // Used for debugging purposes, e.g. perfetto tracing, dumpsys.
+    virtual void setLastHwcState(const LayerFE::HwcLayerDebugState &hwcState) = 0;
+    virtual const HwcLayerDebugState &getLastHwcState() const = 0;
+
     virtual const gui::LayerMetadata* getMetadata() const = 0;
     virtual const gui::LayerMetadata* getRelativeMetadata() const = 0;
 };

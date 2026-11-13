@@ -1,5 +1,5 @@
 /*
- * Copyright 2024, The Android Open Source Project
+ * Copyright (C) 2024 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,15 +14,23 @@
  * limitations under the License.
  */
 
-import {assertDefined} from 'common/assert_utils';
-import {PropertyTreeNode} from 'trace/tree_node/property_tree_node';
+import {assertDefined} from 'common/assert';
+import {PropertyTreeNode} from 'tree_node/property_tree_node';
 import {DiffNode} from './diff_node';
 import {DiffType} from './diff_type';
+
+export interface DiffValuePart {
+  isOld: boolean;
+  isNew: boolean;
+  value: string;
+}
 
 export class UiPropertyTreeNode extends PropertyTreeNode implements DiffNode {
   private diff: DiffType = DiffType.NONE;
   private displayName: string = this.name;
   private oldValue = 'null';
+  private propagate = false;
+  private diffValueParts: DiffValuePart[] | undefined;
 
   static from(node: PropertyTreeNode): UiPropertyTreeNode {
     const displayNode = new UiPropertyTreeNode(
@@ -49,7 +57,7 @@ export class UiPropertyTreeNode extends PropertyTreeNode implements DiffNode {
     return displayNode;
   }
 
-  setDiff(diff: DiffType): void {
+  setDiff(diff: DiffType) {
     this.diff = diff;
   }
 
@@ -71,5 +79,25 @@ export class UiPropertyTreeNode extends PropertyTreeNode implements DiffNode {
 
   getOldValue(): string {
     return this.oldValue;
+  }
+
+  canPropagate(): boolean {
+    return this.propagate;
+  }
+
+  setCanPropagate(value: boolean) {
+    this.propagate = value;
+  }
+
+  hasDiffValueParts(): boolean {
+    return this.diffValueParts !== undefined;
+  }
+
+  setDiffValueParts(value: DiffValuePart[]) {
+    this.diffValueParts = value;
+  }
+
+  getDiffValueParts(): DiffValuePart[] {
+    return assertDefined(this.diffValueParts);
   }
 }

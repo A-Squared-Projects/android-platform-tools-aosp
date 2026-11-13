@@ -16,10 +16,16 @@
 
 #pragma once
 
+#include <ctype.h>
+#include <fcntl.h>
+#include <inttypes.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #include <functional>
 #include <string>
@@ -54,6 +60,35 @@ struct MapInfo {
   std::string name;
   bool shared;
 
+  // With MTE globals, segments are remapped as anonymous mappings. They're
+  // named specifically to preserve offsets and as much of the basename as
+  // possible. For example,
+  // "[anon:mt:/data/local/tmp/debuggerd_test/arm64/debuggerd_test64+108000]" is
+  // the name of anonymized mapping for debuggerd_test64 of the segment starting
+  // at 0x108000. The kernel only supports 80 characters (excluding the '[anon:'
+  // prefix and ']' suffix, but including the null terminator), and in those
+  // instances, we maintain the offset and as much of the basename as possible
+  // by left-truncation. For example:
+  // "[anon:mt:/data/nativetest64/bionic-unit-tests/bionic-loader-test-libs/libdlext_test.so+e000]"
+  // would become:
+  // "[anon:mt:...ivetest64/bionic-unit-tests/bionic-loader-test-libs/libdlext_test.so+e000]".
+  // For mappings under MTE globals, we thus post-process the name to extract the page offset, and
+  // canonicalize the name.
+  static constexpr const char* kMtePrefix = "[anon:mt:";
+  static constexpr size_t kMtePrefixLength = sizeof(kMtePrefix) - 1;
+
+  void MaybeExtractMemtagGlobalsInfo() {
+    if (!this->name.starts_with(kMtePrefix)) return;
+    if (this->name.back() != ']') return;
+
+    size_t offset_to_plus = this->name.rfind('+');
+    if (offset_to_plus == std::string::npos) return;
+    if (sscanf(this->name.c_str() + offset_to_plus + 1, "%" SCNx64 "]", &this->pgoff) != 1) return;
+
+    this->name =
+        std::string(this->name.begin() + kMtePrefixLength + 2, this->name.begin() + offset_to_plus);
+  }
+
   MapInfo(uint64_t start, uint64_t end, uint16_t flags, uint64_t pgoff, ino_t inode,
           const char* name, bool shared)
       : start(start),
@@ -62,7 +97,9 @@ struct MapInfo {
         pgoff(pgoff),
         inode(inode),
         name(name),
-        shared(shared) {}
+        shared(shared) {
+    MaybeExtractMemtagGlobalsInfo();
+  }
 
   MapInfo(const MapInfo& params)
       : start(params.start),

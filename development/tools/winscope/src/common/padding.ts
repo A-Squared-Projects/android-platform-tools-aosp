@@ -14,7 +14,10 @@
  * limitations under the License.
  */
 
-export interface Padding {
+/**
+ * Represents padding values for a rectangle.
+ */
+export declare interface Padding {
   top: number;
   right: number;
   bottom: number;

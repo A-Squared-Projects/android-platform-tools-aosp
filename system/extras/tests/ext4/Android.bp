@@ -17,7 +17,7 @@ package {
     default_applicable_licenses: [
         "system_extras_tests_license",
     ],
-    default_team: "trendy_team_performance",
+    default_team: "trendy_team_system_performance",
 }
 
 cc_binary {

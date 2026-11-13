@@ -14,63 +14,70 @@
  * limitations under the License.
  */
 
-import {assertDefined} from 'common/assert_utils';
-import {PersistentStoreProxy} from 'common/persistent_store_proxy';
-import {TimeUtils} from 'common/time_utils';
-import {WinscopeEvent, WinscopeEventType} from 'messaging/winscope_event';
-import {LayerFlag} from 'parsers/surface_flinger/layer_flag';
-import {Trace, TraceEntry} from 'trace/trace';
-import {Traces} from 'trace/traces';
-import {TraceEntryFinder} from 'trace/trace_entry_finder';
-import {TraceType} from 'trace/trace_type';
-import {EMPTY_OBJ_STRING} from 'trace/tree_node/formatters';
-import {HierarchyTreeNode} from 'trace/tree_node/hierarchy_tree_node';
 import {
-  PropertySource,
-  PropertyTreeNode,
-} from 'trace/tree_node/property_tree_node';
-import {TreeNode} from 'trace/tree_node/tree_node';
-import {IsModifiedCallbackType} from 'viewers/common/add_diffs';
-import {AddDiffsHierarchyTree} from 'viewers/common/add_diffs_hierarchy_tree';
-import {AddDiffsPropertiesTree} from 'viewers/common/add_diffs_properties_tree';
-import {SfCuratedProperties} from 'viewers/common/curated_properties';
-import {DiffType} from 'viewers/common/diff_type';
+  assertBigInt,
+  assertDefined,
+  assertNumberOrUndefined,
+  assertString,
+} from 'common/assert';
+import {createPersistentStoreProxy} from 'common/store/persistent_store_proxy';
+import {Store} from 'common/store/store';
+import {
+  TabbedViewSwitchRequest,
+  TracePositionUpdate,
+} from 'messaging/winscope_event';
+import {EMPTY_OBJ_STRING, FixedStringFormatter} from 'trace/formatters';
+import {LayerFlag} from 'trace/surface_flinger/layer_flag';
+import {CustomQueryType} from 'trace_api/custom_query';
+import {Trace} from 'trace_api/trace';
+import {TraceEntryFinder} from 'trace_api/trace_entry_finder';
+import {TRACE_INFO} from 'trace_api/trace_info';
+import {TraceType} from 'trace_api/trace_type';
+import {Traces} from 'trace_api/traces';
+import {HierarchyTreeNode} from 'tree_node/hierarchy_tree_node';
+import {PropertySource, PropertyTreeNode} from 'tree_node/property_tree_node';
+import {
+  AbstractHierarchyViewerPresenter,
+  NotifyHierarchyViewCallbackType,
+} from 'viewers/common/abstract_hierarchy_viewer_presenter';
+import {VISIBLE_CHIP} from 'viewers/common/chip';
+import {
+  SfCuratedProperties,
+  SfLayerSummary,
+  SfSummaryProperty,
+} from 'viewers/common/curated_properties';
 import {DisplayIdentifier} from 'viewers/common/display_identifier';
-import {AddChips} from 'viewers/common/operations/add_chips';
-import {Filter} from 'viewers/common/operations/filter';
-import {FlattenChildren} from 'viewers/common/operations/flatten_children';
-import {SimplifyNames} from 'viewers/common/operations/simplify_names';
+import {
+  HierarchyPresenter,
+  SelectedTree,
+} from 'viewers/common/hierarchy_presenter';
+import {PropertiesPresenter} from 'viewers/common/properties_presenter';
+import {RectsPresenter} from 'viewers/common/rects_presenter';
+import {TextFilter} from 'viewers/common/text_filter';
 import {UiHierarchyTreeNode} from 'viewers/common/ui_hierarchy_tree_node';
-import {UiPropertyTreeNode} from 'viewers/common/ui_property_tree_node';
 import {UI_RECT_FACTORY} from 'viewers/common/ui_rect_factory';
-import {UiTreeFormatter} from 'viewers/common/ui_tree_formatter';
-import {TreeNodeFilter, UiTreeUtils} from 'viewers/common/ui_tree_utils';
 import {UserOptions} from 'viewers/common/user_options';
-import {ViewCaptureUtils} from 'viewers/common/view_capture_utils';
-import {UiRect} from 'viewers/components/rects/types2d';
+import {ViewerEvents} from 'viewers/common/viewer_events';
+import {
+  RectLegendFactory,
+  RectSpec,
+  TraceRectType,
+} from 'viewers/components/rects/rect_spec';
+import {UiRect} from 'viewers/components/rects/ui_rect';
 import {UiData} from './ui_data';
+import {PlaybackPresenter} from 'viewers/common/playback/playback_presenter';
+import {PlaybackState} from 'viewers/common/playback/playback_state';
 
-type NotifyViewCallbackType = (uiData: UiData) => void;
+export class Presenter extends AbstractHierarchyViewerPresenter<UiData> {
+  static readonly DENYLIST_PROPERTY_NAMES = [
+    'name',
+    'children',
+    'dpiX',
+    'dpiY',
+  ];
 
-export class Presenter {
-  private readonly notifyViewCallback: NotifyViewCallbackType;
-  private readonly traces: Traces;
-  private readonly trace: Trace<HierarchyTreeNode>;
-  private viewCapturePackageNames: string[] = [];
-  private uiData: UiData;
-  private hierarchyFilter: TreeNodeFilter = UiTreeUtils.makeIdFilter('');
-  private propertiesFilter: TreeNodeFilter = UiTreeUtils.makePropertyFilter('');
-  private highlightedItem = '';
-  private highlightedProperty = '';
-  private pinnedItems: UiHierarchyTreeNode[] = [];
-  private pinnedIds: string[] = [];
-  private selectedHierarchyTree: UiHierarchyTreeNode | undefined;
-  private previousEntry: TraceEntry<HierarchyTreeNode> | undefined;
-  private previousHierarchyTree: HierarchyTreeNode | undefined;
-  private currentHierarchyTree: HierarchyTreeNode | undefined;
-  private currentHierarchyTreeName: string | undefined;
-  private hierarchyUserOptions: UserOptions =
-    PersistentStoreProxy.new<UserOptions>(
+  protected override hierarchyPresenter = new HierarchyPresenter(
+    createPersistentStoreProxy<UserOptions>(
       'SfHierarchyOptions',
       {
         showDiff: {
@@ -78,13 +85,14 @@ export class Presenter {
           enabled: false,
           isUnavailable: false,
         },
+        showOnlyVisible: {
+          name: 'Show only',
+          chip: VISIBLE_CHIP,
+          enabled: false,
+        },
         simplifyNames: {
           name: 'Simplify names',
           enabled: true,
-        },
-        onlyVisible: {
-          name: 'Only visible',
-          enabled: false,
         },
         flat: {
           name: 'Flat',
@@ -92,10 +100,42 @@ export class Presenter {
         },
       },
       this.storage,
-    );
-
-  private propertiesUserOptions: UserOptions =
-    PersistentStoreProxy.new<UserOptions>(
+    ),
+    new TextFilter(),
+    Presenter.DENYLIST_PROPERTY_NAMES,
+    true,
+    false,
+    this.getEntryFormattedTimestamp,
+  );
+  protected override rectsPresenter = new RectsPresenter(
+    createPersistentStoreProxy<UserOptions>(
+      'SfRectsOptions',
+      {
+        ignoreRectShowState: {
+          name: 'Ignore',
+          icon: 'visibility',
+          enabled: false,
+        },
+        showOnlyVisible: {
+          name: 'Show only',
+          chip: VISIBLE_CHIP,
+          enabled: false,
+        },
+      },
+      this.storage,
+    ),
+    (tree: HierarchyTreeNode) => {
+      if (this.rectSpecs[this.rectSpecIndex].type === TraceRectType.LAYERS) {
+        return UI_RECT_FACTORY.makeUiRects(tree, this.viewCapturePackageNames);
+      }
+      return UI_RECT_FACTORY.makeInputRects(tree, (id) => false);
+    },
+    (displays: UiRect[]) =>
+      makeDisplayIdentifiers(displays, this.wmFocusedDisplayId),
+    convertRectIdToLayerorDisplayName,
+  );
+  protected override propertiesPresenter = new PropertiesPresenter(
+    createPersistentStoreProxy<UserOptions>(
       'SfPropertyOptions',
       {
         showDiff: {
@@ -106,218 +146,203 @@ export class Presenter {
         showDefaults: {
           name: 'Show defaults',
           enabled: false,
-          tooltip: `
-                If checked, shows the value of all properties.
-                Otherwise, hides all properties whose value is
-                the default for its data type.
-              `,
+          tooltip: `If checked, shows the value of all properties.
+Otherwise, hides all properties whose value is
+the default for its data type.`,
         },
       },
       this.storage,
-    );
+    ),
+    new TextFilter(),
+    Presenter.DENYLIST_PROPERTY_NAMES,
+    undefined,
+    ['a', 'type'],
+  );
+  protected override playbackPresenter = new PlaybackPresenter((event) => {
+    this.hierarchyPresenter.setShowDiffAvailability(true);
+    return this.emitWinscopeEvent(event);
+  });
+  protected override multiTraceType = undefined;
+
+  private viewCapturePackageNames: string[] | undefined;
+  private curatedProperties: SfCuratedProperties | undefined;
+  private wmTrace: Trace<HierarchyTreeNode> | undefined;
+  private wmFocusedDisplayId: number | undefined;
+  private rectSpecs: RectSpec[] = [
+    {
+      type: TraceRectType.LAYERS,
+      icon: TRACE_INFO[TraceType.SURFACE_FLINGER].icon,
+      legend: RectLegendFactory.makeLegendForLayerRects(true),
+    },
+    {
+      type: TraceRectType.INPUT_WINDOWS,
+      icon: TRACE_INFO[TraceType.INPUT_EVENT_MERGED].icon,
+      legend: RectLegendFactory.makeLegendForInputWindowRects(true),
+    },
+  ];
+  private rectSpecIndex = 0;
 
   constructor(
+    trace: Trace<HierarchyTreeNode>,
     traces: Traces,
-    private readonly storage: Storage,
-    notifyViewCallback: NotifyViewCallbackType,
+    storage: Readonly<Store>,
+    notifyViewCallback: NotifyHierarchyViewCallbackType<UiData>,
   ) {
-    this.traces = traces;
-    this.trace = assertDefined(traces.getTrace(TraceType.SURFACE_FLINGER));
-    this.notifyViewCallback = notifyViewCallback;
-    this.uiData = new UiData([TraceType.SURFACE_FLINGER]);
-    this.copyUiDataAndNotifyView();
+    super(trace, traces, storage, notifyViewCallback, new UiData());
+    this.uiData.allRectSpecs = this.rectSpecs;
+    this.wmTrace = traces.getTrace(TraceType.WINDOW_MANAGER);
   }
 
-  async onAppEvent(event: WinscopeEvent) {
-    await event.visit(
-      WinscopeEventType.TRACE_POSITION_UPDATE,
-      async (event) => {
-        await this.initializeIfNeeded();
+  async onRectDoubleClick(rectId: string) {
+    if (!this.viewCapturePackageNames) {
+      return;
+    }
+    const rectHasViewCapture = this.viewCapturePackageNames.some(
+      (packageName) => rectId.includes(packageName),
+    );
+    if (!rectHasViewCapture) {
+      return;
+    }
+    const newActiveTrace = assertDefined(
+      this.traces.getTrace(TraceType.VIEW_CAPTURE),
+    );
+    await this.emitWinscopeEvent(new TabbedViewSwitchRequest(newActiveTrace));
+  }
 
-        const entry = TraceEntryFinder.findCorrespondingEntry(
-          this.trace,
-          event.position,
+  override async onHighlightedNodeChange(item: UiHierarchyTreeNode) {
+    await this.applyHighlightedNodeChange(item);
+    this.updateCuratedProperties();
+    this.refreshUIData();
+  }
+
+  override async onHighlightedIdChange(newId: string) {
+    await this.applyHighlightedIdChange(newId);
+    this.updateCuratedProperties();
+    this.refreshUIData();
+  }
+
+  onRectTypeButtonClicked(type: TraceRectType) {
+    this.rectSpecIndex = this.rectSpecs.findIndex((spec) => spec.type === type);
+    const currentHierarchyTrees =
+      this.hierarchyPresenter.getAllCurrentHierarchyTrees();
+    if (currentHierarchyTrees) {
+      this.rectsPresenter?.applyHierarchyTreesChange(currentHierarchyTrees);
+    }
+    this.refreshUIData();
+  }
+
+  protected override getOverrideDisplayName(
+    selected: SelectedTree,
+  ): string | undefined {
+    return selected.tree.isRoot()
+      ? this.hierarchyPresenter
+          .getCurrentHierarchyTreeNames(selected.trace)
+          ?.at(0)
+      : undefined;
+  }
+
+  protected override keepCalculated(tree: HierarchyTreeNode): boolean {
+    return tree.isRoot();
+  }
+
+  protected override async initializeIfNeeded(event: TracePositionUpdate) {
+    if (!this.viewCapturePackageNames) {
+      const tracesVc = this.traces.getTraces(TraceType.VIEW_CAPTURE);
+      const promisesPackageName = tracesVc.map(async (trace) => {
+        const packageAndWindow = await trace.customQuery(
+          CustomQueryType.VIEW_CAPTURE_METADATA,
         );
-        this.currentHierarchyTree = await entry?.getValue();
-        if (entry) {
-          this.currentHierarchyTreeName = TimeUtils.format(
-            entry.getTimestamp(),
-          );
-        }
-
-        this.previousEntry =
-          entry && entry.getIndex() > 0
-            ? this.trace.getEntry(entry.getIndex() - 1)
-            : undefined;
-        this.previousHierarchyTree = undefined;
-
-        if (this.hierarchyUserOptions['showDiff'].isUnavailable !== undefined) {
-          this.hierarchyUserOptions['showDiff'].isUnavailable =
-            this.previousEntry === undefined;
-        }
-        if (
-          this.propertiesUserOptions['showDiff'].isUnavailable !== undefined
-        ) {
-          this.propertiesUserOptions['showDiff'].isUnavailable =
-            this.previousEntry === undefined;
-        }
-
-        this.uiData = new UiData();
-        this.uiData.hierarchyUserOptions = this.hierarchyUserOptions;
-        this.uiData.propertiesUserOptions = this.propertiesUserOptions;
-
-        if (this.currentHierarchyTree) {
-          this.uiData.highlightedItem = this.highlightedItem;
-          this.uiData.highlightedProperty = this.highlightedProperty;
-          this.uiData.rects = UI_RECT_FACTORY.makeUiRects(
-            this.currentHierarchyTree,
-            this.viewCapturePackageNames,
-          );
-          this.pinnedItems = [];
-          this.uiData.tree = await this.formatHierarchyTreeAndUpdatePinnedItems(
-            this.currentHierarchyTree,
-          );
-          this.uiData.displays = this.getDisplays(this.uiData.rects);
-        }
-        this.copyUiDataAndNotifyView();
-      },
-    );
+        return packageAndWindow.packageName;
+      });
+      this.viewCapturePackageNames = await Promise.all(promisesPackageName);
+    }
+    await this.setInitialWmActiveDisplay(event);
   }
 
-  onPinnedItemChange(pinnedItem: UiHierarchyTreeNode) {
-    const pinnedId = pinnedItem.id;
-    if (this.pinnedItems.map((item) => item.id).includes(pinnedId)) {
-      this.pinnedItems = this.pinnedItems.filter(
-        (pinned) => pinned.id !== pinnedId,
-      );
+  protected override async playPlayback(
+    trace: Trace<HierarchyTreeNode>,
+    currentPosition: number,
+    requestedState: PlaybackState,
+  ) {
+    this.hierarchyPresenter.setShowDiffAvailability(false);
+    this.playbackPresenter.play(trace, currentPosition, requestedState);
+  }
+
+  protected override async pausePlayback(): Promise<void> {
+    this.hierarchyPresenter.setShowDiffAvailability(true);
+    this.playbackPresenter.pause();
+  }
+
+  protected override async processDataAfterPositionUpdate(): Promise<void> {
+    if (this.playbackPresenter.isPlaying()) {
+      this.hierarchyPresenter.setShowDiffAvailability(false);
     } else {
-      this.pinnedItems.push(pinnedItem);
-    }
-    this.updatePinnedIds(pinnedId);
-    this.uiData.pinnedItems = this.pinnedItems;
-    this.copyUiDataAndNotifyView();
-  }
-
-  onHighlightedItemChange(id: string) {
-    if (this.highlightedItem === id) {
-      this.highlightedItem = '';
-    } else {
-      this.highlightedItem = id;
-    }
-    this.uiData.highlightedItem = this.highlightedItem;
-    this.copyUiDataAndNotifyView();
-  }
-
-  onHighlightedPropertyChange(id: string) {
-    if (this.highlightedProperty === id) {
-      this.highlightedProperty = '';
-    } else {
-      this.highlightedProperty = id;
-    }
-    this.uiData.highlightedProperty = this.highlightedProperty;
-    this.copyUiDataAndNotifyView();
-  }
-
-  async onHierarchyUserOptionsChange(userOptions: UserOptions) {
-    this.hierarchyUserOptions = userOptions;
-    this.uiData.hierarchyUserOptions = this.hierarchyUserOptions;
-    this.uiData.tree = await this.formatHierarchyTreeAndUpdatePinnedItems(
-      this.currentHierarchyTree,
-    );
-    this.copyUiDataAndNotifyView();
-  }
-
-  async onHierarchyFilterChange(filterString: string) {
-    this.hierarchyFilter = UiTreeUtils.makeIdFilter(filterString);
-    this.uiData.tree = await this.formatHierarchyTreeAndUpdatePinnedItems(
-      this.currentHierarchyTree,
-    );
-    this.copyUiDataAndNotifyView();
-  }
-
-  async onPropertiesUserOptionsChange(userOptions: UserOptions) {
-    this.propertiesUserOptions = userOptions;
-    this.uiData.propertiesUserOptions = this.propertiesUserOptions;
-    await this.updateSelectedTreeUiData();
-  }
-
-  async onPropertiesFilterChange(filterString: string) {
-    this.propertiesFilter = UiTreeUtils.makePropertyFilter(filterString);
-    await this.updateSelectedTreeUiData();
-  }
-
-  async onSelectedHierarchyTreeChange(selectedTree: UiHierarchyTreeNode) {
-    if (
-      !selectedTree.isOldNode() ||
-      selectedTree.getDiff() === DiffType.DELETED
-    ) {
-      this.selectedHierarchyTree = selectedTree;
-      await this.updateSelectedTreeUiData();
+      this.updateCuratedProperties();
     }
   }
 
-  private async initializeIfNeeded() {
-    this.viewCapturePackageNames = await ViewCaptureUtils.getPackageNames(
-      this.traces,
-    );
+  protected override refreshUIData() {
+    this.uiData.curatedProperties = this.curatedProperties;
+    this.uiData.rectSpec = this.rectSpecs[this.rectSpecIndex];
+    this.refreshHierarchyViewerUiData();
   }
 
-  private getDisplays(rects: UiRect[]): DisplayIdentifier[] {
-    const ids: DisplayIdentifier[] = [];
-
-    rects.forEach((rect: UiRect) => {
-      if (!rect.isDisplay) return;
-      const displayId = rect.id.slice(10, rect.id.length);
-      ids.push({displayId, groupId: rect.groupId, name: rect.label});
+  protected override addViewerSpecificListeners(htmlElement: HTMLElement) {
+    htmlElement.addEventListener(ViewerEvents.RectsDblClick, async (event) => {
+      const rectId = (event as CustomEvent).detail.clickedRectId;
+      await this.onRectDoubleClick(rectId);
     });
-
-    let offscreenDisplayCount = 0;
-    rects.forEach((rect: UiRect) => {
-      if (rect.isDisplay) return;
-
-      if (!ids.find((identifier) => identifier.groupId === rect.groupId)) {
-        offscreenDisplayCount++;
-        const name =
-          'Offscreen Display' +
-          (offscreenDisplayCount > 1 ? ` ${offscreenDisplayCount}` : '');
-        ids.push({displayId: -1, groupId: rect.groupId, name});
-      }
-    });
-
-    return ids.sort((a, b) => {
-      if (a.name < b.name) {
-        return -1;
-      }
-      if (a.name > b.name) {
-        return 1;
-      }
-      return 0;
+    htmlElement.addEventListener(ViewerEvents.RectTypeButtonClick, (event) => {
+      const type = (event as CustomEvent).detail.type;
+      this.onRectTypeButtonClicked(type);
     });
   }
 
-  private async updateSelectedTreeUiData() {
-    if (this.selectedHierarchyTree) {
-      const propertiesTree =
-        await this.selectedHierarchyTree.getAllProperties();
-      if (this.selectedHierarchyTree.isRoot()) {
-        this.uiData.curatedProperties = undefined;
-        this.uiData.displayPropertyGroups = false;
+  private updateCuratedProperties() {
+    const selectedHierarchyTree = this.hierarchyPresenter.getSelectedTree();
+    const propertiesTree = this.propertiesPresenter.getPropertiesTree();
+
+    if (selectedHierarchyTree && propertiesTree) {
+      if (
+        selectedHierarchyTree.tree.isRoot() ||
+        selectedHierarchyTree.tree.name === 'WinscopeRecursiveLayerRoot'
+      ) {
+        this.curatedProperties = undefined;
       } else {
-        this.uiData.curatedProperties =
-          this.getCuratedProperties(propertiesTree);
-        this.uiData.displayPropertyGroups = true;
+        const layerIdToNodeId = this.makeLayerIdToNodeIdMap();
+        this.curatedProperties = this.getCuratedProperties(
+          selectedHierarchyTree.tree,
+          propertiesTree,
+          layerIdToNodeId,
+        );
       }
-
-      this.uiData.propertiesTree = await this.formatPropertiesTree(
-        propertiesTree,
-        this.selectedHierarchyTree.isRoot(),
-      );
+    } else {
+      this.curatedProperties = undefined;
     }
-    this.copyUiDataAndNotifyView();
   }
 
-  private getCuratedProperties(tree: PropertyTreeNode): SfCuratedProperties {
-    const inputWindowInfo = tree.getChildByName('inputWindowInfo');
+  private makeLayerIdToNodeIdMap() {
+    const layerIdToNodeId = new Map<bigint, string>();
+    const tree =
+      this.hierarchyPresenter.getAllCurrentHierarchyTrees()?.[0].trees[0];
+    tree?.forEachNodeDfs((node) => {
+      if (node.isRoot()) {
+        return;
+      }
+      layerIdToNodeId.set(
+        assertBigInt(node.getEagerPropertyByName('layerId')?.getValue()),
+        node.id,
+      );
+    });
+    return layerIdToNodeId;
+  }
+
+  private getCuratedProperties(
+    hTree: HierarchyTreeNode,
+    pTree: PropertyTreeNode,
+    layerIdToNodeId: Map<bigint, string>,
+  ): SfCuratedProperties {
+    const inputWindowInfo = pTree.getChildByName('inputWindowInfo');
     const hasInputChannel =
       inputWindowInfo !== undefined &&
       inputWindowInfo.getAllChildren().length > 0;
@@ -328,58 +353,77 @@ export class Presenter {
         ).formattedValue()
       : '-1';
 
-    const verboseFlags = tree.getChildByName('verboseFlags')?.formattedValue();
-    const flags = assertDefined(tree.getChildByName('flags'));
-    const curatedFlags =
-      verboseFlags !== '' && verboseFlags !== undefined
-        ? verboseFlags
-        : flags.formattedValue();
+    const flags = assertDefined(pTree.getChildByName('flags'));
 
-    const bufferTransform = tree.getChildByName('bufferTransform');
+    const bufferTransform = pTree.getChildByName('bufferTransform');
     const bufferTransformTypeFlags =
       bufferTransform?.getChildByName('type')?.formattedValue() ?? 'null';
 
+    const zOrderRelativeOfNode = assertDefined(
+      pTree.getChildByName('zOrderRelativeOf'),
+    );
+    let relativeParent: string | SfLayerSummary =
+      zOrderRelativeOfNode.formattedValue();
+    if (relativeParent !== 'none') {
+      // update zOrderRelativeOf property formatter to zParent node id
+      zOrderRelativeOfNode.setFormatter(
+        new FixedStringFormatter(assertDefined(hTree.getZParent()).id),
+      );
+      relativeParent = this.getLayerSummary(
+        zOrderRelativeOfNode.formattedValue(),
+      );
+    }
+
     const curated: SfCuratedProperties = {
-      summary: this.getSummaryOfVisibility(tree),
-      flags: curatedFlags,
-      calcTransform: tree.getChildByName('transform'),
-      calcCrop: assertDefined(tree.getChildByName('bounds')).formattedValue(),
+      summary: this.getSummaryOfVisibility(layerIdToNodeId, pTree),
+      flags: flags.formattedValue(),
+      calcTransform: pTree.getChildByName('transform'),
+      calcCrop: this.getRectPropertyValue(pTree, 'bounds'),
       finalBounds: assertDefined(
-        tree.getChildByName('screenBounds'),
+        pTree.getChildByName('screenBounds'),
       ).formattedValue(),
-      reqTransform: tree.getChildByName('requestedTransform'),
-      reqCrop: this.getCropPropertyValue(tree, 'bounds'),
+      reqTransform: pTree.getChildByName('requestedTransform'),
       bufferSize: assertDefined(
-        tree.getChildByName('activeBuffer'),
+        pTree.getChildByName('activeBuffer'),
       ).formattedValue(),
       frameNumber: assertDefined(
-        tree.getChildByName('currFrame'),
+        pTree.getChildByName('currFrame'),
       ).formattedValue(),
       bufferTransformType: bufferTransformTypeFlags,
       destinationFrame: assertDefined(
-        tree.getChildByName('destinationFrame'),
+        pTree.getChildByName('destinationFrame'),
       ).formattedValue(),
-      z: assertDefined(tree.getChildByName('z')).formattedValue(),
-      relativeParent: assertDefined(
-        tree.getChildByName('zOrderRelativeOf'),
-      ).formattedValue(),
-      calcColor: this.getColorPropertyValue(tree, 'color'),
-      calcShadowRadius: this.getPixelPropertyValue(tree, 'shadowRadius'),
-      calcCornerRadius: this.getPixelPropertyValue(tree, 'cornerRadius'),
-      calcCornerRadiusCrop: this.getCropPropertyValue(tree, 'cornerRadiusCrop'),
+      z: assertDefined(pTree.getChildByName('z')).formattedValue(),
+      relativeParent,
+      relativeChildren: hTree
+        .getRelativeChildren()
+        .map((c) => this.getLayerSummary(c.id)),
+      calcColor: this.getColorPropertyValue(pTree, 'color'),
+      calcShadowRadius: this.getPixelPropertyValue(pTree, 'shadowRadius'),
+      calcCornerRadii: this.getCornerRadiiValue(
+        pTree,
+        'cornerRadii',
+        'cornerRadius',
+      ),
+      calcCornerRadiusCrop: this.getRectPropertyValue(
+        pTree,
+        'cornerRadiusCrop',
+      ),
       backgroundBlurRadius: this.getPixelPropertyValue(
-        tree,
+        pTree,
         'backgroundBlurRadius',
       ),
-      reqColor: this.getColorPropertyValue(tree, 'requestedColor'),
-      reqCornerRadius: this.getPixelPropertyValue(
-        tree,
+      reqColor: this.getColorPropertyValue(pTree, 'requestedColor'),
+      reqCornerRadii: this.getCornerRadiiValue(
+        pTree,
+        'requestedCornerRadii',
         'requestedCornerRadius',
       ),
-      inputTransform: hasInputChannel
-        ? inputWindowInfo.getChildByName('transform')
-        : undefined,
-      inputRegion: tree.getChildByName('inputRegion')?.formattedValue(),
+      reqCrop: this.getRectPropertyValue(pTree, 'crop'),
+      inputTransform: inputWindowInfo?.getChildByName('transform'),
+      inputRegion: inputWindowInfo
+        ?.getChildByName('touchableRegion')
+        ?.formattedValue(),
       focusable: hasInputChannel
         ? assertDefined(
             inputWindowInfo.getChildByName('focusable'),
@@ -387,15 +431,16 @@ export class Presenter {
         : 'null',
       cropTouchRegionWithItem: cropLayerId,
       replaceTouchRegionWithCrop: hasInputChannel
-        ? inputWindowInfo
+        ? (inputWindowInfo
             .getChildByName('replaceTouchableRegionWithCrop')
-            ?.formattedValue() ?? 'false'
+            ?.formattedValue() ?? 'false')
         : 'false',
       inputConfig:
         inputWindowInfo?.getChildByName('inputConfig')?.formattedValue() ??
         'null',
       ignoreDestinationFrame:
-        (flags.getValue() & LayerFlag.IGNORE_DESTINATION_FRAME) ===
+        ((flags.getValue<number>() ?? 0) &
+          LayerFlag.IGNORE_DESTINATION_FRAME) ===
         LayerFlag.IGNORE_DESTINATION_FRAME,
       hasInputChannel,
     };
@@ -403,41 +448,53 @@ export class Presenter {
   }
 
   private getSummaryOfVisibility(
-    tree: PropertyTreeNode,
-  ): Array<{key: string; value: string}> {
-    const summary = [];
-    const visibilityReason = tree.getChildByName('visibilityReason');
+    layerIdToNodeId: Map<bigint, string>,
+    pTree: PropertyTreeNode,
+  ): SfSummaryProperty[] {
+    const summary: SfSummaryProperty[] = [];
+    const visibilityReason = pTree.getChildByName('visibilityReason');
     if (visibilityReason && visibilityReason.getAllChildren().length > 0) {
       const reason = this.mapNodeArrayToString(
         visibilityReason.getAllChildren(),
       );
-      summary.push({key: 'Invisible due to', value: reason});
+      summary.push({key: 'Invisible due to', simpleValue: reason});
     }
 
-    const occludedBy = tree.getChildByName('occludedBy');
-    if (occludedBy && occludedBy.getAllChildren().length > 0) {
+    const occludedBy = pTree.getChildByName('occludedBy')?.getAllChildren();
+    if (occludedBy && occludedBy.length > 0) {
       summary.push({
         key: 'Occluded by',
-        value: this.mapNodeArrayToString(occludedBy.getAllChildren()),
+        layerValues: occludedBy.map((layer) => {
+          const nodeId = layerIdToNodeId.get(assertBigInt(layer.getValue()));
+          return this.getLayerSummary(assertString(nodeId));
+        }),
+        desc: 'Fully occluded by these opaque layers',
       });
     }
 
-    const partiallyOccludedBy = tree.getChildByName('partiallyOccludedBy');
-    if (
-      partiallyOccludedBy &&
-      partiallyOccludedBy.getAllChildren().length > 0
-    ) {
+    const partiallyOccludedBy = pTree
+      .getChildByName('partiallyOccludedBy')
+      ?.getAllChildren();
+    if (partiallyOccludedBy && partiallyOccludedBy.length > 0) {
       summary.push({
         key: 'Partially occluded by',
-        value: this.mapNodeArrayToString(partiallyOccludedBy.getAllChildren()),
+        layerValues: partiallyOccludedBy.map((layer) => {
+          const nodeId = layerIdToNodeId.get(assertBigInt(layer.getValue()));
+          return this.getLayerSummary(assertString(nodeId));
+        }),
+        desc: 'Partially occluded by these opaque layers',
       });
     }
 
-    const coveredBy = tree.getChildByName('coveredBy');
-    if (coveredBy && coveredBy.getAllChildren().length > 0) {
+    const coveredBy = pTree.getChildByName('coveredBy')?.getAllChildren();
+    if (coveredBy && coveredBy.length > 0) {
       summary.push({
         key: 'Covered by',
-        value: this.mapNodeArrayToString(coveredBy.getAllChildren()),
+        layerValues: coveredBy.map((layer) => {
+          const nodeId = layerIdToNodeId.get(assertBigInt(layer.getValue()));
+          return this.getLayerSummary(assertString(nodeId));
+        }),
+        desc: 'Partially or fully covered by these likely translucent layers',
       });
     }
     return summary;
@@ -447,12 +504,21 @@ export class Presenter {
     return nodes.map((reason) => reason.formattedValue()).join(', ');
   }
 
+  private getLayerSummary(nodeId: string): SfLayerSummary {
+    const parts = nodeId.split(' ');
+    return {
+      layerId: parts[0],
+      nodeId,
+      name: parts.slice(1).join(' '),
+    };
+  }
+
   private getPixelPropertyValue(tree: PropertyTreeNode, label: string): string {
     const propVal = assertDefined(tree.getChildByName(label)).formattedValue();
     return propVal !== 'null' ? `${propVal} px` : '0 px';
   }
 
-  private getCropPropertyValue(tree: PropertyTreeNode, label: string): string {
+  private getRectPropertyValue(tree: PropertyTreeNode, label: string): string {
     const propVal = assertDefined(tree.getChildByName(label)).formattedValue();
     return propVal !== 'null' ? propVal : EMPTY_OBJ_STRING;
   }
@@ -462,204 +528,113 @@ export class Presenter {
     return propVal !== 'null' ? propVal : 'no color found';
   }
 
-  private async formatHierarchyTreeAndUpdatePinnedItems(
-    hierarchyTree: HierarchyTreeNode | undefined,
-  ): Promise<UiHierarchyTreeNode | undefined> {
-    if (!hierarchyTree) return undefined;
-
-    const uiTree = UiHierarchyTreeNode.from(hierarchyTree);
-
-    if (this.currentHierarchyTreeName) {
-      uiTree.setDisplayName(this.currentHierarchyTreeName);
-    }
-
-    const formatter = new UiTreeFormatter<UiHierarchyTreeNode>().setUiTree(
-      uiTree,
-    );
-
+  private getCornerRadiiValue(
+    tree: PropertyTreeNode,
+    cornerRadiiLabel: string,
+    cornerRadiusLabel: string,
+  ): string {
+    let [tl, tr, bl, br] = ['0', '0', '0', '0'];
+    const radiiNode = assertDefined(tree.getChildByName(cornerRadiiLabel));
+    const radii = radiiNode.getAllChildren();
     if (
-      this.hierarchyUserOptions['showDiff']?.enabled &&
-      !this.hierarchyUserOptions['showDiff']?.isUnavailable
+      radii.length > 0 &&
+      radii.every((r) => r.source !== PropertySource.DEFAULT)
     ) {
-      if (this.previousEntry && !this.previousHierarchyTree) {
-        this.previousHierarchyTree = await this.previousEntry.getValue();
-      }
-      const prevEntryUiTree = this.previousHierarchyTree
-        ? UiHierarchyTreeNode.from(this.previousHierarchyTree)
-        : undefined;
-      await new AddDiffsHierarchyTree(
-        this.isHierarchyTreeModified,
-      ).executeInPlace(uiTree, prevEntryUiTree);
-    }
-
-    if (this.hierarchyUserOptions['flat']?.enabled) {
-      formatter.addOperation(new FlattenChildren());
-    }
-
-    const predicates = [this.hierarchyFilter];
-    if (this.hierarchyUserOptions['onlyVisible']?.enabled) {
-      predicates.push(UiTreeUtils.isVisible);
-    }
-
-    formatter
-      .addOperation(new Filter(predicates, true))
-      .addOperation(new AddChips());
-
-    if (this.hierarchyUserOptions['simplifyNames']?.enabled) {
-      formatter.addOperation(new SimplifyNames());
-    }
-
-    const formattedTree = formatter.format();
-    this.pinnedItems.push(...this.getPinnedItems(formattedTree));
-    this.uiData.pinnedItems = this.pinnedItems;
-    return formattedTree;
-  }
-
-  private getPinnedItems(tree: UiHierarchyTreeNode): UiHierarchyTreeNode[] {
-    const pinnedNodes = [];
-
-    if (this.pinnedIds.includes(tree.id)) {
-      pinnedNodes.push(tree);
-    }
-
-    for (const child of tree.getAllChildren()) {
-      pinnedNodes.push(...this.getPinnedItems(child));
-    }
-
-    return pinnedNodes;
-  }
-
-  private async formatPropertiesTree(
-    propertiesTree: PropertyTreeNode,
-    isHierarchyTreeRoot: boolean,
-  ): Promise<UiPropertyTreeNode> {
-    const uiTree = UiPropertyTreeNode.from(propertiesTree);
-
-    if (
-      this.propertiesUserOptions['showDiff']?.enabled &&
-      !this.propertiesUserOptions['showDiff']?.isUnavailable
-    ) {
-      if (this.previousEntry && !this.previousHierarchyTree) {
-        this.previousHierarchyTree = await this.previousEntry.getValue();
-      }
-      const prevEntryNode = this.previousHierarchyTree?.findDfs(
-        UiTreeUtils.makeIdMatchFilter(propertiesTree.id),
-      );
-      const prevEntryUiTree = prevEntryNode
-        ? UiPropertyTreeNode.from(await prevEntryNode.getAllProperties())
-        : undefined;
-      await new AddDiffsPropertiesTree(
-        this.isPropertyNodeModified,
-      ).executeInPlace(uiTree, prevEntryUiTree);
-    }
-
-    if (isHierarchyTreeRoot && this.currentHierarchyTreeName) {
-      uiTree.setDisplayName(this.currentHierarchyTreeName);
-    }
-
-    const predicatesKeepingChildren = [this.propertiesFilter];
-    const predicatesDiscardingChildren = [
-      UiTreeUtils.makeDenyListFilter(Presenter.DENYLIST_PROPERTY_NAMES),
-    ];
-
-    if (!this.propertiesUserOptions['showDefaults']?.enabled) {
-      predicatesDiscardingChildren.push(UiTreeUtils.isNotDefault);
-      predicatesDiscardingChildren.push(
-        UiTreeUtils.makePropertyMatchFilter('IDENTITY'),
-      );
-    }
-
-    if (!isHierarchyTreeRoot) {
-      predicatesDiscardingChildren.push(UiTreeUtils.isNotCalculated);
-    }
-
-    return new UiTreeFormatter<UiPropertyTreeNode>()
-      .setUiTree(uiTree)
-      .addOperation(new Filter(predicatesDiscardingChildren, false))
-      .addOperation(new Filter(predicatesKeepingChildren, true))
-      .format();
-  }
-
-  private updatePinnedIds(newId: string) {
-    if (this.pinnedIds.includes(newId)) {
-      this.pinnedIds = this.pinnedIds.filter((pinned) => pinned !== newId);
-    } else {
-      this.pinnedIds.push(newId);
-    }
-  }
-
-  private copyUiDataAndNotifyView() {
-    // Create a shallow copy of the data, otherwise the Angular OnPush change detection strategy
-    // won't detect the new input
-    const copy = Object.assign({}, this.uiData);
-    this.notifyViewCallback(copy);
-  }
-
-  private isHierarchyTreeModified: IsModifiedCallbackType = async (
-    newTree: TreeNode | undefined,
-    oldTree: TreeNode | undefined,
-  ) => {
-    if (!newTree && !oldTree) return false;
-    if (!newTree || !oldTree) return true;
-    if ((newTree as UiHierarchyTreeNode).isRoot()) return false;
-    const newProperties = await (
-      newTree as UiHierarchyTreeNode
-    ).getAllProperties();
-    const oldProperties = await (
-      oldTree as UiHierarchyTreeNode
-    ).getAllProperties();
-
-    return await this.isChildPropertyModified(newProperties, oldProperties);
-  };
-
-  private async isChildPropertyModified(
-    newProperties: PropertyTreeNode,
-    oldProperties: PropertyTreeNode,
-  ): Promise<boolean> {
-    for (const newProperty of newProperties.getAllChildren()) {
-      if (Presenter.DENYLIST_PROPERTY_NAMES.includes(newProperty.name)) {
-        continue;
-      }
-      if (newProperty.source === PropertySource.CALCULATED) {
-        continue;
-      }
-
-      const oldProperty = oldProperties.getChildByName(newProperty.name);
-      if (!oldProperty) {
-        return true;
-      }
-
-      if (newProperty.getAllChildren().length === 0) {
-        if (await this.isPropertyNodeModified(newProperty, oldProperty)) {
-          return true;
+      radii.forEach((r) => {
+        const value = r.formattedValue();
+        switch (r.name) {
+          case 'tl':
+            tl = value;
+            return;
+          case 'tr':
+            tr = value;
+            return;
+          case 'bl':
+            bl = value;
+            return;
+          case 'br':
+            br = value;
+            return;
+          default:
+            throw new Error(
+              `Encountered unexpected corner radius node: ${r.name}`,
+            );
         }
-      } else {
-        const childrenModified = await this.isChildPropertyModified(
-          newProperty,
-          oldProperty,
-        );
-        if (childrenModified) return true;
+      });
+    } else {
+      const rNode = tree.getChildByName(cornerRadiusLabel);
+      const r = assertNumberOrUndefined(rNode?.getValue());
+      if (r !== undefined && r > 0) {
+        const rString = assertDefined(rNode).formattedValue();
+        [tl, tr, bl, br] = [rString, rString, rString, rString];
       }
     }
-    return false;
+    return `(${tl}, ${tr}, ${bl}, ${br})`;
   }
 
-  private isPropertyNodeModified: IsModifiedCallbackType = async (
-    newTree: TreeNode | undefined,
-    oldTree: TreeNode | undefined,
-  ) => {
-    if (!newTree && !oldTree) return false;
-    if (!newTree || !oldTree) return true;
+  private async setInitialWmActiveDisplay(event: TracePositionUpdate) {
+    if (!this.wmTrace || this.wmFocusedDisplayId !== undefined) {
+      return;
+    }
+    const wmEntry: HierarchyTreeNode | undefined =
+      await TraceEntryFinder.findCorrespondingEntry<HierarchyTreeNode>(
+        this.wmTrace,
+        event.position,
+      )?.getValue();
+    if (wmEntry) {
+      this.wmFocusedDisplayId = wmEntry
+        .getEagerPropertyByName('focusedDisplayId')
+        ?.getValue();
+    }
+  }
+}
 
-    const newValue = (newTree as UiPropertyTreeNode).formattedValue();
-    const oldValue = (oldTree as UiPropertyTreeNode).formattedValue();
-    return oldValue !== newValue;
+export function makeDisplayIdentifiers(
+  rects: UiRect[],
+  focusedDisplayId?: number,
+): DisplayIdentifier[] {
+  const ids: DisplayIdentifier[] = [];
+
+  const isActive = (display: UiRect) => {
+    if (focusedDisplayId !== undefined) {
+      return display.groupId === focusedDisplayId;
+    }
+    return display.isActiveDisplay;
   };
 
-  static readonly DENYLIST_PROPERTY_NAMES = [
-    'name',
-    'children',
-    'dpiX',
-    'dpiY',
-  ];
+  rects.forEach((rect: UiRect) => {
+    if (!rect.isDisplay) return;
+
+    const displayId = rect.id.slice(10, rect.id.length);
+    ids.push({
+      displayId,
+      groupId: rect.groupId,
+      name: rect.label,
+      isActive: isActive(rect),
+    });
+  });
+
+  let offscreenDisplayCount = 0;
+  rects.forEach((rect: UiRect) => {
+    if (rect.isDisplay) return;
+
+    if (!ids.find((identifier) => identifier.groupId === rect.groupId)) {
+      offscreenDisplayCount++;
+      const name =
+        'Offscreen Display' +
+        (offscreenDisplayCount > 1 ? ` ${offscreenDisplayCount}` : '');
+      ids.push({displayId: -1, groupId: rect.groupId, name, isActive: false});
+    }
+  });
+
+  return ids;
+}
+
+export function convertRectIdToLayerorDisplayName(id: string) {
+  if (id.startsWith('Display')) return id.split('-').slice(1).join('-').trim();
+  const idMinusStartLayerId = id.split(' ').slice(1).join(' ');
+  const idSplittingEndLayerId = idMinusStartLayerId.split('#');
+  return idSplittingEndLayerId
+    .slice(0, idSplittingEndLayerId.length - 1)
+    .join('#');
 }

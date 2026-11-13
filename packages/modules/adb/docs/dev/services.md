@@ -147,6 +147,16 @@ host:server-status
 
     Used to implement 'adb forward --list'.
 
+<host-prefix>:mdns:check
+    Verify a mdns stack is enable and return which one as text.
+    Example: `mdns daemon version [Openscreen discovery 0.0.0]`
+
+<host-prefix>:track-mdns-services
+    Availability: If "track_mdns" is in the list of supported features.
+    Stream discovered mdns services as follows.
+        <hex4>: The length of the protobuffer message
+        <payload>: An MdnsServices binary protobuffer
+
 LOCAL SERVICES:
 
 All the queries below assumed that you already switched the transport

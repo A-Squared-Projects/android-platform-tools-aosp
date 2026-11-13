@@ -61,6 +61,8 @@ class TraceConverter:
   spacing = ""
   apk_info = dict()
   lib_to_path = dict()
+  mte_fault_address = None
+  mte_stack_records = []
 
   # We use the "file" command line tool to extract BuildId from ELF files.
   ElfInfo = collections.namedtuple("ElfInfo", ["bitness", "build_id"])
@@ -133,6 +135,11 @@ class TraceConverter:
                                 r"[ \t]*[a-f0-9]" + self.width +
                                 r"[ \t]*[a-f0-9]" + self.width +
                                 r"[ \t]*[ \r\n]")  # pylint: disable-msg=C6310
+    self.mte_sync_line = re.compile(r".*signal 11 \(SIGSEGV\), code 9 \(SEGV_MTESERR\), fault addr 0x(?P<address>[0-9a-f]+)")
+    self.mte_stack_record_line = re.compile(r".*stack_record fp:0x(?P<fp>[0-9a-f]+) "
+                                            r"tag:0x(?P<tag>[0-9a-f]+) "
+                                            r"pc:(?P<object>[^+]+)\+0x(?P<offset>[0-9a-f]+)"
+                                            r"(?: \(BuildId: (?P<buildid>[A-Za-z0-9]+)\))?")
 
   def CleanLine(self, ln):
     # AndroidFeedback adds zero width spaces into its crash reports. These
@@ -157,11 +164,83 @@ class TraceConverter:
       (addr, value, symbol_with_offset, location) = vl
       print("  %8s  %8s  %s  %s" % (addr, value, symbol_with_offset.ljust(maxlen), location))
 
+  def MatchStackRecords(self):
+    if self.mte_fault_address is None:
+      return
+    fault_tag = (self.mte_fault_address >> 56) & 0xF
+    untagged_fault_address = self.mte_fault_address & ~(0xF << 56)
+    build_id_to_lib = {}
+    record_for_lib = collections.defaultdict(lambda: collections.defaultdict(set))
+    for i, (lib, buildid, offset, fp, tag) in enumerate(self.mte_stack_records):
+      if buildid is not None:
+        if buildid not in build_id_to_lib:
+          basename = os.path.basename(lib).split("!")[-1]
+          newlib = self.GetLibraryByBuildId(symbol.SYMBOLS_DIR, basename, buildid)
+          if newlib is not None:
+            build_id_to_lib[buildid] = newlib
+            lib = newlib
+        else:
+          lib = build_id_to_lib[buildid]
+      record_for_lib[lib][offset].add((fp, tag, i))
+
+    closest_match = None
+    # This order is load-bearing to make inside sort before 0-byte after, and
+    # 1-byte before sort before 1-byte after (which is actually *two*
+    # bytes OOB).
+    INSIDE = 0
+    BEFORE = 1
+    AFTER = 2
+
+    for lib, values in record_for_lib.items():
+      records = symbol.GetStackRecordsForSet(lib, values.keys()) or []
+      for (addr, function_name, local_name, file_line, frame_offset, size,
+           tag_offset) in records:
+        if frame_offset is None or size is None or tag_offset is None:
+          continue
+        for fp, tag, i in values[addr]:
+          obj_offset = untagged_fault_address - fp - frame_offset
+          if tag + tag_offset == fault_tag:
+            if obj_offset >= 0 and obj_offset < size:
+              distance = 0
+              whence = INSIDE
+            elif obj_offset >= 0:
+              distance = obj_offset - size
+              whence = AFTER
+            else: # obj_offset < 0
+              distance = -obj_offset
+              whence = BEFORE
+            # We prefer the closest, and if multiple objects match the most
+            # recent one (lowest i).
+            candidate = (distance, whence, i, obj_offset, local_name,
+                         function_name, file_line)
+            if closest_match is None or candidate < closest_match:
+              closest_match = candidate
+
+    if closest_match is None:
+      return
+
+    distance, whence, _, obj_offset, local_name, function_name, file_line = closest_match
+    if whence == INSIDE:
+      distance = obj_offset
+      whence_str = "inside"
+    elif whence == AFTER:
+      whence_str = "after"
+    else: # whence == BEFORE
+      whence_str = "before"
+
+    print('')
+    print('Potentially referenced stack object:')
+    print('  %d bytes %s a variable "%s" in stack frame of function "%s"'%
+          (distance, whence_str, local_name, function_name))
+    print('  at %s' % file_line)
+
   def PrintOutput(self, trace_lines, value_lines):
     if self.trace_lines:
       self.PrintTraceLines(self.trace_lines)
     if self.value_lines:
       self.PrintValueLines(self.value_lines)
+    if self.mte_stack_records:
+      self.MatchStackRecords()
 
   def PrintDivider(self):
     print("\n-----------------------------------------------------\n")
@@ -228,6 +307,12 @@ class TraceConverter:
     name = match.group(1)
     start = int(match.group(2))
     end = start + int(match.group(3))
+    # When the actual apk data is mapped in to the process, it will be
+    # mapped in on a page boundary. This means the header data can start
+    # after the actual offset and the code will get the wrong file.
+    # Rounding down to a page boundary (assumes 4096 page size) fixes
+    # this problem.
+    start = start & ~0xfff
 
     offset_list.append([name, start, end])
     return name, start, end
@@ -415,12 +500,17 @@ class TraceConverter:
         register_header or dalvik_jni_thread_header or dalvik_native_thread_header or \
         revision_header or unreachable_header:
       ret = True
-      if self.trace_lines or self.value_lines:
+      if self.trace_lines or self.value_lines or self.mte_stack_records:
         self.PrintOutput(self.trace_lines, self.value_lines)
         self.PrintDivider()
         self.trace_lines = []
         self.value_lines = []
+        self.mte_fault_address = None
+        self.mte_stack_records = []
         self.last_frame = -1
+      if self.mte_sync_line.match(line):
+        match = self.mte_sync_line.match(line)
+        self.mte_fault_address = int(match.group("address"), 16)
       if process_header:
         print(process_header.group(1))
       if signal_header:
@@ -469,6 +559,7 @@ class TraceConverter:
         #   Some.apk!libshared.so
         # or
         #   Some.apk
+        lib_extracted = False
         if so_offset:
           # If it ends in apk, we are done.
           apk = None
@@ -488,6 +579,7 @@ class TraceConverter:
                 apk = area[0:index + 4]
           if apk:
             lib_name, lib = self.GetLibFromApk(apk, so_offset)
+            lib_extracted = lib != None
         else:
           # Sometimes we'll see something like:
           #   #01 pc abcd  libart.so!libart.so
@@ -499,17 +591,18 @@ class TraceConverter:
           lib = area
           lib_name = None
 
-        if build_id:
-          # If we have the build_id, do a brute-force search of the symbols directory.
-          basename = os.path.basename(lib).split("!")[-1]
-          lib = self.GetLibraryByBuildId(symbol.SYMBOLS_DIR, basename, build_id)
-          if not lib:
-            print("WARNING: Cannot find {} with build id {} in symbols directory."
-                  .format(basename, build_id))
-        else:
-          # When using atest, test paths are different between the out/ directory
-          # and device. Apply fixups.
-          lib = self.GetLibPath(lib)
+        if not lib_extracted:
+          if build_id:
+            # If we have the build_id, do a brute-force search of the symbols directory.
+            basename = os.path.basename(lib).split("!")[-1]
+            lib = self.GetLibraryByBuildId(symbol.SYMBOLS_DIR, basename, build_id)
+            if not lib:
+              print("WARNING: Cannot find {} with build id {} in symbols directory."
+                    .format(basename, build_id))
+          else:
+            # When using atest, test paths are different between the out/ directory
+            # and device. Apply fixups.
+            lib = self.GetLibPath(lib)
 
         # If a calls b which further calls c and c is inlined to b, we want to
         # display "a -> b -> c" in the stack trace instead of just "a -> c"
@@ -566,6 +659,16 @@ class TraceConverter:
                                    value,
                                    object_symbol_with_offset,
                                    source_location))
+    if self.mte_stack_record_line.match(line):
+      ret = True
+      match = self.mte_stack_record_line.match(line)
+      if self.mte_fault_address is not None:
+        self.mte_stack_records.append(
+          (match.group("object"),
+           match.group("buildid"),
+           int(match.group("offset"), 16),
+           int(match.group("fp"), 16),
+           int(match.group("tag"), 16)))
 
     return ret
 

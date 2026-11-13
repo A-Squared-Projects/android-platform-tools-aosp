@@ -29,6 +29,7 @@
 #include <string>
 #include <vector>
 
+#include <android-base/stringify.h>
 #include <android-base/threads.h>
 #include <crypto_utils/android_pubkey.h>
 #include <fec/ecc.h>
@@ -171,11 +172,6 @@ extern int verity_parse_header(fec_handle *f, uint64_t offset);
 #ifndef unlikely
     #define unlikely(x) __builtin_expect(!!(x), 0)
     #define likely(x)   __builtin_expect(!!(x), 1)
-#endif
-
-#ifndef stringify
-    #define __stringify(x) #x
-    #define stringify(x) __stringify(x)
 #endif
 
 /*  warnings, errors, debug output */

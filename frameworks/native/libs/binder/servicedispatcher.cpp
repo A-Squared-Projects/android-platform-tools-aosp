@@ -127,7 +127,12 @@ public:
         // We can't send BpBinder for regular binder over RPC.
         return android::binder::Status::fromStatusT(android::INVALID_OPERATION);
     }
-    android::binder::Status checkService(const std::string&, android::os::Service*) override {
+    android::binder::Status checkService(const std::string&,
+                                         android::sp<android::IBinder>*) override {
+        // We can't send BpBinder for regular binder over RPC.
+        return android::binder::Status::fromStatusT(android::INVALID_OPERATION);
+    }
+    android::binder::Status checkService2(const std::string&, android::os::Service*) override {
         // We can't send BpBinder for regular binder over RPC.
         return android::binder::Status::fromStatusT(android::INVALID_OPERATION);
     }
@@ -184,6 +189,11 @@ public:
     android::binder::Status getServiceDebugInfo(
             std::vector<android::os::ServiceDebugInfo>* _aidl_return) override {
         return mImpl->getServiceDebugInfo(_aidl_return);
+    }
+    android::binder::Status checkServiceAccess(
+            const android::os::IServiceManager::CallerContext& callerCtx, const std::string& name,
+            const std::string& permission, bool* _aidl_return) override {
+        return mImpl->checkServiceAccess(callerCtx, name, permission, _aidl_return);
     }
 
 private:

@@ -45,12 +45,25 @@ public:
         return intersection;
     }
 
+    bool contains(const FloatRect& other) const {
+        return left <= other.left && top <= other.top && right >= other.right &&
+                bottom >= other.bottom;
+    }
+
     float left = 0.0f;
     float top = 0.0f;
     float right = 0.0f;
     float bottom = 0.0f;
 
     constexpr bool isEmpty() const { return !(left < right && top < bottom); }
+
+    // a valid rectangle has a non negative width and height
+    inline bool isValid() const { return (getWidth() >= 0) && (getHeight() >= 0); }
+
+    std::string toString() const {
+        return "FloatRect(" + std::to_string(left) + ", " + std::to_string(top) + ", " +
+                std::to_string(right) + ", " + std::to_string(bottom) + ")";
+    }
 };
 
 inline bool operator==(const FloatRect& a, const FloatRect& b) {

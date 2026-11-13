@@ -1,0 +1,147 @@
+/*
+ * Copyright (C) 2024 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import {assertBigInt, assertDefined} from 'common/assert';
+import {NOT_IMPLEMENTED_ERROR} from 'common/errors';
+import {INVALID_TIME_NS, Timestamp} from 'common/time/time';
+import {TimestampConverter} from 'common/time/timestamp_converter';
+import {Analytics} from 'logging/analytics';
+import {TraceSearchQueryFailed} from 'messaging/user_warnings';
+import {UserNotifier} from 'services/user_notifier';
+import {CoarseVersion} from 'trace_api/coarse_version';
+import {
+  CustomQueryParserResultTypeMap,
+  CustomQueryType,
+} from 'trace_api/custom_query';
+import {AbsoluteEntryIndex, EntriesRange} from 'trace_api/index_types';
+import {Parser} from 'trace_api/parser';
+import {TraceType} from 'trace_api/trace_type';
+import {QueryResult} from 'trace_processor/query_result';
+import {TraceProcessorFactory} from 'trace_processor/trace_processor_factory';
+
+export class ParserSearch implements Parser<QueryResult> {
+  private queryResult?: QueryResult;
+  private timestamps: Timestamp[] = [];
+
+  constructor(
+    private readonly query: string,
+    private timestampConverter: TimestampConverter,
+  ) {}
+
+  getCoarseVersion(): CoarseVersion {
+    return CoarseVersion.LATEST;
+  }
+
+  getTraceType(): TraceType {
+    return TraceType.SEARCH;
+  }
+
+  isPerfetto(): boolean {
+    return true;
+  }
+
+  getLengthEntries(): number {
+    const queryResult = this.validateQueryResult();
+    const numRows = queryResult.numRows();
+    if (numRows === 0 || !this.hasTimestamps()) {
+      return 1;
+    }
+    return numRows;
+  }
+
+  getTimestamps(): Timestamp[] {
+    return this.timestamps;
+  }
+
+  async getEntry(index: AbsoluteEntryIndex): Promise<QueryResult> {
+    return this.validateQueryResult();
+  }
+
+  getAllEntries(): Promise<QueryResult[]> {
+    throw NOT_IMPLEMENTED_ERROR;
+  }
+
+  getRangeOfEntries(
+    entriesRange: EntriesRange,
+  ): Promise<Array<QueryResult | undefined>> {
+    throw NOT_IMPLEMENTED_ERROR;
+  }
+
+  customQuery<Q extends CustomQueryType>(
+    type: Q,
+    entriesRange: EntriesRange,
+  ): Promise<CustomQueryParserResultTypeMap[Q]> {
+    throw NOT_IMPLEMENTED_ERROR;
+  }
+
+  getDescriptors(): string[] {
+    return [this.query];
+  }
+
+  getRealToMonotonicTimeOffsetNs(): bigint | undefined {
+    return undefined;
+  }
+
+  getRealToBootTimeOffsetNs(): bigint | undefined {
+    return undefined;
+  }
+
+  createTimestamps(): void {
+    throw NOT_IMPLEMENTED_ERROR;
+  }
+
+  canConvertToPerfetto(): boolean {
+    return false;
+  }
+
+  async parse() {
+    const tp = TraceProcessorFactory.getSingleInstance();
+    try {
+      this.queryResult = await tp.query(this.query);
+      if (this.hasTimestamps() && this.queryResult.numRows() > 0) {
+        for (const it = this.queryResult.iter({}); it.valid(); it.next()) {
+          const ns = assertBigInt(it.get('ts'));
+          if (ns === INVALID_TIME_NS) {
+            this.timestamps.push(this.timestampConverter.makeZeroTimestamp());
+          } else {
+            this.timestamps.push(
+              this.timestampConverter.makeTimestampFromBootTimeNs(ns),
+            );
+          }
+        }
+      } else {
+        this.timestamps.push(this.timestampConverter.makeZeroTimestamp());
+      }
+    } catch (e) {
+      Analytics.TraceSearch.logQueryFailure();
+      UserNotifier.add(
+        new TraceSearchQueryFailed((e as Error).message),
+      ).notify();
+      throw e;
+    }
+  }
+
+  private hasTimestamps(): boolean {
+    return this.queryResult?.columns().includes('ts') ?? false;
+  }
+
+  private validateQueryResult(): QueryResult {
+    return assertDefined(
+      this.queryResult,
+      () => 'Attempted to retrieve query result before running search query.',
+    );
+  }
+}

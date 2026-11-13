@@ -53,7 +53,7 @@ public:
     createLayerFECompositionState() = 0;
 
     virtual HWComposer& getHwComposer() const = 0;
-    virtual void setHwComposer(std::unique_ptr<HWComposer>) = 0;
+    virtual void setHwComposer(HWComposer*) = 0;
 
     virtual renderengine::RenderEngine& getRenderEngine() const = 0;
     virtual void setRenderEngine(renderengine::RenderEngine*) = 0;
@@ -72,6 +72,9 @@ public:
 
     // TODO(b/121291683): These will become private/internal
     virtual void preComposition(CompositionRefreshArgs&) = 0;
+
+    // Resolves any unfulfilled promises for release fences
+    virtual void postComposition(CompositionRefreshArgs&) = 0;
 
     virtual FeatureFlags getFeatureFlags() const = 0;
 

@@ -16,7 +16,7 @@
 
 import {DragDropModule} from '@angular/cdk/drag-drop';
 import {ChangeDetectionStrategy} from '@angular/core';
-import {ComponentFixture, TestBed} from '@angular/core/testing';
+import {TestBed} from '@angular/core/testing';
 import {FormsModule, ReactiveFormsModule} from '@angular/forms';
 import {MatButtonModule} from '@angular/material/button';
 import {MatFormFieldModule} from '@angular/material/form-field';
@@ -24,33 +24,37 @@ import {MatIconModule} from '@angular/material/icon';
 import {MatInputModule} from '@angular/material/input';
 import {MatSelectModule} from '@angular/material/select';
 import {MatTooltipModule} from '@angular/material/tooltip';
-import {BrowserAnimationsModule} from '@angular/platform-browser/animations';
+import {
+  BrowserAnimationsModule,
+  NoopAnimationsModule,
+} from '@angular/platform-browser/animations';
 import {TimelineData} from 'app/timeline_data';
-import {assertDefined} from 'common/assert_utils';
-import {NO_TIMEZONE_OFFSET_FACTORY} from 'common/timestamp_factory';
-import {PropertyTreeBuilder} from 'test/unit/property_tree_builder';
+import {assertDefined} from 'common/assert';
+import {DOMTestHelper} from 'test/unit/dom_test_helpers';
+import {HierarchyTreeBuilder} from 'test/unit/hierarchy_tree_builder';
+import {makeRealTimestamp, UTC_CONVERTER} from 'test/unit/time_test_helpers';
 import {TracesBuilder} from 'test/unit/traces_builder';
-import {TracePosition} from 'trace/trace_position';
-import {TraceType} from 'trace/trace_type';
+import {TracePosition} from 'trace_api/trace_position';
+import {TraceType} from 'trace_api/trace_type';
 import {DefaultTimelineRowComponent} from './default_timeline_row_component';
 import {ExpandedTimelineComponent} from './expanded_timeline_component';
 import {TransitionTimelineComponent} from './transition_timeline_component';
 
 describe('ExpandedTimelineComponent', () => {
-  let fixture: ComponentFixture<ExpandedTimelineComponent>;
   let component: ExpandedTimelineComponent;
-  let htmlElement: HTMLElement;
+  let dom: DOMTestHelper<ExpandedTimelineComponent>;
   let timelineData: TimelineData;
-  const time10 = NO_TIMEZONE_OFFSET_FACTORY.makeRealTimestamp(10n);
-  const time11 = NO_TIMEZONE_OFFSET_FACTORY.makeRealTimestamp(11n);
-  const time12 = NO_TIMEZONE_OFFSET_FACTORY.makeRealTimestamp(12n);
-  const time30 = NO_TIMEZONE_OFFSET_FACTORY.makeRealTimestamp(30n);
-  const time60 = NO_TIMEZONE_OFFSET_FACTORY.makeRealTimestamp(60n);
-  const time110 = NO_TIMEZONE_OFFSET_FACTORY.makeRealTimestamp(110n);
+  const time10 = makeRealTimestamp(10n);
+  const time11 = makeRealTimestamp(11n);
+  const time12 = makeRealTimestamp(12n);
+  const time30 = makeRealTimestamp(30n);
+  const time60 = makeRealTimestamp(60n);
+  const time110 = makeRealTimestamp(110n);
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       imports: [
+        NoopAnimationsModule,
         FormsModule,
         MatButtonModule,
         MatFormFieldModule,
@@ -61,8 +65,6 @@ describe('ExpandedTimelineComponent', () => {
         ReactiveFormsModule,
         BrowserAnimationsModule,
         DragDropModule,
-      ],
-      declarations: [
         ExpandedTimelineComponent,
         TransitionTimelineComponent,
         DefaultTimelineRowComponent,
@@ -72,55 +74,39 @@ describe('ExpandedTimelineComponent', () => {
         set: {changeDetection: ChangeDetectionStrategy.Default},
       })
       .compileComponents();
-    fixture = TestBed.createComponent(ExpandedTimelineComponent);
+    const fixture = TestBed.createComponent(ExpandedTimelineComponent);
     component = fixture.componentInstance;
-    htmlElement = fixture.nativeElement;
+    dom = new DOMTestHelper(fixture, fixture.nativeElement);
     timelineData = new TimelineData();
     const traces = new TracesBuilder()
-      .setEntries(TraceType.SURFACE_FLINGER, [{}])
-      .setTimestamps(TraceType.SURFACE_FLINGER, [time10])
-      .setEntries(TraceType.WINDOW_MANAGER, [{}])
-      .setTimestamps(TraceType.WINDOW_MANAGER, [time11])
-      .setEntries(TraceType.TRANSACTIONS, [{}])
-      .setTimestamps(TraceType.TRANSACTIONS, [time12])
+      .setEntries(TraceType.SURFACE_FLINGER, [{}, {}])
+      .setTimestamps(TraceType.SURFACE_FLINGER, [time10, time10])
+      .setEntries(TraceType.WINDOW_MANAGER, [{}, {}])
+      .setTimestamps(TraceType.WINDOW_MANAGER, [time11, time11])
+      .setEntries(TraceType.TRANSACTIONS, [{}, {}])
+      .setTimestamps(TraceType.TRANSACTIONS, [time12, time12])
       .setEntries(TraceType.TRANSITION, [
-        new PropertyTreeBuilder()
-          .setIsRoot(true)
-          .setRootId('TransitionsTraceEntry')
+        new HierarchyTreeBuilder()
+          .setId('TransitionsTraceEntry')
           .setName('transition')
-          .setChildren([
-            {
-              name: 'wmData',
-              children: [{name: 'finishTimeNs', value: time30}],
-            },
-            {
-              name: 'shellData',
-              children: [{name: 'dispatchTimeNs', value: time10}],
-            },
-            {name: 'aborted', value: false},
-          ])
+          .setProperties({
+            finishTimeNs: time30,
+            dispatchTimeNs: time10,
+          })
           .build(),
-        new PropertyTreeBuilder()
-          .setIsRoot(true)
-          .setRootId('TransitionsTraceEntry')
+        new HierarchyTreeBuilder()
+          .setId('TransitionsTraceEntry')
           .setName('transition')
-          .setChildren([
-            {
-              name: 'wmData',
-              children: [{name: 'finishTimeNs', value: time110}],
-            },
-            {
-              name: 'shellData',
-              children: [{name: 'dispatchTimeNs', value: time60}],
-            },
-            {name: 'aborted', value: false},
-          ])
+          .setProperties({
+            finishTimeNs: time110,
+            dispatchTimeNs: time60,
+          })
           .build(),
       ])
       .setTimestamps(TraceType.TRANSITION, [time10, time60])
-      .setTimestamps(TraceType.PROTO_LOG, [])
+      .setTimestamps(TraceType.PROTO_LOG, [time12, time12])
       .build();
-    timelineData.initialize(traces, undefined);
+    await timelineData.initialize(traces, undefined, UTC_CONVERTER);
     component.timelineData = timelineData;
   });
 
@@ -129,21 +115,17 @@ describe('ExpandedTimelineComponent', () => {
   });
 
   it('renders all timelines', () => {
-    fixture.detectChanges();
+    dom.detectChanges();
 
-    const timelineElements = htmlElement.querySelectorAll(
-      '.timeline.row single-timeline',
-    );
-    expect(timelineElements.length).toEqual(4);
+    const timelineElements = dom.findAll('.timeline.row single-timeline');
+    expect(timelineElements.length).toBe(4);
 
-    const transitionElement = htmlElement.querySelectorAll(
-      '.timeline.row transition-timeline',
-    );
-    expect(transitionElement.length).toEqual(1);
+    const transitionElement = dom.findAll('.timeline.row transition-timeline');
+    expect(transitionElement.length).toBe(1);
   });
 
   it('passes initial selectedEntry of correct type into each timeline', () => {
-    fixture.detectChanges();
+    dom.detectChanges();
 
     const singleTimelines = assertDefined(component.singleTimelines);
     expect(singleTimelines.length).toBe(4);
@@ -152,7 +134,7 @@ describe('ExpandedTimelineComponent', () => {
     singleTimelines.forEach((timeline) => {
       if (assertDefined(timeline.trace).type === TraceType.SURFACE_FLINGER) {
         const entry = assertDefined(timeline.selectedEntry);
-        expect(entry.getFullTrace().type).toBe(TraceType.SURFACE_FLINGER);
+        expect(entry.getFullTrace().type).toEqual(TraceType.SURFACE_FLINGER);
       } else {
         expect(timeline.selectedEntry).toBeUndefined();
       }
@@ -169,7 +151,7 @@ describe('ExpandedTimelineComponent', () => {
     assertDefined(component.timelineData).setPosition(
       TracePosition.fromTimestamp(time11),
     );
-    fixture.detectChanges();
+    dom.detectChanges();
 
     const singleTimelines = assertDefined(component.singleTimelines);
     expect(singleTimelines.length).toBe(4);

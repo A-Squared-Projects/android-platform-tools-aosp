@@ -14,12 +14,11 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "AidlLazyServiceRegistrar"
+#define LOG_TAG "libbinder.AidlLazyServiceRegistrar"
 
 #include <android/os/BnClientCallback.h>
 #include <android/os/IServiceManager.h>
 #include <binder/IPCThreadState.h>
-#include <binder/IServiceManager.h>
 #include <binder/LazyServiceRegistrar.h>
 
 namespace android {
@@ -79,6 +78,8 @@ private:
      */
     void maybeTryShutdownLocked();
 
+    void updateCacheClientCount();
+
     // for below
     std::mutex mMutex;
 
@@ -133,6 +134,12 @@ bool ClientCounterCallbackImpl::registerServiceLocked(const sp<IBinder>& service
     bool reRegister = mRegisteredServices.count(name) > 0;
     std::string regStr = (reRegister) ? "Re-registering" : "Registering";
     ALOGI("%s service %s", regStr.c_str(), name.c_str());
+
+    if (dumpFlags & android::os::IServiceManager::FLAG_IS_LAZY_SERVICE) {
+        ALOGW("FLAG_IS_LAZY_SERVICE flag already set. This should only be set by "
+              "ClientCounterCallbackImpl in LazyServiceRegistrar");
+    }
+    dumpFlags |= android::os::IServiceManager::FLAG_IS_LAZY_SERVICE;
 
     if (Status status = manager->addService(name.c_str(), service, allowIsolated, dumpFlags);
         !status.isOk()) {
@@ -238,24 +245,26 @@ void ClientCounterCallbackImpl::maybeTryShutdownLocked() {
     }
 }
 
+void ClientCounterCallbackImpl::updateCacheClientCount() {
+    size_t numWithClients = 0;
+    for (const auto& [name, registered] : mRegisteredServices) {
+        (void)name;
+        if (registered.clients) numWithClients++;
+    }
+    mNumConnectedServices = numWithClients;
+}
+
 Status ClientCounterCallbackImpl::onClients(const sp<IBinder>& service, bool clients) {
     std::lock_guard<std::mutex> lock(mMutex);
     auto & [name, registered] = *assertRegisteredService(service);
     if (registered.clients == clients) {
         LOG_ALWAYS_FATAL("Process already thought %s had clients: %d but servicemanager has "
-                         "notified has clients: %d", name.c_str(), registered.clients, clients);
+                         "notified has clients: %d",
+                         name.c_str(), registered.clients, clients);
     }
     registered.clients = clients;
 
-    // update cache count of clients
-    {
-         size_t numWithClients = 0;
-         for (const auto& [name, registered] : mRegisteredServices) {
-             (void) name;
-             if (registered.clients) numWithClients++;
-         }
-         mNumConnectedServices = numWithClients;
-    }
+    updateCacheClientCount();
 
     ALOGI("Process has %zu (of %zu available) client(s) in use after notification %s has clients: %d",
           mNumConnectedServices, mRegisteredServices.size(), name.c_str(), clients);

@@ -49,7 +49,7 @@ impl CrateType {
             "cdylib" => CrateType::CDyLib,
             "staticlib" => CrateType::StaticLib,
             "proc-macro" => CrateType::ProcMacro,
-            _ => panic!("unexpected --crate-type: {}", s),
+            _ => panic!("unexpected --crate-type: {s}"),
         }
     }
 }
@@ -63,11 +63,6 @@ impl CrateType {
     /// Returns whether the crate type is a kind of test.
     pub fn is_test(self) -> bool {
         matches!(self, Self::Test | Self::TestNoHarness)
-    }
-
-    /// Returns whether the crate type is a kind of C ABI library.
-    pub fn is_c_library(self) -> bool {
-        matches!(self, Self::CDyLib | Self::StaticLib)
     }
 }
 
@@ -87,12 +82,13 @@ pub struct Crate {
     pub cfgs: Vec<String>,      // non-feature --cfg
     pub externs: Vec<Extern>,
     pub codegens: Vec<String>, // -C
-    pub cap_lints: String,
     pub static_libs: Vec<String>,
     pub shared_libs: Vec<String>,
     pub edition: String,
     pub package_dir: PathBuf, // canonicalized
     pub main_src: PathBuf,    // relative to package_dir
+    pub license: Option<String>,
+    pub license_file: Option<String>,
     /// Whether it is a test crate which doesn't actually contain any tests or benchmarks.
     pub empty_test: bool,
 }

@@ -14,10 +14,9 @@
  * limitations under the License.
  */
 
-import {assertDefined} from 'common/assert_utils';
+import {assertDefined} from 'common/assert';
 import {android} from 'protos/surfaceflinger/udc/static';
 import {HierarchyTreeBuilder} from 'test/unit/hierarchy_tree_builder';
-import {PropertyTreeNode} from 'trace/tree_node/property_tree_node';
 import {ZOrderPathsComputation} from './z_order_paths_computation';
 
 describe('ZOrderPathsComputation', () => {
@@ -27,7 +26,11 @@ describe('ZOrderPathsComputation', () => {
     computation = new ZOrderPathsComputation();
   });
 
-  it('calculates zOrderPath', () => {
+  it('throws error if root not set', () => {
+    expect(() => computation.executeInPlace()).toThrowError();
+  });
+
+  it('does not affect tree without rel z parents set', () => {
     const hierarchyRoot = new HierarchyTreeBuilder()
       .setId('LayerTraceEntry')
       .setName('root')
@@ -36,7 +39,7 @@ describe('ZOrderPathsComputation', () => {
           id: 1,
           name: 'layer1',
           properties: {
-            id: 1,
+            layerId: 1,
             name: 'layer1',
             parent: -1,
             children: [2, 4],
@@ -48,7 +51,7 @@ describe('ZOrderPathsComputation', () => {
               id: 2,
               name: 'layer2',
               properties: {
-                id: 2,
+                layerId: 2,
                 name: 'layer2',
                 parent: 1,
                 children: [3],
@@ -60,7 +63,7 @@ describe('ZOrderPathsComputation', () => {
                   id: 3,
                   name: 'layer3',
                   properties: {
-                    id: 3,
+                    layerId: 3,
                     name: 'layer3',
                     parent: 2,
                     children: [],
@@ -74,12 +77,12 @@ describe('ZOrderPathsComputation', () => {
               id: 4,
               name: 'layer4',
               properties: {
-                id: 4,
+                layerId: 4,
                 name: 'layer4',
                 parent: 1,
                 children: [],
                 z: 2,
-                zOrderRelativeOf: 1,
+                zOrderRelativeOf: -1,
               } as android.surfaceflinger.ILayerProto,
             },
           ],
@@ -88,37 +91,109 @@ describe('ZOrderPathsComputation', () => {
       .build();
 
     computation.setRoot(hierarchyRoot).executeInPlace();
-    const layer1WithPath = assertDefined(
-      hierarchyRoot.getChildByName('layer1'),
-    );
-    const layer2WithPath = assertDefined(
-      layer1WithPath.getChildByName('layer2'),
-    );
-    const layer3WithPath = assertDefined(
-      layer2WithPath.getChildByName('layer3'),
-    );
-    const layer4WithPath = assertDefined(
-      layer1WithPath.getChildByName('layer4'),
-    );
+    const layer1 = assertDefined(hierarchyRoot.getChildByName('layer1'));
+    const layer2 = assertDefined(layer1.getChildByName('layer2'));
+    const layer3 = assertDefined(layer2.getChildByName('layer3'));
+    const layer4 = assertDefined(layer1.getChildByName('layer4'));
 
-    expect(
-      getZOrderPathArray(layer1WithPath.getEagerPropertyByName('zOrderPath')),
-    ).toEqual([0]);
-    expect(
-      getZOrderPathArray(layer2WithPath.getEagerPropertyByName('zOrderPath')),
-    ).toEqual([0, 1]);
-    expect(
-      getZOrderPathArray(layer3WithPath.getEagerPropertyByName('zOrderPath')),
-    ).toEqual([0, 1, 1]);
-    expect(
-      getZOrderPathArray(layer4WithPath.getEagerPropertyByName('zOrderPath')),
-    ).toEqual([0, 2]);
+    expect(layer1.getRelativeChildren()).toEqual([]);
+    expect(layer2.getRelativeChildren()).toEqual([]);
+    expect(layer3.getRelativeChildren()).toEqual([]);
+    expect(layer4.getRelativeChildren()).toEqual([]);
+
+    expect(layer1.getZParent()).toEqual(layer1.getParent());
+    expect(layer2.getZParent()).toEqual(layer2.getParent());
+    expect(layer3.getZParent()).toEqual(layer3.getParent());
+    expect(layer4.getZParent()).toEqual(layer4.getParent());
   });
 
-  function getZOrderPathArray(
-    property: PropertyTreeNode | undefined,
-  ): number[] {
-    if (!property) return [];
-    return property.getAllChildren().map((child) => Number(child.getValue()));
-  }
+  it('updates tree with rel z parents', () => {
+    const hierarchyRoot = new HierarchyTreeBuilder()
+      .setId('LayerTraceEntry')
+      .setName('root')
+      .setChildren([
+        {
+          id: 1,
+          name: 'layer1',
+          properties: {
+            layerId: 1,
+            name: 'layer1',
+            parent: -1,
+            children: [2, 4],
+            z: 0,
+            zOrderRelativeOf: -1,
+          } as android.surfaceflinger.ILayerProto,
+          children: [
+            {
+              id: 2,
+              name: 'layer2',
+              properties: {
+                layerId: 2,
+                name: 'layer2',
+                parent: 1,
+                children: [3],
+                z: 1,
+                zOrderRelativeOf: -1,
+              } as android.surfaceflinger.ILayerProto,
+            },
+            {
+              id: 4,
+              name: 'layer4',
+              properties: {
+                layerId: 4,
+                name: 'layer4',
+                parent: 1,
+                children: [],
+                z: 2,
+                zOrderRelativeOf: 2,
+              } as android.surfaceflinger.ILayerProto,
+            },
+            {
+              id: 5,
+              name: 'layer5',
+              properties: {
+                layerId: 5,
+                name: 'layer5',
+                parent: 1,
+                children: [],
+                z: 2,
+                zOrderRelativeOf: 2,
+              } as android.surfaceflinger.ILayerProto,
+            },
+            {
+              id: 6,
+              name: 'layer6',
+              properties: {
+                layerId: 6,
+                name: 'layer6',
+                parent: 1,
+                children: [],
+                z: 2,
+                zOrderRelativeOf: 7,
+              } as android.surfaceflinger.ILayerProto,
+            },
+          ],
+        },
+      ])
+      .build();
+
+    computation.setRoot(hierarchyRoot).executeInPlace();
+    const layer1 = assertDefined(hierarchyRoot.getChildByName('layer1'));
+    const layer2 = assertDefined(layer1.getChildByName('layer2'));
+    const layer4 = assertDefined(layer1.getChildByName('layer4'));
+    const layer5 = assertDefined(layer1.getChildByName('layer5'));
+    const layer6 = assertDefined(layer1.getChildByName('layer6'));
+
+    expect(layer1.getRelativeChildren()).toEqual([]);
+    expect(layer2.getRelativeChildren()).toEqual([layer4, layer5]);
+    expect(layer4.getRelativeChildren()).toEqual([]);
+    expect(layer5.getRelativeChildren()).toEqual([]);
+    expect(layer6.getRelativeChildren()).toEqual([]);
+
+    expect(layer1.getZParent()).toEqual(layer1.getParent());
+    expect(layer2.getZParent()).toEqual(layer2.getParent());
+    expect(layer4.getZParent()).toEqual(layer2);
+    expect(layer5.getZParent()).toEqual(layer2);
+    expect(layer6.getZParent()).toEqual(layer6.getParent());
+  });
 });

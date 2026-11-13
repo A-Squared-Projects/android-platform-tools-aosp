@@ -18,9 +18,11 @@
 
 #include <compositionengine/ProjectionSpace.h>
 #include <compositionengine/impl/HwcBufferCache.h>
+#include <gui/DisplayLuts.h>
 #include <renderengine/ExternalTexture.h>
 #include <ui/FloatRect.h>
 #include <ui/GraphicTypes.h>
+#include <ui/PictureProfileHandle.h>
 #include <ui/Rect.h>
 #include <ui/Region.h>
 
@@ -100,6 +102,12 @@ struct OutputLayerCompositionState {
     // order to save power.
     Region outputSpaceBlockingRegionHint;
 
+    // The picture profile for this layer.
+    PictureProfileHandle pictureProfileHandle;
+
+    // ignore blur requests if there's just too many on top of this layer
+    bool ignoreBlur{false};
+
     // Overrides the buffer, acquire fence, and display frame stored in LayerFECompositionState
     struct {
         std::shared_ptr<renderengine::ExternalTexture> buffer = nullptr;
@@ -151,6 +159,9 @@ struct OutputLayerCompositionState {
 
         // True when this layer was skipped as part of SF-side layer caching.
         bool layerSkipped = false;
+
+        // lut information
+        std::shared_ptr<gui::DisplayLuts> luts;
     };
 
     // The HWC state is optional, and is only set up if there is any potential

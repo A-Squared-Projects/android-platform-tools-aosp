@@ -14,30 +14,68 @@
  * limitations under the License.
  */
 
-import {ElementRef, EventEmitter} from '@angular/core';
-import {assertDefined} from 'common/assert_utils';
-import {Point} from 'common/geometry_types';
-import {TraceEntry} from 'trace/trace';
-import {TracePosition} from 'trace/trace_position';
+import {
+  Directive,
+  ElementRef,
+  EventEmitter,
+  HostListener,
+  Input,
+  Output,
+  ViewChild,
+} from '@angular/core';
+import {assertDefined} from 'common/assert';
+import {Point} from 'common/geometry/point';
+import {TimeRange} from 'common/time/time';
+import {ComponentTimestampConverter} from 'common/time/timestamp_converter';
+import {Trace, TraceEntry} from 'trace_api/trace';
+import {TracePosition} from 'trace_api/trace_position';
+import {TraceType} from 'trace_api/trace_type';
 import {CanvasDrawer} from './canvas_drawer';
 
+/**
+ * An abstract component for a single row in the expanded timeline view.
+ */
+@Directive()
 export abstract class AbstractTimelineRowComponent<T extends {}> {
   abstract selectedEntry: TraceEntry<T> | undefined;
-  abstract onTracePositionUpdate: EventEmitter<TracePosition>;
-  abstract wrapperRef: ElementRef | undefined;
-  abstract canvasRef: ElementRef | undefined;
+  abstract trace: Trace<{}> | undefined;
+
+  @Input() color = '#AF5CF7';
+  @Input() isActive = false;
+  @Input() selectionRange: TimeRange | undefined;
+  @Input() timestampConverter: ComponentTimestampConverter | undefined;
+
+  @Output() readonly onScrollEvent = new EventEmitter<WheelEvent>();
+  @Output() readonly onTraceClicked = new EventEmitter<Trace<object>>();
+  @Output() readonly onTracePositionUpdate = new EventEmitter<TracePosition>();
+  @Output() readonly onMouseXRatioUpdate = new EventEmitter<
+    number | undefined
+  >();
+
+  @ViewChild('canvas', {static: false}) canvasRef: ElementRef | undefined;
+  @ViewChild('wrapper', {static: false}) wrapperRef: ElementRef | undefined;
 
   canvasDrawer = new CanvasDrawer();
   protected viewInitialized = false;
-  private _observer = new ResizeObserver(() => this.initializeCanvas());
+  private observer = new ResizeObserver(() => this.initializeCanvas());
 
   getCanvas(): HTMLCanvasElement {
     return this.canvasRef?.nativeElement;
   }
 
-  async ngAfterViewInit() {
-    this._observer.observe(assertDefined(this.wrapperRef).nativeElement);
-    await this.initializeCanvas();
+  getBackgroundColor(): string | undefined {
+    if (this.isActive) {
+      return 'var(--selected-element-color)';
+    }
+    if (this.trace?.type === TraceType.SEARCH) {
+      return 'var(--search-background-color)';
+    }
+    return undefined;
+  }
+
+  ngAfterViewInit() {
+    this.observer.observe(assertDefined(this.wrapperRef).nativeElement);
+    this.initializeCanvas();
   }
 
   ngOnChanges() {
@@ -47,10 +85,10 @@ export abstract class AbstractTimelineRowComponent<T extends {}> {
   }
 
   ngOnDestroy() {
-    this._observer.disconnect();
+    this.observer.disconnect();
   }
 
-  async initializeCanvas() {
+  initializeCanvas() {
     const canvas = this.getCanvas();
 
     // Reset any size before computing new size to avoid it interfering with size computations
@@ -75,17 +113,17 @@ export abstract class AbstractTimelineRowComponent<T extends {}> {
 
     canvas.width = HiPPIwidth;
     canvas.height = HiPPIheight;
-    canvas.style.width = width + 'px';
-    canvas.style.height = height + 'px';
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
 
     // ensure all drawing operations are scaled
     if (window.devicePixelRatio !== 1) {
-      const context = canvas.getContext('2d')!;
+      const context = assertDefined(canvas.getContext('2d'));
       context.scale(window.devicePixelRatio, window.devicePixelRatio);
     }
 
     this.canvasDrawer.setCanvas(this.getCanvas());
-    await this.redraw();
+    this.redraw();
 
     canvas.addEventListener('mousemove', (event: MouseEvent) => {
       this.handleMouseMove(event);
@@ -100,7 +138,7 @@ export abstract class AbstractTimelineRowComponent<T extends {}> {
     this.viewInitialized = true;
   }
 
-  async handleMouseDown(e: MouseEvent) {
+  handleMouseDown(e: MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
     const mousePoint = {
@@ -108,14 +146,14 @@ export abstract class AbstractTimelineRowComponent<T extends {}> {
       y: e.offsetY,
     };
 
-    const transitionEntry = await this.getEntryAt(mousePoint);
+    const entry = this.getEntryAt(mousePoint);
     // TODO: This can probably get made better by getting the transition and checking both the end and start timestamps match
-    if (transitionEntry && transitionEntry !== this.selectedEntry) {
+    if (entry && entry !== this.selectedEntry) {
       this.redraw();
-      this.selectedEntry = transitionEntry;
-      this.onTracePositionUpdate.emit(
-        TracePosition.fromTraceEntry(transitionEntry),
-      );
+      this.selectedEntry = entry;
+      this.onTracePositionUpdate.emit(TracePosition.fromTraceEntry(entry));
+    } else if (!entry && this.trace) {
+      this.onTraceClicked.emit(this.trace);
     }
   }
 
@@ -127,27 +165,38 @@ export abstract class AbstractTimelineRowComponent<T extends {}> {
       y: e.offsetY,
     };
 
-    this.updateCursor(mousePoint);
     this.onHover(mousePoint);
   }
 
-  protected async updateCursor(mousePoint: Point) {
-    if (this.getEntryAt(mousePoint) !== undefined) {
-      this.getCanvas().style.cursor = 'pointer';
-    } else {
-      this.getCanvas().style.cursor = 'auto';
+  @HostListener('wheel', ['$event'])
+  updateScroll(event: WheelEvent) {
+    event.preventDefault();
+    this.onScrollEvent.emit(event);
+  }
+
+  onTimelineClick(event: MouseEvent) {
+    if ((event.target as HTMLElement).id === 'canvas') {
+      return;
     }
+    this.onTraceClicked.emit(assertDefined(this.trace));
   }
 
-  protected async redraw() {
+  trackMousePos(event: MouseEvent) {
+    const canvas = event.target as HTMLCanvasElement;
+    this.onMouseXRatioUpdate.emit(event.offsetX / canvas.offsetWidth);
+  }
+
+  onMouseLeave(event: MouseEvent) {
+    this.onMouseXRatioUpdate.emit(undefined);
+  }
+
+  protected redraw() {
     this.canvasDrawer.clear();
-    await this.drawTimeline();
+    this.drawTimeline();
   }
 
-  abstract drawTimeline(): Promise<void>;
-  protected abstract getEntryAt(
-    mousePoint: Point,
-  ): Promise<TraceEntry<T> | undefined>;
+  abstract drawTimeline(): void;
+  protected abstract getEntryAt(mousePoint: Point): TraceEntry<T> | undefined;
   protected abstract onHover(mousePoint: Point): void;
   protected abstract handleMouseOut(e: MouseEvent): void;
 }

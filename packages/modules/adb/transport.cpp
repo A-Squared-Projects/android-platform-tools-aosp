@@ -58,6 +58,7 @@
 #if ADB_HOST
 #include <google/protobuf/text_format.h>
 #include "adb_host.pb.h"
+#include "client/detach.h"
 #include "client/usb.h"
 #endif
 
@@ -70,11 +71,12 @@ using TlsError = TlsConnection::TlsError;
 static void remove_transport(atransport* transport);
 static void transport_destroy(atransport* transport);
 
+static auto& transport_lock = *new std::recursive_mutex();
+// When a tranport is created, it is not started yet (and in the case of the host side, it has
+// not yet sent CNXN). These transports are staged in the pending list.
+static auto& pending_list = *new std::list<atransport*>();
 // TODO: unordered_map<TransportId, atransport*>
 static auto& transport_list = *new std::list<atransport*>();
-static auto& pending_list = *new std::list<atransport*>();
-
-static auto& transport_lock = *new std::recursive_mutex();
 
 const char* const kFeatureShell2 = "shell_v2";
 const char* const kFeatureCmd = "cmd";
@@ -101,6 +103,7 @@ const char* const kFeatureDeviceTrackerProtoFormat = "devicetracker_proto_format
 const char* const kFeatureDevRaw = "devraw";
 const char* const kFeatureAppInfo = "app_info";  // Add information to track-app (package name, ...)
 const char* const kFeatureServerStatus = "server_status";  // Ability to output server status
+const char* const kFeatureTrackMdns = "track_mdns";        // Track and stream mdns services.
 
 namespace {
 
@@ -158,12 +161,12 @@ class ReconnectHandler {
 };
 
 void ReconnectHandler::Start() {
-    fdevent_check_looper();
+    CHECK_LOOPER_THREAD();
     handler_thread_ = std::thread(&ReconnectHandler::Run, this);
 }
 
 void ReconnectHandler::Stop() {
-    fdevent_check_looper();
+    CHECK_LOOPER_THREAD();
     {
         std::lock_guard<std::mutex> lock(reconnect_mutex_);
         running_ = false;
@@ -181,7 +184,7 @@ void ReconnectHandler::Stop() {
 }
 
 void ReconnectHandler::TrackTransport(atransport* transport) {
-    fdevent_check_looper();
+    CHECK_LOOPER_THREAD();
     {
         std::lock_guard<std::mutex> lock(reconnect_mutex_);
         if (!running_) return;
@@ -297,11 +300,11 @@ BlockingConnectionAdapter::BlockingConnectionAdapter(std::unique_ptr<BlockingCon
     : underlying_(std::move(connection)) {}
 
 BlockingConnectionAdapter::~BlockingConnectionAdapter() {
-    LOG(INFO) << "BlockingConnectionAdapter(" << Serial() << "): destructing";
+    VLOG(ADB) << "BlockingConnectionAdapter(" << Serial() << "): destructing";
     Stop();
 }
 
-void BlockingConnectionAdapter::Start() {
+bool BlockingConnectionAdapter::Start() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (started_) {
         LOG(FATAL) << "BlockingConnectionAdapter(" << Serial() << "): started multiple times";
@@ -310,7 +313,7 @@ void BlockingConnectionAdapter::Start() {
     StartReadThread();
 
     write_thread_ = std::thread([this]() {
-        LOG(INFO) << Serial() << ": write thread spawning";
+        VLOG(ADB) << Serial() << ": write thread spawning";
         while (true) {
             std::unique_lock<std::mutex> lock(mutex_);
             ScopedLockAssertion assume_locked(mutex_);
@@ -334,15 +337,16 @@ void BlockingConnectionAdapter::Start() {
     });
 
     started_ = true;
+    return true;
 }
 
 void BlockingConnectionAdapter::StartReadThread() {
     read_thread_ = std::thread([this]() {
-        LOG(INFO) << Serial() << ": read thread spawning";
+        VLOG(ADB) << Serial() << ": read thread spawning";
         while (true) {
             auto packet = std::make_unique<apacket>();
             if (!underlying_->Read(packet.get())) {
-                PLOG(INFO) << Serial() << ": read failed";
+                VLOG(ADB) << Serial() << ": read failed";
                 break;
             }
 
@@ -357,7 +361,7 @@ void BlockingConnectionAdapter::StartReadThread() {
             // handshake. So this read thread must stop and resume after the
             // handshake completes otherwise this will interfere in the process.
             if (got_stls_cmd) {
-                LOG(INFO) << Serial() << ": Received STLS packet. Stopping read thread.";
+                VLOG(ADB) << Serial() << ": Received STLS packet. Stopping read thread.";
                 return;
             }
         }
@@ -379,17 +383,17 @@ void BlockingConnectionAdapter::Reset() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!started_) {
-            LOG(INFO) << "BlockingConnectionAdapter(" << Serial() << "): not started";
+            VLOG(ADB) << "BlockingConnectionAdapter(" << Serial() << "): not started";
             return;
         }
 
         if (stopped_) {
-            LOG(INFO) << "BlockingConnectionAdapter(" << Serial() << "): already stopped";
+            VLOG(ADB) << "BlockingConnectionAdapter(" << Serial() << "): already stopped";
             return;
         }
     }
 
-    LOG(INFO) << "BlockingConnectionAdapter(" << Serial() << "): resetting";
+    VLOG(ADB) << "BlockingConnectionAdapter(" << Serial() << "): resetting";
     this->underlying_->Reset();
     Stop();
 }
@@ -398,19 +402,19 @@ void BlockingConnectionAdapter::Stop() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!started_) {
-            LOG(INFO) << "BlockingConnectionAdapter(" << Serial() << "): not started";
+            VLOG(ADB) << "BlockingConnectionAdapter(" << Serial() << "): not started";
             return;
         }
 
         if (stopped_) {
-            LOG(INFO) << "BlockingConnectionAdapter(" << Serial() << "): already stopped";
+            VLOG(ADB) << "BlockingConnectionAdapter(" << Serial() << "): already stopped";
             return;
         }
 
         stopped_ = true;
     }
 
-    LOG(INFO) << "BlockingConnectionAdapter(" << Serial() << "): stopping";
+    VLOG(ADB) << "BlockingConnectionAdapter(" << Serial() << "): stopping";
 
     this->underlying_->Close();
     this->cv_.notify_one();
@@ -428,7 +432,7 @@ void BlockingConnectionAdapter::Stop() {
     read_thread.join();
     write_thread.join();
 
-    LOG(INFO) << "BlockingConnectionAdapter(" << Serial() << "): stopped";
+    VLOG(ADB) << "BlockingConnectionAdapter(" << Serial() << "): stopped";
     std::call_once(this->error_flag_, [this]() { transport_->HandleError("requested stop"); });
 }
 
@@ -559,6 +563,10 @@ void FdConnection::Close() {
 }
 
 void send_packet(apacket* p, atransport* t) {
+    VLOG(PACKETS) << std::format("packet --> {}{}{}{}", ((char*)(&(p->msg.command)))[0],
+                                 ((char*)(&(p->msg.command)))[1], ((char*)(&(p->msg.command)))[2],
+                                 ((char*)(&(p->msg.command)))[3]);
+
     p->msg.magic = p->msg.command ^ 0xffffffff;
     // compute a checksum for connection/auth packets for compatibility reasons
     if (t->get_protocol_version() >= A_VERSION_SKIP_CHECKSUM) {
@@ -728,45 +736,51 @@ void update_transports() {
 
 #endif  // ADB_HOST
 
-#if ADB_HOST
-static bool usb_devices_start_detached() {
-    static const char* env = getenv("ADB_LIBUSB_START_DETACHED");
-    static bool result = env && strcmp("1", env) == 0;
-    return is_libusb_enabled() && result;
-}
-#endif
-
 static void fdevent_unregister_transport(atransport* t) {
-    D("transport: %s deleting", t->serial.c_str());
+    VLOG(TRANSPORT) << "unregistering transport: " << t->serial;
 
     {
         std::lock_guard<std::recursive_mutex> lock(transport_lock);
         transport_list.remove(t);
+        pending_list.remove(t);
     }
 
+    t->connection()->SetTransport(nullptr);
     delete t;
 
     update_transports();
 }
 
 static void fdevent_register_transport(atransport* t) {
+    auto state = to_string(t->GetConnectionState());
+    VLOG(TRANSPORT) << "registering: " << t->serial.c_str() << " state=" << state
+                    << " type=" << t->type;
+
     /* don't create transport threads for inaccessible devices */
     if (t->GetConnectionState() != kCsNoPerm) {
         t->connection()->SetTransport(t);
 
-        if (t->type == kTransportUsb
 #if ADB_HOST
-            && usb_devices_start_detached()  // -d setting propagated from the
-                                             // host device, hence n/a on-device.
-#endif
-        ) {
+        if (t->type == kTransportUsb &&
+            attached_devices.ShouldStartDetached(*t->connection().get())) {
+            VLOG(TRANSPORT) << "Force-detaching transport:" << t->serial;
             t->SetConnectionState(kCsDetached);
-        } else {
-            t->connection()->Start();
-#if ADB_HOST
-            send_connect(t);
-#endif
         }
+
+        VLOG(TRANSPORT) << "transport:" << t->serial << "(" << state << ")";
+        if (t->GetConnectionState() != kCsDetached) {
+            VLOG(TRANSPORT) << "Starting transport:" << t->serial;
+            if (t->connection()->Start()) {
+                send_connect(t);
+            } else {
+                VLOG(TRANSPORT) << "transport:" << t->serial << " failed to start.";
+                return;
+            }
+        }
+#else
+        VLOG(TRANSPORT) << "Starting transport:" << t->serial;
+        t->connection()->Start();
+#endif
     }
 
     {
@@ -819,21 +833,19 @@ void kick_all_transports_by_auth_key(std::string_view auth_key) {
 #endif
 
 void register_transport(atransport* transport) {
-    D("transport: %s registered", transport->serial.c_str());
     fdevent_run_on_looper([=]() { fdevent_register_transport(transport); });
 }
 
 static void remove_transport(atransport* transport) {
-    D("transport: %s removed", transport->serial.c_str());
     fdevent_run_on_looper([=]() { fdevent_unregister_transport(transport); });
 }
 
 static void transport_destroy(atransport* t) {
-    fdevent_check_looper();
+    CHECK_LOOPER_THREAD();
     CHECK(t != nullptr);
 
     std::lock_guard<std::recursive_mutex> lock(transport_lock);
-    LOG(INFO) << "destroying transport " << t->serial_name();
+    VLOG(TRANSPORT) << "destroying transport " << t->serial_name();
     t->connection()->Stop();
 #if ADB_HOST
     if (t->IsTcpDevice() && !t->kicked()) {
@@ -1067,7 +1079,7 @@ ConnectionState atransport::GetConnectionState() const {
 }
 
 void atransport::SetConnectionState(ConnectionState state) {
-    fdevent_check_looper();
+    CHECK_LOOPER_THREAD();
     connection_state_ = state;
     update_transports();
 }
@@ -1075,11 +1087,14 @@ void atransport::SetConnectionState(ConnectionState state) {
 #if ADB_HOST
 bool atransport::Attach(std::string* error) {
     D("%s: attach", serial.c_str());
-    fdevent_check_looper();
+    CHECK_LOOPER_THREAD();
 
-    if (!is_libusb_enabled()) {
-        *error = "attach/detach only implemented for libusb backend";
-        return false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!connection_->SupportsDetach()) {
+            *error = "attach/detach not supported";
+            return false;
+        }
     }
 
     if (GetConnectionState() != ConnectionState::kCsDetached) {
@@ -1102,11 +1117,14 @@ bool atransport::Attach(std::string* error) {
 
 bool atransport::Detach(std::string* error) {
     D("%s: detach", serial.c_str());
-    fdevent_check_looper();
+    CHECK_LOOPER_THREAD();
 
-    if (!is_libusb_enabled()) {
-        *error = "attach/detach only implemented for libusb backend";
-        return false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!connection_->SupportsDetach()) {
+            *error = "attach/detach not supported!";
+            return false;
+        }
     }
 
     if (GetConnectionState() == ConnectionState::kCsDetached) {
@@ -1175,8 +1193,8 @@ size_t atransport::get_max_payload() const {
 }
 
 #if ADB_HOST
-static bool delayed_ack_enabled() {
-    static const char* env = getenv("ADB_DELAYED_ACK");
+bool burst_mode_enabled() {
+    static const char* env = getenv("ADB_BURST_MODE");
     static bool result = env && strcmp(env, "1") == 0;
     return result;
 }
@@ -1212,11 +1230,12 @@ const FeatureSet& supported_features() {
             kFeatureDevRaw,
             kFeatureAppInfo,
             kFeatureServerStatus,
+            kFeatureTrackMdns,
         };
         // clang-format on
 
 #if ADB_HOST
-        if (delayed_ack_enabled()) {
+        if (burst_mode_enabled()) {
             result.push_back(kFeatureDelayedAck);
         }
 #else
@@ -1488,14 +1507,20 @@ bool validate_transport_list(const std::list<atransport*>& list, const std::stri
     return true;
 }
 
-bool register_socket_transport(unique_fd s, std::string serial, int port, int local,
+bool register_socket_transport(unique_fd s, std::string serial, int port, bool is_emulator,
                                atransport::ReconnectCallback reconnect, bool use_tls, int* error) {
-    atransport* t = new atransport(std::move(reconnect), kCsOffline);
+#if ADB_HOST
+    // Below in this method, we block up to 10s on the waitable. This should never run on the
+    // fdevent thread.
+    CHECK_NOT_LOOPER_THREAD();
+#endif
+
+    atransport* t = new atransport(kTransportLocal, std::move(reconnect), kCsOffline);
     t->use_tls = use_tls;
     t->serial = std::move(serial);
 
     D("transport: %s init'ing for socket %d, on port %d", t->serial.c_str(), s.get(), port);
-    if (init_socket_transport(t, std::move(s), port, local) < 0) {
+    if (init_socket_transport(t, std::move(s), port, is_emulator) < 0) {
         delete t;
         if (error) *error = errno;
         return false;
@@ -1519,8 +1544,7 @@ bool register_socket_transport(unique_fd s, std::string serial, int port, int lo
 #endif
     register_transport(t);
 
-    if (local == 1) {
-        // Do not wait for emulator transports.
+    if (is_emulator) {
         return true;
     }
 
@@ -1569,9 +1593,9 @@ void kick_all_tcp_devices() {
 }
 
 #if ADB_HOST
-void register_usb_transport(std::shared_ptr<Connection> connection, const char* serial,
-                            const char* devpath, unsigned writeable) {
-    atransport* t = new atransport(writeable ? kCsOffline : kCsNoPerm);
+void register_libusb_transport(std::shared_ptr<Connection> connection, const char* serial,
+                               const char* devpath, unsigned writeable) {
+    atransport* t = new atransport(kTransportUsb, writeable ? kCsOffline : kCsNoPerm);
     if (serial) {
         t->serial = serial;
     }
@@ -1580,7 +1604,6 @@ void register_usb_transport(std::shared_ptr<Connection> connection, const char* 
     }
 
     t->SetConnection(std::move(connection));
-    t->type = kTransportUsb;
 
     {
         std::lock_guard<std::recursive_mutex> lock(transport_lock);
@@ -1592,7 +1615,7 @@ void register_usb_transport(std::shared_ptr<Connection> connection, const char* 
 
 void register_usb_transport(usb_handle* usb, const char* serial, const char* devpath,
                             unsigned writeable) {
-    atransport* t = new atransport(writeable ? kCsOffline : kCsNoPerm);
+    atransport* t = new atransport(kTransportUsb, writeable ? kCsOffline : kCsNoPerm);
 
     D("transport: %p init'ing for usb_handle %p (sn='%s')", t, usb, serial ? serial : "");
     init_usb_transport(t, usb);
@@ -1628,7 +1651,7 @@ void unregister_usb_transport(usb_handle* usb) {
 //   - adb reverse --remove tcp:<device_port> : responds OKAY
 //   - adb reverse --remove-all : responds OKAY
 void atransport::UpdateReverseConfig(std::string_view service_addr) {
-    fdevent_check_looper();
+    CHECK_LOOPER_THREAD();
     if (!android::base::ConsumePrefix(&service_addr, "reverse:")) {
         return;
     }
@@ -1668,7 +1691,7 @@ void atransport::UpdateReverseConfig(std::string_view service_addr) {
 
 // Is this an authorized :connect request?
 bool atransport::IsReverseConfigured(const std::string& local_addr) {
-    fdevent_check_looper();
+    CHECK_LOOPER_THREAD();
     for (const auto& [remote, local] : reverse_forwards_) {
         if (local == local_addr) {
             return true;
@@ -1707,7 +1730,7 @@ std::shared_ptr<RSA> atransport::Key() {
 
 std::shared_ptr<RSA> atransport::NextKey() {
     if (keys_.empty()) {
-        LOG(INFO) << "fetching keys for transport " << this->serial_name();
+        VLOG(ADB) << "fetching keys for transport " << this->serial_name();
         keys_ = adb_auth_get_private_keys();
 
         // We should have gotten at least one key: the one that's automatically generated.

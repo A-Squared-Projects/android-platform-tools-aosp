@@ -30,12 +30,6 @@ license {
     ],
 }
 
-tidy_errors = [
-    "-*",
-    "bugprone-inaccurate-erase",
-    "bugprone-use-after-move",
-]
-
 cc_defaults {
     name: "adb_defaults",
 
@@ -97,17 +91,14 @@ cc_defaults {
             ],
 
             host_ldlibs: [
-                "-lws2_32",
+                "-ldbghelp",
                 "-lgdi32",
-                "-luserenv",
                 "-liphlpapi",
+                "-luserenv",
+                "-lws2_32",
             ],
         },
     },
-
-    tidy: true,
-    tidy_checks: tidy_errors,
-    tidy_checks_as_errors: tidy_errors,
 }
 
 cc_defaults {
@@ -117,6 +108,10 @@ cc_defaults {
     cflags: [
         "-UADB_HOST",
         "-DADB_HOST=0",
+    ],
+
+    shared_libs: [
+        "libprocessgroup",
     ],
 }
 
@@ -217,6 +212,7 @@ libadb_srcs = [
     "adb_trace.cpp",
     "adb_unique_fd.cpp",
     "adb_utils.cpp",
+    "apacket_reader.cpp",
     "fdevent/fdevent.cpp",
     "services.cpp",
     "sockets.cpp",
@@ -267,16 +263,20 @@ cc_library_host_static {
     defaults: ["adb_defaults"],
 
     srcs: libadb_srcs + [
-        "client/openscreen/mdns_service_info.cpp",
-        "client/openscreen/mdns_service_watcher.cpp",
+        "client/openscreen/mdns_service.cpp",
         "client/openscreen/platform/logging.cpp",
         "client/openscreen/platform/task_runner.cpp",
         "client/openscreen/platform/udp_socket.cpp",
         "client/auth.cpp",
         "client/adb_wifi.cpp",
+        "client/detach.cpp",
+        "client/discovered_services.cpp",
+        "client/mdns_tracker.cpp",
         "client/usb_libusb.cpp",
-        "client/transport_local.cpp",
-        "client/mdnsresponder_client.cpp",
+        "client/usb_libusb_device.cpp",
+        "client/usb_libusb_hotplug.cpp",
+        "client/usb_libusb_inhouse_hotplug.cpp",
+        "client/transport_emulator.cpp",
         "client/mdns_utils.cpp",
         "client/transport_mdns.cpp",
         "client/transport_usb.cpp",
@@ -316,7 +316,6 @@ cc_library_host_static {
         "libcutils",
         "libdiagnose_usb",
         "liblog",
-        "libmdnssd",
         "libopenscreen-discovery",
         "libopenscreen-platform-impl",
         "libprotobuf-cpp-lite",
@@ -358,16 +357,16 @@ cc_library {
         "//packages/modules/adb:__subpackages__",
     ],
 
-    apex_available: [
-        "com.android.adbd",
-        "test_com.android.adbd",
-    ],
+    apex_available: ["com.android.adbd"],
 }
 
 cc_test_host {
     name: "adb_test",
     defaults: ["adb_defaults"],
     srcs: libadb_test_srcs + [
+        "client/adb_wifi_test.cpp",
+        "client/commandline_test.cpp",
+        "client/discovered_services_test.cpp",
         "client/mdns_utils_test.cpp",
         "test_utils/test_utils.cpp",
     ],
@@ -378,6 +377,7 @@ cc_test_host {
         "libadb_host_protos",
         "libadb_pairing_auth_static",
         "libadb_pairing_connection_static",
+        "libapp_processes_protos_full",
         "libadb_protos_static",
         "libadb_sysdeps",
         "libadb_tls_connection_static",
@@ -387,7 +387,6 @@ cc_test_host {
         "libcutils",
         "libdiagnose_usb",
         "liblog",
-        "libmdnssd",
         "libopenscreen-discovery",
         "libopenscreen-platform-impl",
         "libprotobuf-cpp-full",
@@ -400,6 +399,24 @@ cc_test_host {
             enabled: true,
             ldflags: ["-municode"],
             shared_libs: ["AdbWinApi"],
+        },
+        // TODO: Create an asan_default rule and use it for adb_asan target
+        // and ALL unit tests.
+        linux: {
+            sanitize: {
+                address: true,
+            },
+            strip: {
+                none: true,
+            },
+        },
+        darwin: {
+            sanitize: {
+                address: true,
+            },
+            strip: {
+                none: true,
+            },
         },
     },
 
@@ -425,14 +442,13 @@ cc_defaults {
         "client/adb_install.cpp",
         "client/line_printer.cpp",
         "client/fastdeploy.cpp",
-        "client/fastdeploycallbacks.cpp",
         "client/incremental.cpp",
         "client/incremental_server.cpp",
         "client/incremental_utils.cpp",
         "shell_service_protocol.cpp",
     ],
 
-    generated_headers: [
+    device_first_generated_headers: [
         "bin2c_fastdeployagent",
         "bin2c_fastdeployagentscript",
     ],
@@ -458,7 +474,6 @@ cc_defaults {
         "liblog",
         "liblog",
         "liblz4",
-        "libmdnssd",
         "libopenscreen-discovery",
         "libopenscreen-platform-impl",
         "libprotobuf-cpp-full",
@@ -512,18 +527,26 @@ cc_binary_host {
     name: "adb_asan",
     defaults: ["adb_binary_host_defaults"],
     target: {
-            darwin: {
-                sanitize: { address: true, },
-                strip: {  none: true },
+        darwin: {
+            sanitize: {
+                address: true,
             },
-            linux: {
-                sanitize: { address: true, },
-                strip: {  none: true },
+            strip: {
+                none: true,
             },
-            // Not supported on Windows yet...
-            windows: {
-                enabled: false,
-            }
+        },
+        linux: {
+            sanitize: {
+                address: true,
+            },
+            strip: {
+                none: true,
+            },
+        },
+        // Not supported on Windows yet...
+        windows: {
+            enabled: false,
+        },
     },
 }
 
@@ -544,13 +567,15 @@ cc_library_static {
         "daemon/auth.cpp",
         "daemon/jdwp_service.cpp",
         "daemon/logging.cpp",
-        "daemon/transport_local.cpp",
+        "daemon/mdns.cpp",
+        "daemon/transport_socket_server.cpp",
     ],
 
     generated_headers: ["platform_tools_version"],
 
     static_libs: [
         "libdiagnose_usb",
+        "libmdnssd",
     ],
 
     shared_libs: [
@@ -583,9 +608,16 @@ cc_library_static {
                 "daemon/usb_ffs.cpp",
                 "daemon/watchdog.cpp",
             ],
+            shared_libs: [
+                "adbd_flags_c_lib",
+            ],
+            static_libs: [
+                 "android_adbdauth_flags_cc_lib",
+            ],
         },
         recovery: {
             exclude_shared_libs: [
+                "adbd_flags_c_lib",
                 "libadb_pairing_auth",
                 "libadb_pairing_connection",
                 "libapp_processes_protos_lite",
@@ -620,6 +652,7 @@ cc_library {
         "daemon/file_sync_service.cpp",
         "daemon/services.cpp",
         "daemon/shell_service.cpp",
+        "daemon/tradeinmode.cpp",
         "shell_service_protocol.cpp",
     ],
 
@@ -634,6 +667,7 @@ cc_library {
         "libbrotli",
         "libdiagnose_usb",
         "liblz4",
+        "libmdnssd",
         "libprotobuf-cpp-lite",
         "libzstd",
     ],
@@ -661,12 +695,16 @@ cc_library {
             srcs: [
                 "daemon/abb_service.cpp",
                 "daemon/framebuffer_service.cpp",
-                "daemon/mdns.cpp",
                 "daemon/restart_service.cpp",
             ],
             shared_libs: [
+                "adbd_flags_c_lib",
                 "libmdnssd",
                 "libselinux",
+            ],
+            static_libs: [
+                "android_trade_in_mode_flags_cc_lib",
+                "android_adbdauth_flags_cc_lib",
             ],
         },
         recovery: {
@@ -674,8 +712,12 @@ cc_library {
                 "daemon/abb_service.cpp",
             ],
             exclude_shared_libs: [
+                "adbd_flags_c_lib",
                 "libadb_pairing_auth",
                 "libadb_pairing_connection",
+            ],
+            exclude_static_libs: [
+                "android_trade_in_mode_flags_cc_lib",
             ],
         },
     },
@@ -752,14 +794,12 @@ cc_library {
     ],
 }
 
-cc_binary {
-    name: "adbd",
+cc_defaults {
+    name: "adbd_binary_defaults",
     defaults: [
         "adbd_defaults",
-        "host_adbd_supported",
         "libadbd_binary_dependencies",
     ],
-    recovery_available: true,
     min_sdk_version: "30",
     apex_available: ["com.android.adbd"],
 
@@ -790,15 +830,41 @@ cc_binary {
     shared_libs: [
         "libadbd_auth",
     ],
+}
 
+cc_binary {
+    name: "adbd",
+    defaults: [
+        "host_adbd_supported",
+        "adbd_binary_defaults",
+    ],
     target: {
-        recovery: {
-            exclude_shared_libs: [
-                "libadb_pairing_auth",
-                "libadb_pairing_connection",
+        android: {
+            static_libs: [
+                "android_trade_in_mode_flags_cc_lib",
+                "android_adbdauth_flags_cc_lib",
+            ],
+            shared_libs: [
+                "adbd_flags_c_lib",
             ],
         },
     },
+}
+
+cc_binary {
+    name: "adbd.recovery",
+    defaults: [
+        "adbd_binary_defaults",
+    ],
+    target: {
+        android: {
+            static_libs: [
+                "android_adbdauth_flags_cc_lib",
+            ],
+        },
+    },
+    recovery: true,
+    stem: "adbd",
 }
 
 phony {
@@ -826,6 +892,9 @@ phony {
         "libadbd_fs.recovery",
         "reboot.recovery",
     ],
+    // This property is needed to inform Soong that the module and its deps are
+    // installed as part of the recovery partition.
+    recovery: true,
 }
 
 cc_binary {
@@ -885,6 +954,8 @@ cc_test {
         "daemon/services.cpp",
         "daemon/shell_service.cpp",
         "daemon/shell_service_test.cpp",
+        "daemon/tradeinmode.cpp",
+        "daemon/tradeinmode_test.cpp",
         "test_utils/test_utils.cpp",
         "shell_service_protocol_test.cpp",
         "mdns_test.cpp",
@@ -896,6 +967,10 @@ cc_test {
         android: {
             srcs: [
                 "daemon/property_monitor_test.cpp",
+            ],
+            static_libs: [
+                "android_trade_in_mode_flags_cc_lib",
+                "android_adbdauth_flags_cc_lib",
             ],
         },
     },
@@ -941,7 +1016,7 @@ python_test_host {
     main: "test_device.py",
     srcs: [
         "proto/app_processes.proto",
-        "proto/adb_host.proto",
+        ":adb_host_proto",
         "test_device.py",
     ],
     proto: {
@@ -956,7 +1031,7 @@ python_test_host {
     test_options: {
         unit_test: false,
     },
-    data: [
+    device_common_data: [
         ":adb_test_app1",
         ":adb_test_app2",
     ],
@@ -996,7 +1071,6 @@ cc_library_host_static {
         "libcutils",
         "libdiagnose_usb",
         "liblog",
-        "libmdnssd",
         "libusb",
         "libutils",
         "libz",
@@ -1039,7 +1113,6 @@ cc_test_host {
         "libdiagnose_usb",
         "libfastdeploy_host",
         "liblog",
-        "libmdnssd",
         "libopenscreen-discovery",
         "libopenscreen-platform-impl",
         "libprotobuf-cpp-full",
@@ -1061,4 +1134,21 @@ cc_test_host {
         "fastdeploy/testdata/sample.apk",
         "fastdeploy/testdata/sample.cd",
     ],
+}
+
+aconfig_declarations {
+    name: "adbd_flags",
+    container: "com.android.adbd",
+    package: "com.android.adbd.flags",
+    srcs: ["adbd_flags.aconfig"],
+}
+
+cc_aconfig_library {
+    name: "adbd_flags_c_lib",
+    aconfig_declarations: "adbd_flags",
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.adbd",
+    ],
+    min_sdk_version: "apex_inherit",
 }

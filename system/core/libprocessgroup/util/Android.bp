@@ -19,8 +19,9 @@ package {
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
 
-cc_library_headers {
+cc_library_static {
     name: "libprocessgroup_util",
+    cpp_std: "gnu++23",
     vendor_available: true,
     product_available: true,
     ramdisk_available: true,
@@ -36,12 +37,22 @@ cc_library_headers {
     export_include_dirs: [
         "include",
     ],
-    defaults: ["libprocessgroup_build_flags_cc"],
+    srcs: [
+        "cgroup_controller.cpp",
+        "cgroup_descriptor.cpp",
+        "util.cpp",
+    ],
+    shared_libs: [
+        "libbase",
+    ],
+    static_libs: [
+        "libjsoncpp",
+    ],
 }
 
 cc_test {
     name: "libprocessgroup_util_test",
-    header_libs: ["libprocessgroup_util"],
+    static_libs: ["libprocessgroup_util"],
     srcs: ["tests/util.cpp"],
     test_suites: ["general-tests"],
 }

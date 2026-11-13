@@ -13,88 +13,63 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {assertDefined} from 'common/assert_utils';
-import {TimestampType} from 'common/time';
-import {NO_TIMEZONE_OFFSET_FACTORY} from 'common/timestamp_factory';
-import {UnitTestUtils} from 'test/unit/utils';
-import {Parser} from 'trace/parser';
-import {ScreenRecordingTraceEntry} from 'trace/screen_recording';
-import {TraceType} from 'trace/trace_type';
+
+import {assertDefined} from 'common/assert';
+import {LegacyParserProvider} from 'test/unit/fixture_utils';
+import {makeElapsedTimestamp} from 'test/unit/time_test_helpers';
+import {CoarseVersion} from 'trace_api/coarse_version';
+import {MediaBasedTraceEntry} from 'trace_api/media_based_trace_entry';
+import {Parser} from 'trace_api/parser';
+import {TraceType} from 'trace_api/trace_type';
 
 describe('ParserScreenRecordingLegacy', () => {
-  let parser: Parser<ScreenRecordingTraceEntry>;
+  let parser: Parser<MediaBasedTraceEntry>;
 
   beforeAll(async () => {
-    parser = (await UnitTestUtils.getParser(
-      'traces/elapsed_timestamp/screen_recording.mp4',
-    )) as Parser<ScreenRecordingTraceEntry>;
+    parser = await new LegacyParserProvider()
+      .addFile('traces/elapsed_timestamp/screen_recording.mp4')
+      .getParser<MediaBasedTraceEntry>();
   });
 
   it('has expected trace type', () => {
     expect(parser.getTraceType()).toEqual(TraceType.SCREEN_RECORDING);
   });
 
-  it('provides elapsed timestamps', () => {
-    const timestamps = assertDefined(
-      parser.getTimestamps(TimestampType.ELAPSED),
-    );
+  it('has expected coarse version', () => {
+    expect(parser.getCoarseVersion()).toEqual(CoarseVersion.LEGACY);
+  });
 
-    expect(timestamps.length).toEqual(85);
+  it('provides timestamps', () => {
+    const timestamps = assertDefined(parser.getTimestamps());
+
+    expect(timestamps.length).toBe(85);
 
     let expected = [
-      NO_TIMEZONE_OFFSET_FACTORY.makeElapsedTimestamp(19446131807000n),
-      NO_TIMEZONE_OFFSET_FACTORY.makeElapsedTimestamp(19446158500000n),
-      NO_TIMEZONE_OFFSET_FACTORY.makeElapsedTimestamp(19446167117000n),
+      makeElapsedTimestamp(19446131807000n),
+      makeElapsedTimestamp(19446158500000n),
+      makeElapsedTimestamp(19446167117000n),
     ];
     expect(timestamps.slice(0, 3)).toEqual(expected);
 
     expected = [
-      NO_TIMEZONE_OFFSET_FACTORY.makeElapsedTimestamp(19448470076000n),
-      NO_TIMEZONE_OFFSET_FACTORY.makeElapsedTimestamp(19448487525000n),
-      NO_TIMEZONE_OFFSET_FACTORY.makeElapsedTimestamp(19448501007000n),
+      makeElapsedTimestamp(19448470076000n),
+      makeElapsedTimestamp(19448487525000n),
+      makeElapsedTimestamp(19448501007000n),
     ];
     expect(timestamps.slice(timestamps.length - 3, timestamps.length)).toEqual(
       expected,
     );
   });
 
-  it("doesn't provide real timestamps", () => {
-    expect(parser.getTimestamps(TimestampType.REAL)).toEqual(undefined);
-  });
-
-  it('does not apply timezone info', async () => {
-    const parserWithTimezoneInfo = (await UnitTestUtils.getParser(
-      'traces/elapsed_timestamp/screen_recording.mp4',
-      true,
-    )) as Parser<ScreenRecordingTraceEntry>;
-    expect(parserWithTimezoneInfo.getTraceType()).toEqual(
-      TraceType.SCREEN_RECORDING,
-    );
-
-    const expectedElapsed = [
-      NO_TIMEZONE_OFFSET_FACTORY.makeElapsedTimestamp(19446131807000n),
-      NO_TIMEZONE_OFFSET_FACTORY.makeElapsedTimestamp(19446158500000n),
-      NO_TIMEZONE_OFFSET_FACTORY.makeElapsedTimestamp(19446167117000n),
-    ];
-    expect(
-      assertDefined(
-        parserWithTimezoneInfo.getTimestamps(TimestampType.ELAPSED),
-      ).slice(0, 3),
-    ).toEqual(expectedElapsed);
-  });
-
   it('retrieves trace entry', async () => {
     {
-      const entry = await parser.getEntry(0, TimestampType.ELAPSED);
-      expect(entry).toBeInstanceOf(ScreenRecordingTraceEntry);
+      const entry = await parser.getEntry(0);
+      expect(entry).toBeInstanceOf(MediaBasedTraceEntry);
       expect(Number(entry.videoTimeSeconds)).toBeCloseTo(0);
     }
     {
-      const entry = await parser.getEntry(
-        parser.getLengthEntries() - 1,
-        TimestampType.ELAPSED,
-      );
-      expect(entry).toBeInstanceOf(ScreenRecordingTraceEntry);
+      const entry = await parser.getEntry(parser.getLengthEntries() - 1);
+      expect(entry).toBeInstanceOf(MediaBasedTraceEntry);
       expect(Number(entry.videoTimeSeconds)).toBeCloseTo(2.37, 0.001);
     }
   });

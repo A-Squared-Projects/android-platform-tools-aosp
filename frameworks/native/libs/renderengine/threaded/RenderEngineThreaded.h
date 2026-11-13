@@ -41,7 +41,7 @@ public:
 
     RenderEngineThreaded(CreateInstanceFactory factory);
     ~RenderEngineThreaded() override;
-    std::future<void> primeCache(bool shouldPrimeUltraHDR) override;
+    std::future<void> primeCache(PrimeCacheConfig config) override;
 
     void dump(std::string& result) override;
 
@@ -55,12 +55,21 @@ public:
                                         const std::vector<LayerSettings>& layers,
                                         const std::shared_ptr<ExternalTexture>& buffer,
                                         base::unique_fd&& bufferFence) override;
+    ftl::Future<FenceResult> tonemapAndDrawGainmap(
+            const std::shared_ptr<ExternalTexture>& hdr, base::borrowed_fd&& hdrFence,
+            float hdrSdrRatio, ui::Dataspace dataspace, const std::shared_ptr<ExternalTexture>& sdr,
+            const std::shared_ptr<ExternalTexture>& gainmap) override;
 
     int getContextPriority() override;
     bool supportsBackgroundBlur() override;
     void onActiveDisplaySizeChanged(ui::Size size) override;
     std::optional<pid_t> getRenderEngineTid() const override;
     void setEnableTracing(bool tracingEnabled) override;
+
+    void rdocCaptureNextFrame() override {
+        ALOGI("[RDOC] Flagging RenderEngine to capture next frame");
+        mRenderEngine->rdocCaptureNextFrame();
+    }
 
 protected:
     void mapExternalTextureBuffer(const sp<GraphicBuffer>& buffer, bool isRenderable) override;
@@ -71,6 +80,11 @@ protected:
                             const std::vector<LayerSettings>& layers,
                             const std::shared_ptr<ExternalTexture>& buffer,
                             base::unique_fd&& bufferFence) override;
+    void tonemapAndDrawGainmapInternal(
+            const std::shared_ptr<std::promise<FenceResult>>&& resultPromise,
+            const std::shared_ptr<ExternalTexture>& hdr, base::borrowed_fd&& hdrFence,
+            float hdrSdrRatio, ui::Dataspace dataspace, const std::shared_ptr<ExternalTexture>& sdr,
+            const std::shared_ptr<ExternalTexture>& gainmap) override;
 
 private:
     void threadMain(CreateInstanceFactory factory);

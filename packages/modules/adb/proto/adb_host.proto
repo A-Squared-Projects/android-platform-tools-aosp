@@ -85,5 +85,56 @@ message AdbServerStatus {
      string executable_absolute_path = 7;
      string log_absolute_path = 8;
      string os = 9;
+     optional string trace_level = 10;
+     optional bool burst_mode = 11;
+     optional bool mdns_enabled = 12;
+     optional string keystore_path = 13;
+     optional string known_hosts_path = 14;
 }
+
+message MdnsServices {
+    repeated ServiceAdbTcp tcp = 1;
+    repeated ServiceAdbTls tls = 2;
+    repeated ServiceAdbPairing pair = 3;
+}
+
+message ServiceAdbTcp {
+    MdnsService service = 1;
+}
+
+message ServiceAdbTls {
+    MdnsService service = 1 ;
+    // If this device has previously been paired, it is considered a known device.
+    bool known_device = 2;
+}
+
+message ServiceAdbPairing {
+    MdnsService service = 1;
+}
+
+message MdnsService {
+    // For explanation about the meaning of instance, service, and domain
+    // refer to RFC 6763 (mdns-sd).
+
+    // e.g.: "adb-43081FDAS000ST-GIVKML"
+    string instance = 1;
+
+    // e.g.: _adb-tls-connect._tcp
+    string service = 2;
+
+    // e.g.: local
+    string domain = 3;
+
+    optional string ipv4 = 4;
+    repeated string ipv6 = 5;
+    uint32 port = 6;
+
+    // Comes from device property "ro.product.model"
+    optional string product_model = 7;
+
+    // Comes from device property "ro.build.version.sdk_full"
+    optional string build_version_sdk_full = 8;
+}
+
+
 

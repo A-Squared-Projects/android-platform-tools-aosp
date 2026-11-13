@@ -13,20 +13,51 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {com} from 'protos/windowmanager/latest/static';
+import {perfetto} from 'protos/perfetto/trace/static';
+import {com} from 'protos/windowmanager/udc/static';
 import {
   CustomQueryParserResultTypeMap,
   CustomQueryType,
-} from 'trace/custom_query';
+} from 'trace_api/custom_query';
 
 type WindowsTokenAndTitle =
   CustomQueryParserResultTypeMap[CustomQueryType.WM_WINDOWS_TOKEN_AND_TITLE];
 
+type ActivityRecordProto =
+  | com.android.server.wm.IActivityRecordProto
+  | perfetto.protos.IActivityRecordProto;
+type DisplayAreaProto =
+  | com.android.server.wm.IDisplayAreaProto
+  | perfetto.protos.DisplayAreaProto;
+type DisplayContentProto =
+  | com.android.server.wm.IDisplayContentProto
+  | perfetto.protos.DisplayContentProto;
+type RootWindowContainerProto =
+  | com.android.server.wm.IRootWindowContainerProto
+  | perfetto.protos.IRootWindowContainerProto;
+type TaskFragmentProto =
+  | com.android.server.wm.ITaskFragmentProto
+  | perfetto.protos.ITaskFragmentProto;
+type TaskProto = com.android.server.wm.ITaskProto | perfetto.protos.ITaskProto;
+type WindowContainerProto =
+  | com.android.server.wm.IWindowContainerProto
+  | perfetto.protos.IWindowContainerProto;
+type WindowStateProto =
+  | com.android.server.wm.IWindowStateProto
+  | perfetto.protos.IWindowStateProto;
+type WindowTokenProto =
+  | com.android.server.wm.IWindowTokenProto
+  | perfetto.protos.IWindowTokenProto;
+
+/**
+ * A parser for a custom query on the WM trace, which extracts all valid window
+ * tokens and their titles from the trace.
+ */
 export class WmCustomQueryUtils {
   private static readonly NA = 'n/a';
 
   static parseWindowsTokenAndTitle(
-    rootWindowContainer: com.android.server.wm.IRootWindowContainerProto,
+    rootWindowContainer: RootWindowContainerProto,
     result: WindowsTokenAndTitle,
   ) {
     const token =
@@ -44,7 +75,7 @@ export class WmCustomQueryUtils {
   }
 
   private static parseWindowContainerProto(
-    proto: com.android.server.wm.IWindowContainerProto | null | undefined,
+    proto: WindowContainerProto | null | undefined,
     result: WindowsTokenAndTitle,
   ) {
     if (!proto) {
@@ -85,7 +116,7 @@ export class WmCustomQueryUtils {
   }
 
   private static parseActivityRecordProto(
-    proto: com.android.server.wm.IActivityRecordProto | null | undefined,
+    proto: ActivityRecordProto | null | undefined,
     result: WindowsTokenAndTitle,
   ) {
     if (!proto) {
@@ -102,7 +133,7 @@ export class WmCustomQueryUtils {
   }
 
   private static parseDisplayAreaProto(
-    proto: com.android.server.wm.IDisplayAreaProto | null | undefined,
+    proto: DisplayAreaProto | null | undefined,
     result: WindowsTokenAndTitle,
   ) {
     if (!proto) {
@@ -117,7 +148,7 @@ export class WmCustomQueryUtils {
   }
 
   private static parseDisplayContentProto(
-    proto: com.android.server.wm.IDisplayContentProto | null | undefined,
+    proto: DisplayContentProto | null | undefined,
     result: WindowsTokenAndTitle,
   ) {
     if (!proto) {
@@ -136,7 +167,7 @@ export class WmCustomQueryUtils {
   }
 
   private static parseTaskProto(
-    proto: com.android.server.wm.ITaskProto | null | undefined,
+    proto: TaskProto | null | undefined,
     result: WindowsTokenAndTitle,
   ) {
     if (!proto) {
@@ -156,7 +187,7 @@ export class WmCustomQueryUtils {
   }
 
   private static parseTaskFragmentProto(
-    proto: com.android.server.wm.ITaskFragmentProto | null | undefined,
+    proto: TaskFragmentProto | null | undefined,
     result: WindowsTokenAndTitle,
   ) {
     if (!proto) {
@@ -169,7 +200,7 @@ export class WmCustomQueryUtils {
   }
 
   private static parseWindowStateProto(
-    proto: com.android.server.wm.IWindowStateProto | null | undefined,
+    proto: WindowStateProto | null | undefined,
     result: WindowsTokenAndTitle,
   ) {
     if (!proto) {
@@ -185,7 +216,7 @@ export class WmCustomQueryUtils {
   }
 
   private static parseWindowTokenProto(
-    proto: com.android.server.wm.IWindowTokenProto | null | undefined,
+    proto: WindowTokenProto | null | undefined,
     result: WindowsTokenAndTitle,
   ) {
     if (!proto) {

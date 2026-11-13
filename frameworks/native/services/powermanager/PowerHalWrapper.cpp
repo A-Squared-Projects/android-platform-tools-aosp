@@ -18,10 +18,10 @@
 #include <aidl/android/hardware/power/Boost.h>
 #include <aidl/android/hardware/power/IPowerHintSession.h>
 #include <aidl/android/hardware/power/Mode.h>
+#include <aidl/android/hardware/power/SupportInfo.h>
+#include <powermanager/HalResult.h>
 #include <powermanager/PowerHalWrapper.h>
 #include <utils/Log.h>
-
-#include <cinttypes>
 
 using namespace android::hardware::power;
 namespace Aidl = aidl::android::hardware::power;
@@ -29,15 +29,6 @@ namespace Aidl = aidl::android::hardware::power;
 namespace android {
 
 namespace power {
-
-// -------------------------------------------------------------------------------------------------
-inline HalResult<void> toHalResult(const ndk::ScopedAStatus& result) {
-    if (result.isOk()) {
-        return HalResult<void>::ok();
-    }
-    ALOGE("Power HAL request failed: %s", result.getDescription().c_str());
-    return HalResult<void>::failed(result.getDescription());
-}
 
 // -------------------------------------------------------------------------------------------------
 
@@ -53,19 +44,19 @@ HalResult<void> EmptyHalWrapper::setMode(Aidl::Mode mode, bool enabled) {
     return HalResult<void>::unsupported();
 }
 
-HalResult<std::shared_ptr<Aidl::IPowerHintSession>> EmptyHalWrapper::createHintSession(
+HalResult<std::shared_ptr<PowerHintSessionWrapper>> EmptyHalWrapper::createHintSession(
         int32_t, int32_t, const std::vector<int32_t>& threadIds, int64_t) {
     ALOGV("Skipped createHintSession(task num=%zu) because %s", threadIds.size(),
           getUnsupportedMessage());
-    return HalResult<std::shared_ptr<Aidl::IPowerHintSession>>::unsupported();
+    return HalResult<std::shared_ptr<PowerHintSessionWrapper>>::unsupported();
 }
 
-HalResult<std::shared_ptr<Aidl::IPowerHintSession>> EmptyHalWrapper::createHintSessionWithConfig(
+HalResult<std::shared_ptr<PowerHintSessionWrapper>> EmptyHalWrapper::createHintSessionWithConfig(
         int32_t, int32_t, const std::vector<int32_t>& threadIds, int64_t, Aidl::SessionTag,
         Aidl::SessionConfig*) {
     ALOGV("Skipped createHintSessionWithConfig(task num=%zu) because %s", threadIds.size(),
           getUnsupportedMessage());
-    return HalResult<std::shared_ptr<Aidl::IPowerHintSession>>::unsupported();
+    return HalResult<std::shared_ptr<PowerHintSessionWrapper>>::unsupported();
 }
 
 HalResult<int64_t> EmptyHalWrapper::getHintSessionPreferredRate() {
@@ -80,6 +71,21 @@ HalResult<Aidl::ChannelConfig> EmptyHalWrapper::getSessionChannel(int, int) {
 
 HalResult<void> EmptyHalWrapper::closeSessionChannel(int, int) {
     ALOGV("Skipped closeSessionChannel because %s", getUnsupportedMessage());
+    return HalResult<void>::unsupported();
+}
+
+HalResult<Aidl::SupportInfo> EmptyHalWrapper::getSupportInfo() {
+    ALOGV("Skipped getSupportInfo because %s", getUnsupportedMessage());
+    return HalResult<Aidl::SupportInfo>::unsupported();
+}
+
+HalResult<void> EmptyHalWrapper::sendCompositionData(const std::vector<hal::CompositionData>&) {
+    ALOGV("Skipped sendCompositionData because %s", getUnsupportedMessage());
+    return HalResult<void>::unsupported();
+}
+
+HalResult<void> EmptyHalWrapper::sendCompositionUpdate(const hal::CompositionUpdate&) {
+    ALOGV("Skipped sendCompositionUpdate because %s", getUnsupportedMessage());
     return HalResult<void>::unsupported();
 }
 
@@ -225,7 +231,7 @@ HalResult<void> AidlHalWrapper::setBoost(Aidl::Boost boost, int32_t durationMs) 
     }
     lock.unlock();
 
-    return toHalResult(mHandle->setBoost(boost, durationMs));
+    return HalResult<void>::fromStatus(mHandle->setBoost(boost, durationMs));
 }
 
 HalResult<void> AidlHalWrapper::setMode(Aidl::Mode mode, bool enabled) {
@@ -253,25 +259,25 @@ HalResult<void> AidlHalWrapper::setMode(Aidl::Mode mode, bool enabled) {
     }
     lock.unlock();
 
-    return toHalResult(mHandle->setMode(mode, enabled));
+    return HalResult<void>::fromStatus(mHandle->setMode(mode, enabled));
 }
 
-HalResult<std::shared_ptr<Aidl::IPowerHintSession>> AidlHalWrapper::createHintSession(
+HalResult<std::shared_ptr<PowerHintSessionWrapper>> AidlHalWrapper::createHintSession(
         int32_t tgid, int32_t uid, const std::vector<int32_t>& threadIds, int64_t durationNanos) {
     std::shared_ptr<Aidl::IPowerHintSession> appSession;
-    return HalResult<std::shared_ptr<Aidl::IPowerHintSession>>::
+    return HalResult<std::shared_ptr<PowerHintSessionWrapper>>::
             fromStatus(mHandle->createHintSession(tgid, uid, threadIds, durationNanos, &appSession),
-                       std::move(appSession));
+                       std::make_shared<PowerHintSessionWrapper>(std::move(appSession)));
 }
 
-HalResult<std::shared_ptr<Aidl::IPowerHintSession>> AidlHalWrapper::createHintSessionWithConfig(
+HalResult<std::shared_ptr<PowerHintSessionWrapper>> AidlHalWrapper::createHintSessionWithConfig(
         int32_t tgid, int32_t uid, const std::vector<int32_t>& threadIds, int64_t durationNanos,
         Aidl::SessionTag tag, Aidl::SessionConfig* config) {
     std::shared_ptr<Aidl::IPowerHintSession> appSession;
-    return HalResult<std::shared_ptr<Aidl::IPowerHintSession>>::
+    return HalResult<std::shared_ptr<PowerHintSessionWrapper>>::
             fromStatus(mHandle->createHintSessionWithConfig(tgid, uid, threadIds, durationNanos,
                                                             tag, config, &appSession),
-                       std::move(appSession));
+                       std::make_shared<PowerHintSessionWrapper>(std::move(appSession)));
 }
 
 HalResult<int64_t> AidlHalWrapper::getHintSessionPreferredRate() {
@@ -287,7 +293,21 @@ HalResult<Aidl::ChannelConfig> AidlHalWrapper::getSessionChannel(int tgid, int u
 }
 
 HalResult<void> AidlHalWrapper::closeSessionChannel(int tgid, int uid) {
-    return toHalResult(mHandle->closeSessionChannel(tgid, uid));
+    return HalResult<void>::fromStatus(mHandle->closeSessionChannel(tgid, uid));
+}
+
+HalResult<Aidl::SupportInfo> AidlHalWrapper::getSupportInfo() {
+    Aidl::SupportInfo support;
+    auto result = mHandle->getSupportInfo(&support);
+    return HalResult<Aidl::SupportInfo>::fromStatus(result, std::move(support));
+}
+
+HalResult<void> AidlHalWrapper::sendCompositionData(const std::vector<hal::CompositionData>& data) {
+    return HalResult<void>::fromStatus(mHandle->sendCompositionData(data));
+}
+
+HalResult<void> AidlHalWrapper::sendCompositionUpdate(const hal::CompositionUpdate& update) {
+    return HalResult<void>::fromStatus(mHandle->sendCompositionUpdate(update));
 }
 
 const char* AidlHalWrapper::getUnsupportedMessage() {

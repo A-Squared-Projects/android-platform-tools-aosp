@@ -19,9 +19,11 @@
 #include "InputFilterCallbacks.h"
 #include <aidl/com/android/server/inputflinger/BnInputThread.h>
 #include <android/binder_auto_utils.h>
+#include <utils/Looper.h>
 #include <utils/StrongPointer.h>
-#include <utils/Thread.h>
 #include <functional>
+#include "InputThread.h"
+#include "jni.h"
 
 namespace android {
 
@@ -29,45 +31,48 @@ using AidlKeyEvent = aidl::com::android::server::inputflinger::KeyEvent;
 
 NotifyKeyArgs keyEventToNotifyKeyArgs(const AidlKeyEvent& event) {
     return NotifyKeyArgs(event.id, event.eventTime, event.readTime, event.deviceId,
-                         static_cast<uint32_t>(event.source), event.displayId, event.policyFlags,
-                         static_cast<int32_t>(event.action), event.flags, event.keyCode,
-                         event.scanCode, event.metaState, event.downTime);
+                         static_cast<uint32_t>(event.source), ui::LogicalDisplayId{event.displayId},
+                         event.policyFlags, static_cast<int32_t>(event.action), event.flags,
+                         event.keyCode, event.scanCode, event.metaState, event.downTime);
 }
 
 namespace {
 
 using namespace aidl::com::android::server::inputflinger;
 
-class InputFilterThreadImpl : public Thread {
-public:
-    explicit InputFilterThreadImpl(std::function<void()> loop)
-          : Thread(/*canCallJava=*/true), mThreadLoop(loop) {}
-
-    ~InputFilterThreadImpl() {}
-
-private:
-    std::function<void()> mThreadLoop;
-
-    bool threadLoop() override {
-        mThreadLoop();
-        return true;
-    }
-};
-
 class InputFilterThread : public BnInputThread {
 public:
-    InputFilterThread(std::shared_ptr<IInputThreadCallback> callback) : mCallback(callback) {
-        mThread = sp<InputFilterThreadImpl>::make([this]() { loopOnce(); });
-        mThread->run("InputFilterThread", ANDROID_PRIORITY_URGENT_DISPLAY);
+    InputFilterThread(std::shared_ptr<IInputThreadCallback> callback, JNIEnv* env)
+          : mCallback(callback) {
+        mLooper = sp<Looper>::make(/*allowNonCallbacks=*/false);
+        mThread = std::make_unique<InputThread>(
+                "InputFilter", [this]() { loopOnce(); }, [this]() { mLooper->wake(); },
+                /*isInCriticalPath=*/false, env);
     }
 
     ndk::ScopedAStatus finish() override {
-        mThread->requestExit();
+        if (mThread && mThread->isCallingThread()) {
+            ALOGE("InputFilterThread cannot be stopped on itself!");
+            return ndk::ScopedAStatus::fromStatus(INVALID_OPERATION);
+        }
+        mThread.reset();
+        return ndk::ScopedAStatus::ok();
+    }
+
+    ndk::ScopedAStatus sleepUntil(nsecs_t when) override {
+        nsecs_t now = systemTime(SYSTEM_TIME_MONOTONIC);
+        mLooper->pollOnce(toMillisecondTimeoutDelay(now, when));
+        return ndk::ScopedAStatus::ok();
+    }
+
+    ndk::ScopedAStatus wake() override {
+        mLooper->wake();
         return ndk::ScopedAStatus::ok();
     }
 
 private:
-    sp<Thread> mThread;
+    sp<Looper> mLooper;
+    std::unique_ptr<InputThread> mThread;
     std::shared_ptr<IInputThreadCallback> mCallback;
 
     void loopOnce() { LOG_ALWAYS_FATAL_IF(!mCallback->loopOnce().isOk()); }
@@ -76,8 +81,8 @@ private:
 } // namespace
 
 InputFilterCallbacks::InputFilterCallbacks(InputListenerInterface& listener,
-                                           InputFilterPolicyInterface& policy)
-      : mNextListener(listener), mPolicy(policy) {}
+                                           InputFilterPolicyInterface& policy, JNIEnv* env)
+      : mNextListener(listener), mPolicy(policy), mJniEnv(env) {}
 
 ndk::ScopedAStatus InputFilterCallbacks::sendKeyEvent(const AidlKeyEvent& event) {
     mNextListener.notifyKey(keyEventToNotifyKeyArgs(event));
@@ -98,7 +103,7 @@ ndk::ScopedAStatus InputFilterCallbacks::onModifierStateChanged(int32_t modifier
 ndk::ScopedAStatus InputFilterCallbacks::createInputFilterThread(
         const std::shared_ptr<IInputThreadCallback>& callback,
         std::shared_ptr<IInputThread>* aidl_return) {
-    *aidl_return = ndk::SharedRefBase::make<InputFilterThread>(callback);
+    *aidl_return = ndk::SharedRefBase::make<InputFilterThread>(callback, mJniEnv);
     return ndk::ScopedAStatus::ok();
 }
 

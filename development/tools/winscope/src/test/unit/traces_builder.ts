@@ -14,24 +14,34 @@
  * limitations under the License.
  */
 
-import {Timestamp} from 'common/time';
-import {FrameMap} from 'trace/frame_map';
-import {Traces} from 'trace/traces';
-import {TraceType} from 'trace/trace_type';
+import {Timestamp} from 'common/time/time';
+import {FrameMap} from 'trace_api/frame_map';
+import {TraceType} from 'trace_api/trace_type';
+import {Traces} from 'trace_api/traces';
 import {TraceBuilder} from './trace_builder';
 
 export class TracesBuilder {
   private readonly traceBuilders = new Map<TraceType, TraceBuilder<{}>>();
 
-  setEntries(type: TraceType, entries: Array<{}>): TracesBuilder {
+  setEntries(
+    type: TraceType,
+    entries: Array<{}>,
+    descriptors?: string[],
+  ): TracesBuilder {
     const builder = this.getOrCreateTraceBuilder(type);
     builder.setEntries(entries);
+    if (descriptors) builder.setDescriptors(descriptors);
     return this;
   }
 
-  setTimestamps(type: TraceType, timestamps: Timestamp[]): TracesBuilder {
+  setTimestamps(
+    type: TraceType,
+    timestamps: Timestamp[],
+    descriptors?: string[],
+  ): TracesBuilder {
     const builder = this.getOrCreateTraceBuilder(type);
     builder.setTimestamps(timestamps);
+    if (descriptors) builder.setDescriptors(descriptors);
     return this;
   }
 
@@ -43,8 +53,8 @@ export class TracesBuilder {
 
   build(): Traces {
     const traces = new Traces();
-    this.traceBuilders.forEach((builder, type) => {
-      traces.setTrace(type, builder.build());
+    this.traceBuilders.forEach((builder) => {
+      traces.addTrace(builder.build());
     });
     return traces;
   }

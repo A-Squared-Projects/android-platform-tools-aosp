@@ -112,6 +112,40 @@ static_assert(
         static_cast<int>(aidl::android::hardware::graphics::common::PixelFormat::RGBA_10101010) ==
                 AHARDWAREBUFFER_FORMAT_R10G10B10A10_UNORM,
         "HAL and AHardwareBuffer pixel format don't match");
+static_assert(
+        static_cast<int>(aidl::android::hardware::graphics::common::PixelFormat::YCBCR_P210) ==
+                AHARDWAREBUFFER_FORMAT_YCbCr_P210,
+        "HAL and AHardwareBuffer pixel format don't match");
+static_assert(static_cast<int>(aidl::android::hardware::graphics::common::PixelFormat::R_12_UINT) ==
+                      AHARDWAREBUFFER_FORMAT_R12_UINT,
+              "HAL and AHardwareBuffer pixel format don't match");
+static_assert(static_cast<int>(aidl::android::hardware::graphics::common::PixelFormat::R_14_UINT) ==
+                      AHARDWAREBUFFER_FORMAT_R14_UINT,
+              "HAL and AHardwareBuffer pixel format don't match");
+static_assert(
+        static_cast<int>(aidl::android::hardware::graphics::common::PixelFormat::RG_1212_UINT) ==
+                AHARDWAREBUFFER_FORMAT_R12G12_UINT,
+        "HAL and AHardwareBuffer pixel format don't match");
+static_assert(
+        static_cast<int>(aidl::android::hardware::graphics::common::PixelFormat::RG_1414_UINT) ==
+                AHARDWAREBUFFER_FORMAT_R14G14_UINT,
+        "HAL and AHardwareBuffer pixel format don't match");
+static_assert(static_cast<int>(
+                      aidl::android::hardware::graphics::common::PixelFormat::RGBA_12121212_UINT) ==
+                      AHARDWAREBUFFER_FORMAT_R12G12B12A12_UINT,
+              "HAL and AHardwareBuffer pixel format don't match");
+static_assert(static_cast<int>(
+                      aidl::android::hardware::graphics::common::PixelFormat::RGBA_14141414_UINT) ==
+                      AHARDWAREBUFFER_FORMAT_R14G14B14A14_UINT,
+              "HAL and AHardwareBuffer pixel format don't match");
+static_assert(
+        static_cast<int>(aidl::android::hardware::graphics::common::PixelFormat::BGRA_1010102) ==
+                AHARDWAREBUFFER_FORMAT_B10G10R10A2_UNORM,
+        "HAL and AHardwareBuffer pixel format don't match");
+static_assert(
+        static_cast<int>(aidl::android::hardware::graphics::common::PixelFormat::BGRX_1010102) ==
+                AHARDWAREBUFFER_FORMAT_B10G10R10X2_UNORM,
+        "HAL and AHardwareBuffer pixel format don't match");
 
 static enum AHardwareBufferStatus filterStatus(status_t status) {
     switch (status) {
@@ -196,10 +230,10 @@ int AHardwareBuffer_lockAndGetInfo(AHardwareBuffer* buffer, uint64_t usage,
         return BAD_VALUE;
     }
 
-    if (usage & ~(AHARDWAREBUFFER_USAGE_CPU_READ_MASK |
-                  AHARDWAREBUFFER_USAGE_CPU_WRITE_MASK)) {
+    if (usage & ~(AHARDWAREBUFFER_USAGE_CPU_READ_MASK | AHARDWAREBUFFER_USAGE_CPU_WRITE_MASK) ||
+        usage == 0) {
         ALOGE("Invalid usage flags passed to AHardwareBuffer_lock; only "
-                "AHARDWAREBUFFER_USAGE_CPU_* flags are allowed");
+              "AHARDWAREBUFFER_USAGE_CPU_* flags are allowed");
         return BAD_VALUE;
     }
 
@@ -248,10 +282,10 @@ int AHardwareBuffer_lock(AHardwareBuffer* buffer, uint64_t usage,
 
     if (!buffer) return BAD_VALUE;
 
-    if (usage & ~(AHARDWAREBUFFER_USAGE_CPU_READ_MASK |
-                  AHARDWAREBUFFER_USAGE_CPU_WRITE_MASK)) {
+    if (usage & ~(AHARDWAREBUFFER_USAGE_CPU_READ_MASK | AHARDWAREBUFFER_USAGE_CPU_WRITE_MASK) ||
+        usage == 0) {
         ALOGE("Invalid usage flags passed to AHardwareBuffer_lock; only "
-                "AHARDWAREBUFFER_USAGE_CPU_* flags are allowed");
+              "AHARDWAREBUFFER_USAGE_CPU_* flags are allowed");
         return BAD_VALUE;
     }
 
@@ -277,10 +311,10 @@ int AHardwareBuffer_lockPlanes(AHardwareBuffer* buffer, uint64_t usage,
         int32_t fence, const ARect* rect, AHardwareBuffer_Planes* outPlanes) {
     if (!buffer || !outPlanes) return BAD_VALUE;
 
-    if (usage & ~(AHARDWAREBUFFER_USAGE_CPU_READ_MASK |
-                  AHARDWAREBUFFER_USAGE_CPU_WRITE_MASK)) {
+    if (usage & ~(AHARDWAREBUFFER_USAGE_CPU_READ_MASK | AHARDWAREBUFFER_USAGE_CPU_WRITE_MASK) ||
+        usage == 0) {
         ALOGE("Invalid usage flags passed to AHardwareBuffer_lock; only "
-                " AHARDWAREBUFFER_USAGE_CPU_* flags are allowed");
+              " AHARDWAREBUFFER_USAGE_CPU_* flags are allowed");
         return BAD_VALUE;
     }
 
@@ -300,7 +334,11 @@ int AHardwareBuffer_lockPlanes(AHardwareBuffer* buffer, uint64_t usage,
       if (result == 0) {
         outPlanes->planeCount = 3;
         outPlanes->planes[0].data = yuvData.y;
-        if (format == AHARDWAREBUFFER_FORMAT_YCbCr_P010) {
+        // P010 & P210 are word-aligned 10-bit semiplaner, and YCbCr_422_I is a single interleaved
+        // plane
+        if (format == AHARDWAREBUFFER_FORMAT_YCbCr_P010 ||
+            format == AHARDWAREBUFFER_FORMAT_YCbCr_P210 ||
+            format == AHARDWAREBUFFER_FORMAT_YCbCr_422_I) {
             outPlanes->planes[0].pixelStride = 2;
         } else {
             outPlanes->planes[0].pixelStride = 1;
@@ -722,6 +760,7 @@ bool AHardwareBuffer_formatIsYuv(uint32_t format) {
         case AHARDWAREBUFFER_FORMAT_YCrCb_420_SP:
         case AHARDWAREBUFFER_FORMAT_YCbCr_422_I:
         case AHARDWAREBUFFER_FORMAT_YCbCr_P010:
+        case AHARDWAREBUFFER_FORMAT_YCbCr_P210:
             return true;
         default:
             return false;

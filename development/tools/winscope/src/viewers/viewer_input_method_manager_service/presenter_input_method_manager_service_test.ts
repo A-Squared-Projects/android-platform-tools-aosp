@@ -16,14 +16,21 @@
 
 import {HierarchyTreeBuilder} from 'test/unit/hierarchy_tree_builder';
 import {PropertyTreeBuilder} from 'test/unit/property_tree_builder';
-import {TraceType} from 'trace/trace_type';
-import {PropertySource} from 'trace/tree_node/property_tree_node';
-import {executePresenterInputMethodTests} from 'viewers/common/presenter_input_method_test_utils';
+import {TraceType} from 'trace_api/trace_type';
+import {HierarchyTreeNode} from 'tree_node/hierarchy_tree_node';
+import {PropertySource, PropertyTreeNode} from 'tree_node/property_tree_node';
+import {AbstractPresenterInputMethodTest} from 'viewers/common/abstract_presenter_input_method_test';
 import {PresenterInputMethodManagerService} from './presenter_input_method_manager_service';
 
-describe('PresenterInputMethodManagerService', () => {
-  describe('PresenterInputMethod tests:', () => {
-    const selectedTree = new HierarchyTreeBuilder()
+class PresenterInputMethodManagerServiceTest extends AbstractPresenterInputMethodTest {
+  protected override readonly PresenterInputMethod =
+    PresenterInputMethodManagerService;
+  protected override readonly imeTraceType =
+    TraceType.INPUT_METHOD_MANAGER_SERVICE;
+  protected override readonly numberOfNestedChildren = 1;
+
+  override getSelectedNode(): HierarchyTreeNode {
+    return new HierarchyTreeBuilder()
       .setId('InputMethodManagerService')
       .setName('entry')
       .setProperties({where: 'location', elapsedNanos: 0})
@@ -33,21 +40,16 @@ describe('PresenterInputMethodManagerService', () => {
         source: PropertySource.DEFAULT,
       })
       .build();
-
-    const selectedPropertyTreeNode = new PropertyTreeBuilder()
+  }
+  override getPropertiesTree(): PropertyTreeNode {
+    return new PropertyTreeBuilder()
       .setRootId('TestNode')
       .setName('input target')
       .setChildren([{name: 'test property', value: 1}])
       .build();
+  }
+}
 
-    executePresenterInputMethodTests(
-      selectedTree,
-      'elapsedNanos',
-      [2, 1, 3],
-      false,
-      PresenterInputMethodManagerService,
-      TraceType.INPUT_METHOD_MANAGER_SERVICE,
-      selectedPropertyTreeNode,
-    );
-  });
+describe('PresenterInputMethodManagerService', () => {
+  new PresenterInputMethodManagerServiceTest().execute();
 });

@@ -24,6 +24,13 @@
 #  undef _WIN32
 #endif
 
+// Include this protobuf header first, because it uses some write() calls
+// that we will redefine later. Not all modules that include sysdeps.h use
+// protobufs, so only include it if it exists.
+#if __has_include("google/protobuf/io/coded_stream.h")
+#include "google/protobuf/io/coded_stream.h"
+#endif
+
 #include <errno.h>
 
 #include <optional>
@@ -178,11 +185,11 @@ int unix_isatty(borrowed_fd fd);
 int network_inaddr_any_server(int port, int type, std::string* error);
 
 inline int network_local_client(const char* name, int namespace_id, int type, std::string* error) {
-    abort();
+    abort(); // Windows-only, and libbase logging conflicts with Win32 ERROR.
 }
 
 inline int network_local_server(const char* name, int namespace_id, int type, std::string* error) {
-    abort();
+    abort(); // Windows-only, and libbase logging conflicts with Win32 ERROR.
 }
 
 int network_connect(const std::string& host, int port, int type, int timeout,

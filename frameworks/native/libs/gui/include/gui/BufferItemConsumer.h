@@ -17,13 +17,15 @@
 #ifndef ANDROID_GUI_BUFFERITEMCONSUMER_H
 #define ANDROID_GUI_BUFFERITEMCONSUMER_H
 
-#include <gui/ConsumerBase.h>
+#include <com_android_graphics_libgui_flags.h>
 #include <gui/BufferQueue.h>
+#include <gui/ConsumerBase.h>
 
 #define ANDROID_GRAPHICS_BUFFERITEMCONSUMER_JNI_ID "mBufferItemConsumer"
 
 namespace android {
 
+class GraphicBuffer;
 class String8;
 
 /**
@@ -51,9 +53,15 @@ class BufferItemConsumer: public ConsumerBase
     // access at the same time.
     // controlledByApp tells whether this consumer is controlled by the
     // application.
-    BufferItemConsumer(const sp<IGraphicBufferConsumer>& consumer,
+    static std::tuple<sp<BufferItemConsumer>, sp<Surface>> create(
             uint64_t consumerUsage, int bufferCount = DEFAULT_MAX_BUFFERS,
-            bool controlledByApp = false);
+            bool controlledByApp = false, bool isConsumerSurfaceFlinger = false);
+
+    static sp<BufferItemConsumer> create(const sp<IGraphicBufferConsumer>& consumer,
+                                         uint64_t consumerUsage,
+                                         int bufferCount = DEFAULT_MAX_BUFFERS,
+                                         bool controlledByApp = false)
+            __attribute((deprecated("Prefer ctors that create their own surface and consumer.")));
 
     ~BufferItemConsumer() override;
 
@@ -76,6 +84,14 @@ class BufferItemConsumer: public ConsumerBase
     status_t acquireBuffer(BufferItem* item, nsecs_t presentWhen,
             bool waitForFence = true);
 
+    // Transfer ownership of a buffer to the BufferQueue. On NO_ERROR, the buffer
+    // is considered as if it were acquired. Buffer must not be null.
+    //
+    // Returns
+    //  - BAD_VALUE if buffer is null
+    //  - INVALID_OPERATION if too many buffers have already been acquired
+    status_t attachBuffer(const sp<GraphicBuffer>& buffer);
+
     // Returns an acquired buffer to the queue, allowing it to be reused. Since
     // only a fixed number of buffers may be acquired at a time, old buffers
     // must be released by calling releaseBuffer to ensure new buffers can be
@@ -85,8 +101,35 @@ class BufferItemConsumer: public ConsumerBase
     status_t releaseBuffer(const BufferItem &item,
             const sp<Fence>& releaseFence = Fence::NO_FENCE);
 
-   private:
+    status_t releaseBuffer(const sp<GraphicBuffer>& buffer,
+                           const sp<Fence>& releaseFence = Fence::NO_FENCE);
+
+    void onFirstRef() override;
+
+protected:
+    // This should only be used by BLASTBufferQueue:
+    BufferItemConsumer(const sp<IGraphicBufferProducer>& producer,
+                       const sp<IGraphicBufferConsumer>& consumer, uint64_t consumerUsage,
+                       int bufferCount = DEFAULT_MAX_BUFFERS, bool controlledByApp = false);
+
+    BufferItemConsumer(uint64_t consumerUsage, int bufferCount = DEFAULT_MAX_BUFFERS,
+                       bool controlledByApp = false, bool isConsumerSurfaceFlinger = false);
+    BufferItemConsumer(const sp<IGraphicBufferConsumer>& consumer, uint64_t consumerUsage,
+                       int bufferCount = DEFAULT_MAX_BUFFERS, bool controlledByApp = false)
+            __attribute((deprecated("Prefer ctors that create their own surface and consumer.")));
+
+private:
+    friend sp<BufferItemConsumer>;
+
+    void initializeConsumer();
+
+    status_t releaseBufferSlotLocked(int slotIndex, const sp<GraphicBuffer>& buffer,
+                                     const sp<Fence>& releaseFence);
+
     void freeBufferLocked(int slotIndex) override;
+
+    uint64_t mConsumerUsage;
+    int mBufferCount;
 
     // mBufferFreedListener is the listener object that will be called when
     // an old buffer is being freed. If it is not NULL it will be called from

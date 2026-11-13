@@ -59,8 +59,10 @@ TEST(process_info, process_info_proc_pid_fd_smoke) {
   ASSERT_NE(-1, fd);
   ASSERT_TRUE(android::procinfo::GetProcessInfoFromProcPidFd(fd, gettid(), &self));
 
+  std::string process_path = android::base::GetExecutablePath();
+  std::string process_name = android::base::Basename(process_path);
   // Process name is capped at 15 bytes.
-  ASSERT_EQ("libprocinfo_tes", self.name);
+  ASSERT_EQ(process_name.substr(0, 15), self.name);
   ASSERT_EQ(gettid(), self.tid);
   ASSERT_EQ(getpid(), self.pid);
   ASSERT_EQ(getppid(), self.ppid);

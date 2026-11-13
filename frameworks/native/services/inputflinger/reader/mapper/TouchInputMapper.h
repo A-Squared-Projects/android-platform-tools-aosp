@@ -16,17 +16,32 @@
 
 #pragma once
 
+#include <array>
+#include <climits>
+#include <limits>
+#include <list>
+#include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
+#include <input/DisplayViewport.h>
+#include <input/Input.h>
+#include <input/InputDevice.h>
 #include <stdint.h>
+#include <ui/Rect.h>
 #include <ui/Rotation.h>
+#include <ui/Size.h>
+#include <ui/Transform.h>
+#include <utils/BitSet.h>
+#include <utils/Timers.h>
 
 #include "CursorButtonAccumulator.h"
-#include "CursorScrollAccumulator.h"
 #include "EventHub.h"
 #include "InputMapper.h"
 #include "InputReaderBase.h"
+#include "NotifyArgs.h"
+#include "StylusState.h"
 #include "TouchButtonAccumulator.h"
 
 namespace android {
@@ -42,17 +57,17 @@ static constexpr nsecs_t TOUCH_DATA_TIMEOUT = ms2ns(20);
 struct RawPointerAxes {
     RawAbsoluteAxisInfo x{};
     RawAbsoluteAxisInfo y{};
-    RawAbsoluteAxisInfo pressure{};
-    RawAbsoluteAxisInfo touchMajor{};
-    RawAbsoluteAxisInfo touchMinor{};
-    RawAbsoluteAxisInfo toolMajor{};
-    RawAbsoluteAxisInfo toolMinor{};
-    RawAbsoluteAxisInfo orientation{};
-    RawAbsoluteAxisInfo distance{};
-    RawAbsoluteAxisInfo tiltX{};
-    RawAbsoluteAxisInfo tiltY{};
-    RawAbsoluteAxisInfo trackingId{};
-    RawAbsoluteAxisInfo slot{};
+    std::optional<RawAbsoluteAxisInfo> pressure{};
+    std::optional<RawAbsoluteAxisInfo> touchMajor{};
+    std::optional<RawAbsoluteAxisInfo> touchMinor{};
+    std::optional<RawAbsoluteAxisInfo> toolMajor{};
+    std::optional<RawAbsoluteAxisInfo> toolMinor{};
+    std::optional<RawAbsoluteAxisInfo> orientation{};
+    std::optional<RawAbsoluteAxisInfo> distance{};
+    std::optional<RawAbsoluteAxisInfo> tiltX{};
+    std::optional<RawAbsoluteAxisInfo> tiltY{};
+    std::optional<RawAbsoluteAxisInfo> trackingId{};
+    std::optional<RawAbsoluteAxisInfo> slot{};
 
     inline int32_t getRawWidth() const { return x.maxValue - x.minValue + 1; }
     inline int32_t getRawHeight() const { return y.maxValue - y.minValue + 1; }
@@ -89,8 +104,6 @@ struct RawPointerData {
     IdToIndexArray idToIndex{};
 
     inline void clear() { *this = RawPointerData(); }
-
-    void getCentroidOfTouchingPointers(float* outX, float* outY) const;
 
     inline void markIdBit(uint32_t id, bool isHovering) {
         if (isHovering) {
@@ -155,7 +168,7 @@ public:
                                                     const InputReaderConfiguration& config,
                                                     ConfigurationChanges changes) override;
     [[nodiscard]] std::list<NotifyArgs> reset(nsecs_t when) override;
-    [[nodiscard]] std::list<NotifyArgs> process(const RawEvent* rawEvent) override;
+    [[nodiscard]] std::list<NotifyArgs> process(const RawEvent& rawEvent) override;
 
     int32_t getKeyCodeState(uint32_t sourceMask, int32_t keyCode) override;
     int32_t getScanCodeState(uint32_t sourceMask, int32_t scanCode) override;
@@ -166,11 +179,10 @@ public:
     [[nodiscard]] std::list<NotifyArgs> timeoutExpired(nsecs_t when) override;
     [[nodiscard]] std::list<NotifyArgs> updateExternalStylusState(
             const StylusState& state) override;
-    std::optional<int32_t> getAssociatedDisplayId() override;
+    std::optional<ui::LogicalDisplayId> getAssociatedDisplayId() const override;
 
 protected:
     CursorButtonAccumulator mCursorButtonAccumulator;
-    CursorScrollAccumulator mCursorScrollAccumulator;
     TouchButtonAccumulator mTouchButtonAccumulator;
 
     struct VirtualKey {
@@ -195,9 +207,8 @@ protected:
     enum class DeviceMode {
         DISABLED,   // input is disabled
         DIRECT,     // direct mapping (touchscreen)
-        UNSCALED,   // unscaled mapping (e.g. captured touchpad)
         NAVIGATION, // unscaled mapping with assist gesture (touch navigation)
-        POINTER,    // pointer mapping (e.g. uncaptured touchpad, drawing tablet)
+        POINTER,    // pointer mapping (e.g. absolute mouse, drawing tablet)
 
         ftl_last = POINTER
     };
@@ -216,23 +227,16 @@ protected:
             ftl_last = POINTER
         };
 
+        // TouchInputMapper will configure devices with INPUT_PROP_DIRECT as
+        // DeviceType::TOUCH_SCREEN, and will otherwise use DeviceType::POINTER by default.
+        // This can be overridden by IDC files, using the `touch.deviceType` config.
         DeviceType deviceType;
-        bool hasAssociatedDisplay;
         bool associatedDisplayIsExternal;
         bool orientationAware;
 
         ui::Rotation orientation;
 
-        bool hasButtonUnderPad;
         std::string uniqueDisplayId;
-
-        enum class GestureMode {
-            SINGLE_TOUCH,
-            MULTI_TOUCH,
-
-            ftl_last = MULTI_TOUCH
-        };
-        GestureMode gestureMode;
 
         bool wake;
 
@@ -320,21 +324,14 @@ protected:
 
         int32_t buttonState{};
 
-        // Scroll state.
-        int32_t rawVScroll{};
-        int32_t rawHScroll{};
-
         inline void clear() { *this = RawState(); }
     };
+
+    friend std::ostream& operator<<(std::ostream& out, const RawState& state);
 
     struct CookedState {
         // Cooked pointer sample data.
         CookedPointerData cookedPointerData{};
-
-        // Id bits used to differentiate fingers, stylus and mouse tools.
-        BitSet32 fingerIdBits{};
-        BitSet32 stylusIdBits{};
-        BitSet32 mouseIdBits{};
 
         int32_t buttonState{};
 
@@ -347,6 +344,16 @@ protected:
     RawState mLastRawState;
     CookedState mLastCookedState;
 
+    enum class ExternalStylusPresence {
+        // No external stylus connected.
+        NONE,
+        // An external stylus that can report touch/pressure that can be fused with the touchscreen.
+        TOUCH_FUSION,
+        // An external stylus that can only report buttons.
+        BUTTON_FUSION,
+        ftl_last = BUTTON_FUSION,
+    };
+    ExternalStylusPresence mExternalStylusPresence{ExternalStylusPresence::NONE};
     // State provided by an external stylus
     StylusState mExternalStylusState;
     // If an external stylus is capable of reporting pointer-specific data like pressure, we will
@@ -371,9 +378,6 @@ protected:
 
     // The time the primary pointer last went down.
     nsecs_t mDownTime{0};
-
-    // The pointer controller, or null if the device is not a pointer.
-    std::shared_ptr<PointerControllerInterface> mPointerController;
 
     std::vector<VirtualKey> mVirtualKeys;
 
@@ -445,8 +449,6 @@ private:
     float mTiltYCenter;
     float mTiltYScale;
 
-    bool mExternalStylusConnected;
-
     // Oriented motion ranges for input device info.
     struct OrientedRanges {
         InputDeviceInfo::MotionRange x;
@@ -491,227 +493,6 @@ private:
         int32_t scanCode;
     } mCurrentVirtualKey;
 
-    // Scale factor for gesture or mouse based pointer movements.
-    float mPointerXMovementScale;
-    float mPointerYMovementScale;
-
-    // Scale factor for gesture based zooming and other freeform motions.
-    float mPointerXZoomScale;
-    float mPointerYZoomScale;
-
-    // The maximum swipe width between pointers to detect a swipe gesture
-    // in the number of pixels.Touches that are wider than this are translated
-    // into freeform gestures.
-    float mPointerGestureMaxSwipeWidth;
-
-    struct PointerDistanceHeapElement {
-        uint32_t currentPointerIndex : 8 {};
-        uint32_t lastPointerIndex : 8 {};
-        uint64_t distance : 48 {}; // squared distance
-    };
-
-    enum class PointerUsage {
-        NONE,
-        GESTURES,
-        STYLUS,
-        MOUSE,
-    };
-    PointerUsage mPointerUsage{PointerUsage::NONE};
-
-    struct PointerGesture {
-        enum class Mode {
-            // No fingers, button is not pressed.
-            // Nothing happening.
-            NEUTRAL,
-
-            // No fingers, button is not pressed.
-            // Tap detected.
-            // Emits DOWN and UP events at the pointer location.
-            TAP,
-
-            // Exactly one finger dragging following a tap.
-            // Pointer follows the active finger.
-            // Emits DOWN, MOVE and UP events at the pointer location.
-            //
-            // Detect double-taps when the finger goes up while in TAP_DRAG mode.
-            TAP_DRAG,
-
-            // Button is pressed.
-            // Pointer follows the active finger if there is one.  Other fingers are ignored.
-            // Emits DOWN, MOVE and UP events at the pointer location.
-            BUTTON_CLICK_OR_DRAG,
-
-            // Exactly one finger, button is not pressed.
-            // Pointer follows the active finger.
-            // Emits HOVER_MOVE events at the pointer location.
-            //
-            // Detect taps when the finger goes up while in HOVER mode.
-            HOVER,
-
-            // Exactly two fingers but neither have moved enough to clearly indicate
-            // whether a swipe or freeform gesture was intended.  We consider the
-            // pointer to be pressed so this enables clicking or long-pressing on buttons.
-            // Pointer does not move.
-            // Emits DOWN, MOVE and UP events with a single stationary pointer coordinate.
-            PRESS,
-
-            // Exactly two fingers moving in the same direction, button is not pressed.
-            // Pointer does not move.
-            // Emits DOWN, MOVE and UP events with a single pointer coordinate that
-            // follows the midpoint between both fingers.
-            SWIPE,
-
-            // Two or more fingers moving in arbitrary directions, button is not pressed.
-            // Pointer does not move.
-            // Emits DOWN, POINTER_DOWN, MOVE, POINTER_UP and UP events that follow
-            // each finger individually relative to the initial centroid of the finger.
-            FREEFORM,
-
-            // Waiting for quiet time to end before starting the next gesture.
-            QUIET,
-        };
-
-        // When a gesture is sent to an unfocused window, return true if it can bring that window
-        // into focus, false otherwise.
-        static bool canGestureAffectWindowFocus(Mode mode) {
-            switch (mode) {
-                case Mode::TAP:
-                case Mode::TAP_DRAG:
-                case Mode::BUTTON_CLICK_OR_DRAG:
-                    // Taps can affect window focus.
-                    return true;
-                case Mode::FREEFORM:
-                case Mode::HOVER:
-                case Mode::NEUTRAL:
-                case Mode::PRESS:
-                case Mode::QUIET:
-                case Mode::SWIPE:
-                    // Most gestures can be performed on an unfocused window, so they should not
-                    // not affect window focus.
-                    return false;
-            }
-        }
-
-        // Time the first finger went down.
-        nsecs_t firstTouchTime;
-
-        // The active pointer id from the raw touch data.
-        int32_t activeTouchId; // -1 if none
-
-        // The active pointer id from the gesture last delivered to the application.
-        int32_t activeGestureId; // -1 if none
-
-        // Pointer coords and ids for the current and previous pointer gesture.
-        Mode currentGestureMode;
-        BitSet32 currentGestureIdBits;
-        IdToIndexArray currentGestureIdToIndex{};
-        PropertiesArray currentGestureProperties{};
-        CoordsArray currentGestureCoords{};
-
-        Mode lastGestureMode;
-        BitSet32 lastGestureIdBits;
-        IdToIndexArray lastGestureIdToIndex{};
-        PropertiesArray lastGestureProperties{};
-        CoordsArray lastGestureCoords{};
-
-        // Time the pointer gesture last went down.
-        nsecs_t downTime;
-
-        // Time when the pointer went down for a TAP.
-        nsecs_t tapDownTime;
-
-        // Time when the pointer went up for a TAP.
-        nsecs_t tapUpTime;
-
-        // Location of initial tap.
-        float tapX, tapY;
-
-        // Time we started waiting for quiescence.
-        nsecs_t quietTime;
-
-        // Reference points for multitouch gestures.
-        float referenceTouchX; // reference touch X/Y coordinates in surface units
-        float referenceTouchY;
-        float referenceGestureX; // reference gesture X/Y coordinates in pixels
-        float referenceGestureY;
-
-        // Distance that each pointer has traveled which has not yet been
-        // subsumed into the reference gesture position.
-        BitSet32 referenceIdBits;
-        struct Delta {
-            float dx, dy;
-        };
-        Delta referenceDeltas[MAX_POINTER_ID + 1];
-
-        // Describes how touch ids are mapped to gesture ids for freeform gestures.
-        uint32_t freeformTouchToGestureIdMap[MAX_POINTER_ID + 1];
-
-        // A velocity tracker for determining whether to switch active pointers during drags.
-        VelocityTracker velocityTracker;
-
-        void reset() {
-            firstTouchTime = LLONG_MIN;
-            activeTouchId = -1;
-            activeGestureId = -1;
-            currentGestureMode = Mode::NEUTRAL;
-            currentGestureIdBits.clear();
-            lastGestureMode = Mode::NEUTRAL;
-            lastGestureIdBits.clear();
-            downTime = 0;
-            velocityTracker.clear();
-            resetTap();
-            resetQuietTime();
-        }
-
-        void resetTap() {
-            tapDownTime = LLONG_MIN;
-            tapUpTime = LLONG_MIN;
-        }
-
-        void resetQuietTime() { quietTime = LLONG_MIN; }
-    } mPointerGesture;
-
-    struct PointerSimple {
-        PointerCoords currentCoords;
-        PointerProperties currentProperties;
-        PointerCoords lastCoords;
-        PointerProperties lastProperties;
-
-        // True if the pointer is down.
-        bool down;
-
-        // True if the pointer is hovering.
-        bool hovering;
-
-        // Time the pointer last went down.
-        nsecs_t downTime;
-
-        // Values reported for the last pointer event.
-        uint32_t source;
-        int32_t displayId;
-        float lastCursorX;
-        float lastCursorY;
-
-        void reset() {
-            currentCoords.clear();
-            currentProperties.clear();
-            lastCoords.clear();
-            lastProperties.clear();
-            down = false;
-            hovering = false;
-            downTime = 0;
-            source = 0;
-            displayId = ADISPLAY_ID_NONE;
-            lastCursorX = 0.f;
-            lastCursorY = 0.f;
-        }
-    } mPointerSimple;
-
-    // The pointer and scroll velocity controls.
-    SimpleVelocityControl mPointerVelocityControl;
-    SimpleVelocityControl mWheelXVelocityControl;
-    SimpleVelocityControl mWheelYVelocityControl;
-
     std::optional<DisplayViewport> findViewport();
 
     void resetExternalStylus();
@@ -741,60 +522,11 @@ private:
                                                               uint32_t policyFlags);
     [[nodiscard]] std::list<NotifyArgs> dispatchButtonPress(nsecs_t when, nsecs_t readTime,
                                                             uint32_t policyFlags);
-    [[nodiscard]] std::list<NotifyArgs> dispatchGestureButtonPress(nsecs_t when,
-                                                                   uint32_t policyFlags,
-                                                                   BitSet32 idBits,
-                                                                   nsecs_t readTime);
-    [[nodiscard]] std::list<NotifyArgs> dispatchGestureButtonRelease(nsecs_t when,
-                                                                     uint32_t policyFlags,
-                                                                     BitSet32 idBits,
-                                                                     nsecs_t readTime);
     const BitSet32& findActiveIdBits(const CookedPointerData& cookedPointerData);
     void cookPointerData();
-    [[nodiscard]] std::list<NotifyArgs> abortTouches(nsecs_t when, nsecs_t readTime,
-                                                     uint32_t policyFlags);
-
-    [[nodiscard]] std::list<NotifyArgs> dispatchPointerUsage(nsecs_t when, nsecs_t readTime,
-                                                             uint32_t policyFlags,
-                                                             PointerUsage pointerUsage);
-    [[nodiscard]] std::list<NotifyArgs> abortPointerUsage(nsecs_t when, nsecs_t readTime,
-                                                          uint32_t policyFlags);
-
-    [[nodiscard]] std::list<NotifyArgs> dispatchPointerGestures(nsecs_t when, nsecs_t readTime,
-                                                                uint32_t policyFlags,
-                                                                bool isTimeout);
-    [[nodiscard]] std::list<NotifyArgs> abortPointerGestures(nsecs_t when, nsecs_t readTime,
-                                                             uint32_t policyFlags);
-    bool preparePointerGestures(nsecs_t when, bool* outCancelPreviousGesture,
-                                bool* outFinishPreviousGesture, bool isTimeout);
-
-    // Returns true if we're in a period of "quiet time" when touchpad gestures should be ignored.
-    bool checkForTouchpadQuietTime(nsecs_t when);
-
-    std::pair<int32_t, float> getFastestFinger();
-
-    void prepareMultiFingerPointerGestures(nsecs_t when, bool* outCancelPreviousGesture,
-                                           bool* outFinishPreviousGesture);
-
-    // Moves the on-screen mouse pointer based on the movement of the pointer of the given ID
-    // between the last and current events. Uses a relative motion.
-    void moveMousePointerFromPointerDelta(nsecs_t when, uint32_t pointerId);
-
-    [[nodiscard]] std::list<NotifyArgs> dispatchPointerStylus(nsecs_t when, nsecs_t readTime,
-                                                              uint32_t policyFlags);
-    [[nodiscard]] std::list<NotifyArgs> abortPointerStylus(nsecs_t when, nsecs_t readTime,
-                                                           uint32_t policyFlags);
-
-    [[nodiscard]] std::list<NotifyArgs> dispatchPointerMouse(nsecs_t when, nsecs_t readTime,
-                                                             uint32_t policyFlags);
-    [[nodiscard]] std::list<NotifyArgs> abortPointerMouse(nsecs_t when, nsecs_t readTime,
-                                                          uint32_t policyFlags);
-
-    [[nodiscard]] std::list<NotifyArgs> dispatchPointerSimple(nsecs_t when, nsecs_t readTime,
-                                                              uint32_t policyFlags, bool down,
-                                                              bool hovering, int32_t displayId);
-    [[nodiscard]] std::list<NotifyArgs> abortPointerSimple(nsecs_t when, nsecs_t readTime,
-                                                           uint32_t policyFlags);
+    [[nodiscard]] std::list<NotifyArgs> abortTouches(
+            nsecs_t when, nsecs_t readTime, uint32_t policyFlags,
+            std::optional<ui::LogicalDisplayId> gestureDisplayId);
 
     // Attempts to assign a pointer id to the external stylus. Returns true if the state should be
     // withheld from further processing while waiting for data from the stylus.
@@ -807,17 +539,15 @@ private:
     // method will take care of setting the index and transmuting the action to DOWN or UP
     // it is the first / last pointer to go down / up.
     [[nodiscard]] NotifyMotionArgs dispatchMotion(
-            nsecs_t when, nsecs_t readTime, uint32_t policyFlags, uint32_t source, int32_t action,
-            int32_t actionButton, int32_t flags, int32_t metaState, int32_t buttonState,
-            int32_t edgeFlags, const PropertiesArray& properties, const CoordsArray& coords,
-            const IdToIndexArray& idToIndex, BitSet32 idBits, int32_t changedId, float xPrecision,
-            float yPrecision, nsecs_t downTime, MotionClassification classification);
+            nsecs_t when, nsecs_t readTime, uint32_t policyFlags, ui::LogicalDisplayId displayId,
+            int32_t action, int32_t actionButton, int32_t flags, int32_t metaState,
+            int32_t buttonState, const PropertiesArray& properties, const CoordsArray& coords,
+            const IdToIndexArray& idToIndex, BitSet32 idBits, int32_t changedId) const;
 
     // Returns if this touch device is a touch screen with an associated display.
     bool isTouchScreen();
-    // Updates touch spots if they are enabled. Should only be used when this device is a
-    // touchscreen.
-    void updateTouchSpots();
+
+    ui::LogicalDisplayId resolveDisplayId() const;
 
     bool isPointInsidePhysicalFrame(int32_t x, int32_t y) const;
     const VirtualKey* findVirtualKeyHit(int32_t x, int32_t y);

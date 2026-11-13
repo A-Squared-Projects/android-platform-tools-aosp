@@ -13,15 +13,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {assertDefined} from 'common/assert_utils';
-import {Timestamp} from 'common/time';
-import {TimeUtils} from 'common/time_utils';
-import {Item} from 'trace/item';
-import {HierarchyTreeNode} from 'trace/tree_node/hierarchy_tree_node';
-import {PropertyTreeNode} from 'trace/tree_node/property_tree_node';
-import {WindowType} from 'trace/window_type';
-import {WmImeUtils} from 'viewers/common/wm_ime_utils';
-import {TreeNodeFilter, UiTreeUtils} from './ui_tree_utils';
+import {assertDefined} from 'common/assert';
+import {FilterFlag} from 'common/filter_flag';
+import {Timestamp} from 'common/time/time';
+import {WindowType} from 'trace/window_manager/window_type';
+import {HierarchyTreeNode} from 'tree_node/hierarchy_tree_node';
+import {Item} from 'tree_node/item';
+import {PropertyTreeNode} from 'tree_node/property_tree_node';
+import {TextFilter} from 'viewers/common/text_filter';
+import {
+  getFocusedActivity,
+  getFocusedWindow,
+} from 'viewers/common/wm_ime_utils';
+import {makeNodeFilter, TreeNodeFilter} from './ui_tree_utils';
 
 interface WmStateProperties {
   timestamp: string | undefined;
@@ -35,6 +39,9 @@ interface WmStateProperties {
   imeControlTarget: PropertyTreeNode | undefined;
 }
 
+/**
+ * A processed window manager state with a summary of the IME state.
+ */
 export class ProcessedWindowManagerState implements Item {
   constructor(
     readonly id: string,
@@ -44,12 +51,18 @@ export class ProcessedWindowManagerState implements Item {
   ) {}
 }
 
+/**
+ * Properties of the IME container.
+ */
 export interface ImeContainerProperties {
   id: string;
   zOrderRelativeOfId: number;
   z: number;
 }
 
+/**
+ * Properties of the input method surface.
+ */
 export interface InputMethodSurfaceProperties {
   id: string;
   isVisible: boolean;
@@ -68,6 +81,9 @@ interface ImeLayerProperties {
   root: RootImeProperties | undefined;
 }
 
+/**
+ * A processed IME layers entry with a summary of the IME layers.
+ */
 export class ImeLayers implements Item {
   constructor(
     readonly id: string,
@@ -79,6 +95,20 @@ export class ImeLayers implements Item {
 }
 
 class ImeAdditionalPropertiesUtils {
+  private isInputMethodSurface = makeNodeFilter(
+    new TextFilter('InputMethod').getFilterPredicate(),
+  );
+  private isImeContainer = makeNodeFilter(
+    new TextFilter('ImeContainer').getFilterPredicate(),
+  );
+
+  /**
+   * Creates a new ProcessedWindowManagerState object with a summary of the IME state.
+   *
+   * @param entry The trace entry to process.
+   * @param wmEntryTimestamp The timestamp of the trace entry.
+   * @return A new ProcessedWindowManagerState object.
+   */
   processWindowManagerTraceEntry(
     entry: HierarchyTreeNode,
     wmEntryTimestamp: Timestamp | undefined,
@@ -86,9 +116,7 @@ class ImeAdditionalPropertiesUtils {
     const displayContent = entry.getAllChildren()[0];
 
     const props: WmStateProperties = {
-      timestamp: wmEntryTimestamp
-        ? TimeUtils.format(wmEntryTimestamp)
-        : undefined,
+      timestamp: wmEntryTimestamp ? wmEntryTimestamp.format() : undefined,
       focusedApp: entry.getEagerPropertyByName('focusedApp')?.getValue(),
       focusedWindow: this.getFocusedWindowString(entry),
       focusedActivity: this.getFocusedActivityString(entry),
@@ -104,44 +132,55 @@ class ImeAdditionalPropertiesUtils {
     return new ProcessedWindowManagerState(entry.id, entry.name, props, entry);
   }
 
-  getImeLayers(
+  /**
+   * Creates a new ImeLayers object with a summary of the IME layers.
+   *
+   * @param entryTree The trace entry to process.
+   * @param processedWindowManagerState The processed window manager state.
+   * @param sfEntryTimestamp The timestamp of the trace entry.
+   * @return A new ImeLayers object, or undefined if no IME layers are found.
+   */
+  async getImeLayers(
     entryTree: HierarchyTreeNode,
     processedWindowManagerState: ProcessedWindowManagerState,
     sfEntryTimestamp: Timestamp | undefined,
-  ): ImeLayers | undefined {
-    const isImeContainer = UiTreeUtils.makeIdFilter('ImeContainer');
-    const imeContainerLayer = entryTree.findDfs(isImeContainer);
-
+  ): Promise<ImeLayers | undefined> {
+    const imeContainerLayer = entryTree.findDfs(this.isImeContainer);
     if (!imeContainerLayer) {
       return undefined;
     }
 
-    const imeContainerProps: ImeContainerProperties = {
-      id: imeContainerLayer.id,
-      zOrderRelativeOfId: assertDefined(
-        imeContainerLayer.getEagerPropertyByName('zOrderRelativeOf'),
-      ).getValue(),
-      z: assertDefined(
-        imeContainerLayer.getEagerPropertyByName('z'),
-      ).getValue(),
-    };
-
-    const isInputMethodSurface = UiTreeUtils.makeIdFilter('InputMethod');
-    const inputMethodSurfaceLayer =
-      imeContainerLayer.findDfs(isInputMethodSurface);
-
+    const inputMethodSurfaceLayer = imeContainerLayer.findDfs(
+      this.isInputMethodSurface,
+    );
     if (!inputMethodSurfaceLayer) {
       return undefined;
     }
 
+    const imeContainerAllProps = await imeContainerLayer.getAllProperties();
+    const imeContainerProps: ImeContainerProperties = {
+      id: imeContainerLayer.id,
+      zOrderRelativeOfId: assertDefined(
+        imeContainerAllProps
+          .getChildByName('zOrderRelativeOf')
+          ?.getValue<number>(),
+      ),
+      z: assertDefined(
+        imeContainerAllProps.getChildByName('z')?.getValue<number>(),
+      ),
+    };
+
+    const inputMethodSurfaceAllProps =
+      await inputMethodSurfaceLayer.getAllProperties();
     const inputMethodSurfaceProps: InputMethodSurfaceProperties = {
       id: inputMethodSurfaceLayer.id,
       isVisible: assertDefined(
-        inputMethodSurfaceLayer.getEagerPropertyByName('isComputedVisible'),
-      ).getValue(),
-      screenBounds:
-        inputMethodSurfaceLayer.getEagerPropertyByName('screenBounds'),
-      rect: inputMethodSurfaceLayer.getEagerPropertyByName('bounds'),
+        inputMethodSurfaceAllProps
+          .getChildByName('isVisible')
+          ?.getValue<boolean>(),
+      ),
+      screenBounds: inputMethodSurfaceAllProps.getChildByName('screenBounds'),
+      rect: inputMethodSurfaceAllProps.getChildByName('bounds'),
     };
 
     let focusedWindowLayer: HierarchyTreeNode | undefined;
@@ -150,28 +189,30 @@ class ImeAdditionalPropertiesUtils {
         ?.split(' ')[0]
         .slice(1);
     if (focusedWindowToken) {
-      const isFocusedWindow = UiTreeUtils.makeIdFilter(focusedWindowToken);
+      const isFocusedWindow = makeNodeFilter(
+        new TextFilter(focusedWindowToken).getFilterPredicate(),
+      );
       focusedWindowLayer = entryTree.findDfs(isFocusedWindow);
     }
 
     const focusedWindowColor = focusedWindowLayer
-      ? focusedWindowLayer.getEagerPropertyByName('color')
+      ? (await focusedWindowLayer.getAllProperties()).getChildByName('color')
       : undefined;
 
     // we want to see both ImeContainer and IME-snapshot if there are
     // cases where both exist
     const taskLayerOfImeContainer = this.findAncestorTaskLayerOfImeLayer(
       entryTree,
-      UiTreeUtils.makeIdFilter('ImeContainer'),
+      this.isImeContainer,
     );
 
     const taskLayerOfImeSnapshot = this.findAncestorTaskLayerOfImeLayer(
       entryTree,
-      UiTreeUtils.makeIdFilter('IME-snapshot'),
+      makeNodeFilter(new TextFilter('IME-snapshot').getFilterPredicate()),
     );
 
     const rootProperties = sfEntryTimestamp
-      ? {timestamp: TimeUtils.format(sfEntryTimestamp)}
+      ? {timestamp: sfEntryTimestamp.format()}
       : undefined;
 
     return new ImeLayers(
@@ -190,15 +231,17 @@ class ImeAdditionalPropertiesUtils {
 
   private getFocusedWindowString(entry: HierarchyTreeNode): string | undefined {
     let focusedWindowString = undefined;
-    const focusedWindow = WmImeUtils.getFocusedWindow(entry);
+    const focusedWindow = getFocusedWindow(entry);
     if (focusedWindow) {
       const token = assertDefined(
-        focusedWindow.getEagerPropertyByName('token'),
-      ).getValue();
+        focusedWindow.getEagerPropertyByName('token')?.getValue<string>(),
+      );
       const windowTypeSuffix = this.getWindowTypeSuffix(
         assertDefined(
-          focusedWindow.getEagerPropertyByName('windowType'),
-        ).getValue(),
+          focusedWindow
+            .getEagerPropertyByName('windowType')
+            ?.getValue<number>(),
+        ),
       );
       const type = assertDefined(
         focusedWindow
@@ -220,9 +263,15 @@ class ImeAdditionalPropertiesUtils {
     return focusedWindowString;
   }
 
+  /**
+   * Returns a string representation of the focused activity.
+   *
+   * @param entry The trace entry to process.
+   * @return A string representation of the focused activity.
+   */
   private getFocusedActivityString(entry: HierarchyTreeNode): string {
     let focusedActivityString = 'null';
-    const focusedActivity = WmImeUtils.getFocusedActivity(entry);
+    const focusedActivity = getFocusedActivity(entry);
     if (focusedActivity) {
       const token = assertDefined(
         focusedActivity.getEagerPropertyByName('token'),
@@ -263,7 +312,11 @@ class ImeAdditionalPropertiesUtils {
       return undefined;
     }
 
-    const isTaskLayer = UiTreeUtils.makeIdFilter('Task|ImePlaceholder');
+    const isTaskLayer = makeNodeFilter(
+      new TextFilter('Task|ImePlaceholder', [
+        FilterFlag.USE_REGEX,
+      ]).getFilterPredicate(),
+    );
     const taskLayer = imeLayer.findAncestor(isTaskLayer);
     if (!taskLayer) {
       return undefined;
@@ -291,11 +344,14 @@ class ImeAdditionalPropertiesUtils {
   }
 
   private isInputMethodVisible(displayContent: HierarchyTreeNode): boolean {
-    const isInputMethod = UiTreeUtils.makeIdFilter('InputMethod');
-    const inputMethodWindowOrLayer = displayContent.findDfs(isInputMethod);
-    return inputMethodWindowOrLayer
-      ?.getEagerPropertyByName('isComputedVisible')
-      ?.getValue();
+    const inputMethodWindowOrLayer = displayContent.findDfs(
+      this.isInputMethodSurface,
+    );
+    return (
+      inputMethodWindowOrLayer
+        ?.getEagerPropertyByName('isComputedVisible')
+        ?.getValue<boolean>() ?? false
+    );
   }
 }
 

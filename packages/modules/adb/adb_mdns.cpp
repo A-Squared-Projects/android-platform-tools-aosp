@@ -26,23 +26,7 @@
 
 #include "adb_trace.h"
 
-#define ADB_SECURE_SERVICE_VERSION_TXT_RECORD(ver) ("v=" #ver)
-
-const char* kADBSecurePairingServiceTxtRecord =
-        ADB_SECURE_SERVICE_VERSION_TXT_RECORD(ADB_SECURE_SERVICE_VERSION);
-const char* kADBSecureConnectServiceTxtRecord =
-        ADB_SECURE_SERVICE_VERSION_TXT_RECORD(ADB_SECURE_SERVICE_VERSION);
-
-#define ADB_FULL_MDNS_SERVICE_TYPE(atype) ("_" atype "._tcp")
-const char* kADBDNSServices[] = {ADB_FULL_MDNS_SERVICE_TYPE(ADB_MDNS_SERVICE_TYPE),
-                                 ADB_FULL_MDNS_SERVICE_TYPE(ADB_MDNS_TLS_PAIRING_TYPE),
-                                 ADB_FULL_MDNS_SERVICE_TYPE(ADB_MDNS_TLS_CONNECT_TYPE)};
-
-const char* kADBDNSServiceTxtRecords[] = {
-        nullptr,
-        kADBSecurePairingServiceTxtRecord,
-        kADBSecureConnectServiceTxtRecord,
-};
+const char* kADBDNSServices[] = {ADB_SERVICE_TCP, ADB_SERVICE_PAIR, ADB_SERVICE_TLS};
 
 #if ADB_HOST
 namespace {
@@ -105,15 +89,6 @@ void config_auto_connect_services() {
 
 }  // namespace
 
-std::optional<int> adb_DNSServiceIndexByName(std::string_view reg_type) {
-    for (int i = 0; i < kNumADBDNSServices; ++i) {
-        if (!strncmp(reg_type.data(), kADBDNSServices[i], strlen(kADBDNSServices[i]))) {
-            return i;
-        }
-    }
-    return std::nullopt;
-}
-
 bool adb_DNSServiceShouldAutoConnect(std::string_view reg_type, std::string_view service_name) {
     config_auto_connect_services();
 
@@ -137,3 +112,12 @@ bool adb_DNSServiceShouldAutoConnect(std::string_view reg_type, std::string_view
 }
 
 #endif  // ADB_HOST
+
+std::optional<int> adb_DNSServiceIndexByName(std::string_view reg_type) {
+    for (int i = 0; i < kNumADBDNSServices; ++i) {
+        if (!strncmp(reg_type.data(), kADBDNSServices[i], strlen(kADBDNSServices[i]))) {
+            return i;
+        }
+    }
+    return std::nullopt;
+}

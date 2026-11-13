@@ -25,6 +25,7 @@
 #include <fmt/core.h>
 #include <fmt/format.h>
 #include <fmt/printf.h>
+#include <fmt/ranges.h>
 
 #ifndef _WIN32
 #include <fmt/ostream.h>

@@ -7,7 +7,6 @@ soong_config_module_type {
     module_type: "cc_defaults",
     config_namespace: "ANDROID",
     bool_variables: [
-        "memcg_v2_force_enabled",
         "cgroup_v2_sys_app_isolation",
     ],
     properties: [
@@ -17,13 +16,8 @@ soong_config_module_type {
 
 libprocessgroup_flag_aware_cc_defaults {
     name: "libprocessgroup_build_flags_cc",
-    cpp_std: "gnu++20",
+    cpp_std: "gnu++23",
     soong_config_variables: {
-        memcg_v2_force_enabled: {
-            cflags: [
-                "-DMEMCG_V2_FORCE_ENABLED=true",
-            ],
-        },
         cgroup_v2_sys_app_isolation: {
             cflags: [
                 "-DCGROUP_V2_SYS_APP_ISOLATION=true",
@@ -75,16 +69,15 @@ cc_library {
     double_loadable: true,
     shared_libs: [
         "libbase",
-        "libcgrouprc",
     ],
     static_libs: [
         "libjsoncpp",
+        "libprocessgroup_util",
     ],
     // for cutils/android_filesystem_config.h
     header_libs: [
         "libcutils_headers",
         "libprocessgroup_headers",
-        "libprocessgroup_util",
     ],
     export_include_dirs: ["include"],
     export_header_lib_headers: [
@@ -111,10 +104,10 @@ cc_test {
     ],
     shared_libs: [
         "libbase",
-        "libcgrouprc",
         "libprocessgroup",
     ],
     static_libs: [
         "libgmock",
+        "libprocessgroup_util",
     ],
 }

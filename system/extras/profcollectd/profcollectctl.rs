@@ -16,62 +16,78 @@
 
 //! Command to control profcollectd behaviour.
 
-use anyhow::{bail, Context, Result};
-use std::env;
+use anyhow::{Context, Result};
+use clap::{Args, Parser, Subcommand};
+use flags_rust::GetServerConfigurableFlag;
+use rustutils::system_properties;
 
-const HELP_MSG: &str = r#"
-usage: profcollectctl [command]
+#[derive(Parser)]
+#[command(about = "Command interface for profcollectd", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
 
-Command to control profcollectd behaviour.
+#[derive(Subcommand)]
+enum Commands {
+    /// Request an one-off system-wide trace.
+    Trace(TraceArgs),
+    /// Convert traces to perf profiles.
+    Process,
+    /// Create a report containing all profiles.
+    Report,
+    /// Clear all local data and reset the state.
+    Reset,
+    /// Set property for profcollectd.
+    SetProperty,
+}
 
-command:
-    start       Schedule periodic collection.
-    stop        Terminate periodic collection.
-    trace       Request an one-off system-wide trace.
-    process     Convert traces to perf profiles.
-    reconfig    Refresh configuration.
-    report      Create a report containing all profiles.
-    reset       Clear all local data.
-    help        Print this message.
-"#;
+#[derive(Args)]
+struct TraceArgs {
+    #[arg(short = 't', long = "tag", default_value_t = String::from("manual"))]
+    tag: String,
+    #[arg(short = 'd', long = "duration", default_value_t = 1000)]
+    duration_ms: i32,
+}
 
 fn main() -> Result<()> {
     libprofcollectd::init_logging();
 
-    let args: Vec<String> = env::args().collect();
-    if args.len() != 2 {
-        bail!("This program only takes one argument{}", &HELP_MSG);
-    }
-
-    let action = &args[1];
-    match action.as_str() {
-        "start" => {
-            println!("Scheduling profile collection");
-            libprofcollectd::schedule().context("Failed to schedule collection.")?;
-        }
-        "stop" => {
-            println!("Terminating profile collection");
-            libprofcollectd::terminate().context("Failed to terminate collection.")?;
-        }
-        "trace" => {
+    let cli = Cli::parse();
+    match &cli.command {
+        Commands::Trace(TraceArgs { tag, duration_ms }) => {
             println!("Performing system-wide trace");
-            libprofcollectd::trace_system("manual").context("Failed to trace.")?;
+            libprofcollectd::trace_system(tag, *duration_ms).context("Failed to trace.")?;
         }
-        "process" => {
+        Commands::Process => {
             println!("Processing traces");
             libprofcollectd::process().context("Failed to process traces.")?;
         }
-        "report" => {
+        Commands::Report => {
             println!("Creating profile report");
             let path = libprofcollectd::report().context("Failed to create profile report.")?;
             println!("Report created at: {}", &path);
         }
-        "reset" => {
+        Commands::Reset => {
             libprofcollectd::reset().context("Failed to reset.")?;
             println!("Reset done.");
         }
-        "help" => println!("{}", &HELP_MSG),
-        arg => bail!("Unknown argument: {}\n{}", &arg, &HELP_MSG),
+        Commands::SetProperty => {
+            let old_value = system_properties::read("persist.profcollectd.enabled")?
+                .unwrap_or("false".to_string());
+            let new_value =
+                match GetServerConfigurableFlag("profcollect_native_boot", "enabled", "false")
+                    .as_str()
+                {
+                    "1" | "y" | "yes" | "on" | "true" => "true",
+                    "0" | "n" | "no" | "off" | "false" => "false",
+                    invalid => anyhow::bail!("Failed to parse server flag as bool: {}", &invalid),
+                };
+
+            if old_value != new_value {
+                system_properties::write("persist.profcollectd.enabled", new_value)?;
+            }
+        }
     }
     Ok(())
 }

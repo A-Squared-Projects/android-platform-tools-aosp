@@ -16,46 +16,20 @@
 
 #pragma once
 
-#include <algorithm>
-#include <iterator>
+#include <map>
 #include <string>
 
-namespace util {
+#include "cgroup_descriptor.h"
 
-namespace internal {
+// Duplicated from cgrouprc.h. Don't depend on libcgrouprc here.
+#define CGROUPRC_CONTROLLER_FLAG_MOUNTED 0x1
+#define CGROUPRC_CONTROLLER_FLAG_NEEDS_ACTIVATION 0x2
+#define CGROUPRC_CONTROLLER_FLAG_OPTIONAL 0x4
 
-const char SEP = '/';
+unsigned int GetCgroupDepth(const std::string& controller_root, const std::string& cgroup_path);
 
-std::string DeduplicateAndTrimSeparators(const std::string& path) {
-    bool lastWasSep = false;
-    std::string ret;
+using CgroupControllerName = std::string;
+using CgroupDescriptorMap = std::map<CgroupControllerName, CgroupDescriptor>;
+bool ReadDescriptors(CgroupDescriptorMap* descriptors);
 
-    std::copy_if(path.begin(), path.end(), std::back_inserter(ret), [&lastWasSep](char c) {
-        if (lastWasSep) {
-            if (c == SEP) return false;
-            lastWasSep = false;
-        } else if (c == SEP) {
-            lastWasSep = true;
-        }
-        return true;
-    });
-
-    if (ret.length() > 1 && ret.back() == SEP) ret.pop_back();
-
-    return ret;
-}
-
-}  // namespace internal
-
-unsigned int GetCgroupDepth(const std::string& controller_root, const std::string& cgroup_path) {
-    const std::string deduped_root = internal::DeduplicateAndTrimSeparators(controller_root);
-    const std::string deduped_path = internal::DeduplicateAndTrimSeparators(cgroup_path);
-
-    if (deduped_root.empty() || deduped_path.empty() || !deduped_path.starts_with(deduped_root))
-        return 0;
-
-    return std::count(deduped_path.begin() + deduped_root.size(), deduped_path.end(),
-                      internal::SEP);
-}
-
-}  // namespace util
+bool ActivateControllers(const std::string& path, const CgroupDescriptorMap& descriptors);

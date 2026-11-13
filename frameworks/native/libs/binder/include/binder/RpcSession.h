@@ -25,6 +25,7 @@
 
 #include <map>
 #include <optional>
+#include <type_traits>
 #include <vector>
 
 namespace android {
@@ -37,15 +38,16 @@ class RpcState;
 class RpcTransport;
 class FdTrigger;
 
-constexpr uint32_t RPC_WIRE_PROTOCOL_VERSION_NEXT = 2;
+constexpr uint32_t RPC_WIRE_PROTOCOL_VERSION_NEXT = 3;
 constexpr uint32_t RPC_WIRE_PROTOCOL_VERSION_EXPERIMENTAL = 0xF0000000;
-constexpr uint32_t RPC_WIRE_PROTOCOL_VERSION = 1;
+constexpr uint32_t RPC_WIRE_PROTOCOL_VERSION = 2;
 
 // Starting with this version:
 //
 // * RpcWireReply is larger (4 bytes -> 20).
 // * RpcWireTransaction and RpcWireReplyV1 include the parcel data size.
 constexpr uint32_t RPC_WIRE_PROTOCOL_VERSION_RPC_HEADER_FEATURE_EXPLICIT_PARCEL_SIZE = 1;
+constexpr uint32_t RPC_WIRE_PROTOCOL_VERSION_RPC_HEADER_INCLUDES_BINDER_POSITIONS = 2;
 
 /**
  * This represents a session (group of connections) between a client
@@ -291,9 +293,14 @@ private:
     // join on thread passed to preJoinThreadOwnership
     static void join(sp<RpcSession>&& session, PreJoinSetupResult&& result);
 
-    [[nodiscard]] status_t setupClient(
-            const std::function<status_t(const std::vector<uint8_t>& sessionId, bool incoming)>&
-                    connectAndInit);
+    // This is a workaround to support move-only functors.
+    // TODO: use std::move_only_function when it becomes available.
+    template <typename Fn,
+              // Fn must be a callable type taking (const std::vector<uint8_t>&, bool) and returning
+              // status_t
+              typename = std::enable_if_t<
+                      std::is_invocable_r_v<status_t, Fn, const std::vector<uint8_t>&, bool>>>
+    [[nodiscard]] status_t setupClient(Fn&& connectAndInit);
     [[nodiscard]] status_t setupSocketClient(const RpcSocketAddress& address);
     [[nodiscard]] status_t setupOneSocketConnection(const RpcSocketAddress& address,
                                                     const std::vector<uint8_t>& sessionId,

@@ -25,10 +25,11 @@ class MockDeviceInfo : public SnapshotManager::IDeviceInfo {
     MOCK_METHOD(std::string, GetMetadataDir, (), (const, override));
     MOCK_METHOD(std::string, GetSlotSuffix, (), (const, override));
     MOCK_METHOD(std::string, GetOtherSlotSuffix, (), (const, override));
-    MOCK_METHOD(std::string, GetSuperDevice, (uint32_t slot), (const, override));
+    MOCK_METHOD(std::string, GetSuperDevice, (), (const, override));
     MOCK_METHOD(const android::fs_mgr::IPartitionOpener&, GetPartitionOpener, (), (const));
     MOCK_METHOD(bool, IsOverlayfsSetup, (), (const, override));
     MOCK_METHOD(bool, SetBootControlMergeStatus, (MergeStatus status), (override));
+    MOCK_METHOD(bool, SetActiveBootSlot, (unsigned int slot), (override));
     MOCK_METHOD(bool, SetSlotAsUnbootable, (unsigned int slot), (override));
     MOCK_METHOD(bool, IsRecovery, (), (const, override));
     MOCK_METHOD(bool, IsFirstStageInit, (), (const, override));

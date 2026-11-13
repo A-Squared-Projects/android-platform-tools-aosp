@@ -43,20 +43,57 @@ interface IInputConstants
     const int INVALID_INPUT_DEVICE_ID = -2;
 
     /**
-     * The input event was injected from accessibility. Used in policyFlags for input event
-     * injection.
+     * The input event was injected from some AccessibilityService, which may be either an
+     * Accessibility Tool OR a service using that API for purposes other than assisting users with
+     * disabilities. Used in policyFlags for input event injection.
      */
     const int POLICY_FLAG_INJECTED_FROM_ACCESSIBILITY = 0x20000;
 
     /**
-     * The input event was generated or modified by accessibility service.
-     * Shared by both KeyEvent and MotionEvent flags, so this value should not overlap with either
-     * set of flags, including in input/Input.h and in android/input.h.
+     * The key event triggered a key gesture. Used in policy flag to notify that a key gesture was
+     * triggered using the event.
+     */
+    const int POLICY_FLAG_KEY_GESTURE_TRIGGERED = 0x40000;
+
+    /**
+     * The input event was injected from an AccessibilityService with the
+     * AccessibilityServiceInfo#isAccessibilityTool property set to true. These services (known as
+     * "Accessibility Tools") are used to assist users with disabilities, so events from these
+     * services should be able to reach all Views including Views which set
+     * View#isAccessibilityDataSensitive to true. Used in policyFlags for input event injection.
+     */
+    const int POLICY_FLAG_INJECTED_FROM_ACCESSIBILITY_TOOL = 0x80000;
+
+    /**
+     * Common input event flag used for both motion and key events for a gesture or pointer being
+     * canceled.
+     */
+    const int INPUT_EVENT_FLAG_CANCELED = 0x20;
+
+    /**
+     * Input event flag used for both motion and key events.
+     * See POLICY_FLAG_INJECTED_FROM_ACCESSIBILITY for more information.
      */
     const int INPUT_EVENT_FLAG_IS_ACCESSIBILITY_EVENT = 0x800;
 
+    /**
+     * Input event flag used for motion events.
+     * See POLICY_FLAG_INJECTED_FROM_ACCESSIBILITY_TOOL for more information.
+     */
+    const int INPUT_EVENT_FLAG_INJECTED_FROM_ACCESSIBILITY_TOOL = 0x1000;
+
+    /**
+     * Common input event flag used for both motion and key events, indicating that the system has
+     * detected this event may be inconsistent with the current event sequence or gesture, such as
+     * when a pointer move event is sent but the pointer is not down.
+     */
+    const int INPUT_EVENT_FLAG_TAINTED = 0x80000000;
+
     /* The default pointer acceleration value. */
     const int DEFAULT_POINTER_ACCELERATION = 3;
+
+    /* The default mouse wheel acceleration value. */
+    const int DEFAULT_MOUSE_WHEEL_ACCELERATION = 4;
 
     /**
      * Use the default Velocity Tracker Strategy. Different axes may use different default
@@ -141,4 +178,157 @@ interface IInputConstants
      * time to adjust to changes in direction.
      */
     const int VELOCITY_TRACKER_STRATEGY_LEGACY = 9;
+
+
+    /*
+     * Input device class: Keyboard
+     * The input device is a keyboard or has buttons.
+     *
+     * @hide
+     */
+    const int DEVICE_CLASS_KEYBOARD = 0x00000001;
+
+    /*
+     * Input device class: Alphakey
+     * The input device is an alpha-numeric keyboard (not just a dial pad).
+     *
+     * @hide
+     */
+    const int DEVICE_CLASS_ALPHAKEY = 0x00000002;
+
+    /*
+     * Input device class: Touch
+     * The input device is a touchscreen or a touchpad (either single-touch or multi-touch).
+     *
+     * @hide
+     */
+    const int DEVICE_CLASS_TOUCH = 0x00000004;
+
+    /*
+     * Input device class: Cursor
+     * The input device is a cursor device such as a trackball or mouse.
+     *
+     * @hide
+     */
+    const int DEVICE_CLASS_CURSOR = 0x00000008;
+
+    /*
+     * Input device class: Multi-touch
+     * The input device is a multi-touch touchscreen or touchpad.
+     *
+     * @hide
+     */
+    const int DEVICE_CLASS_TOUCH_MT = 0x00000010;
+
+    /*
+     * Input device class: Dpad
+     * The input device is a directional pad (implies keyboard, has DPAD keys).
+     *
+     * @hide
+     */
+    const int DEVICE_CLASS_DPAD = 0x00000020;
+
+    /*
+     * Input device class: Gamepad
+     * The input device is a gamepad (implies keyboard, has BUTTON keys).
+     *
+     * @hide
+     */
+    const int DEVICE_CLASS_GAMEPAD = 0x00000040;
+
+    /*
+     * Input device class: Switch
+     * The input device has switches.
+     *
+     * @hide
+     */
+    const int DEVICE_CLASS_SWITCH = 0x00000080;
+
+    /*
+     * Input device class: Joystick
+     * The input device is a joystick (implies gamepad, has joystick absolute axes).
+     *
+     * @hide
+     */
+    const int DEVICE_CLASS_JOYSTICK = 0x00000100;
+
+    /*
+     * Input device class: Vibrator
+     * The input device has a vibrator (supports FF_RUMBLE).
+     *
+     * @hide
+     */
+    const int DEVICE_CLASS_VIBRATOR = 0x00000200;
+
+    /*
+     * Input device class: Mic
+     * The input device has a microphone.
+     *
+     * @hide
+     */
+    const int DEVICE_CLASS_MIC = 0x00000400;
+
+    /*
+     * Input device class: External Stylus
+     * The input device is an external stylus (has data we want to fuse with touch data).
+     *
+     * @hide
+     */
+    const int DEVICE_CLASS_EXTERNAL_STYLUS = 0x00000800;
+
+    /*
+     * Input device class: Rotary Encoder
+     * The input device has a rotary encoder.
+     *
+     * @hide
+     */
+    const int DEVICE_CLASS_ROTARY_ENCODER = 0x00001000;
+
+    /*
+     * Input device class: Sensor
+     * The input device has a sensor like accelerometer, gyro, etc.
+     *
+     * @hide
+     */
+    const int DEVICE_CLASS_SENSOR = 0x00002000;
+
+    /*
+     * Input device class: Battery
+     * The input device has a battery.
+     *
+     * @hide
+     */
+    const int DEVICE_CLASS_BATTERY = 0x00004000;
+
+    /*
+     * Input device class: Light
+     * The input device has sysfs controllable lights.
+     *
+     * @hide
+     */
+    const int DEVICE_CLASS_LIGHT = 0x00008000;
+
+    /*
+     * Input device class: Touchpad
+     * The input device is a touchpad, requiring an on-screen cursor.
+     *
+     * @hide
+     */
+    const int DEVICE_CLASS_TOUCHPAD = 0x00010000;
+
+    /*
+     * Input device class: Virtual
+     * The input device is virtual (not a real device, not part of UI configuration).
+     *
+     * @hide
+     */
+    const int DEVICE_CLASS_VIRTUAL = 0x20000000;
+
+    /*
+     * Input device class: External
+     * The input device is external (not built-in).
+     *
+     * @hide
+     */
+    const int DEVICE_CLASS_EXTERNAL = 0x40000000;
 }

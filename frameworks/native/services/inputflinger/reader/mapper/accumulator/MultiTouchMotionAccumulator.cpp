@@ -19,6 +19,9 @@
 // clang-format on
 #include "MultiTouchMotionAccumulator.h"
 
+#include <input/InputEventLabels.h>
+#include <linux/input-event-codes.h>
+
 namespace android {
 
 // --- MultiTouchMotionAccumulator ---
@@ -45,12 +48,12 @@ void MultiTouchMotionAccumulator::resetSlots() {
     mCurrentSlot = -1;
 }
 
-void MultiTouchMotionAccumulator::process(const RawEvent* rawEvent) {
-    if (rawEvent->type == EV_ABS) {
+void MultiTouchMotionAccumulator::process(const RawEvent& rawEvent) {
+    if (rawEvent.type == EV_ABS) {
         bool newSlot = false;
         if (mUsingSlotsProtocol) {
-            if (rawEvent->code == ABS_MT_SLOT) {
-                mCurrentSlot = rawEvent->value;
+            if (rawEvent.code == ABS_MT_SLOT) {
+                mCurrentSlot = rawEvent.value;
                 newSlot = true;
             }
         } else if (mCurrentSlot < 0) {
@@ -72,12 +75,12 @@ void MultiTouchMotionAccumulator::process(const RawEvent* rawEvent) {
             if (!mUsingSlotsProtocol) {
                 slot.mInUse = true;
             }
-            if (rawEvent->code == ABS_MT_POSITION_X || rawEvent->code == ABS_MT_POSITION_Y) {
-                warnIfNotInUse(*rawEvent, slot);
+            if (rawEvent.code == ABS_MT_POSITION_X || rawEvent.code == ABS_MT_POSITION_Y) {
+                warnIfNotInUse(rawEvent, slot);
             }
-            slot.populateAxisValue(rawEvent->code, rawEvent->value);
+            slot.populateAxisValue(rawEvent.code, rawEvent.value);
         }
-    } else if (rawEvent->type == EV_SYN && rawEvent->code == SYN_MT_REPORT) {
+    } else if (rawEvent.type == EV_SYN && rawEvent.code == SYN_MT_REPORT) {
         // MultiTouch Sync: The driver has returned all data for *one* of the pointers.
         mCurrentSlot += 1;
     }
@@ -106,8 +109,9 @@ void MultiTouchMotionAccumulator::syncSlots(const InputDeviceContext& deviceCont
                 mSlots[i - 1].populateAxisValue(axisCode, mtSlotValues[i]);
             }
         } else {
-            ALOGE("Could not retrieve multi-touch slot value for axis=%d error=%s status=%d",
-                  axisCode, result.error().message().c_str(), result.error().code().value());
+            ALOGE("Could not retrieve multi-touch slot value for axis %s error=%s status=%d",
+                  InputEventLookup::getLinuxEvdevLabel(EV_ABS, axisCode, 0).code.c_str(),
+                  result.error().message().c_str(), result.error().code().value());
         }
     }
     populateCurrentSlot(deviceContext);
@@ -139,13 +143,11 @@ void MultiTouchMotionAccumulator::populateCurrentSlot(
     if (!mUsingSlotsProtocol) {
         return;
     }
-    int32_t initialSlot;
-    if (const auto status = deviceContext.getAbsoluteAxisValue(ABS_MT_SLOT, &initialSlot);
-        status == OK) {
-        mCurrentSlot = initialSlot;
+    if (const std::optional<int32_t> initialSlot = deviceContext.getAbsoluteAxisValue(ABS_MT_SLOT);
+        initialSlot.has_value()) {
+        mCurrentSlot = initialSlot.value();
     } else {
-        ALOGE("Could not retrieve current multi-touch slot index. status=%s",
-              statusToString(status).c_str());
+        ALOGE("Could not retrieve current multi-touch slot index");
     }
 }
 

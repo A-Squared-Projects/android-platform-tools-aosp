@@ -51,7 +51,7 @@ class AdbFdTextOutput : public android::TextOutput {
 std::vector<std::string_view> parseCmdArgs(std::string_view args) {
     std::vector<std::string_view> argv;
 
-    char delim = ABB_ARG_DELIMETER;
+    char delim = ABB_ARG_DELIMITER;
     size_t size = args.size();
     size_t base = 0;
     while (base < size) {

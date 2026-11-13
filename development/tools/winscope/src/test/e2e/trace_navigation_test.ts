@@ -15,30 +15,31 @@
  */
 
 import {browser, by, element, ElementFinder} from 'protractor';
-import {E2eTestUtils} from './utils';
+import {
+  clickUploadNewButton,
+  clickViewTracesButton,
+  closeSnackBar,
+  setTimeouts,
+  uploadFixture,
+  WINSCOPE_URL,
+} from './utils';
 
 describe('Trace navigation', () => {
   const DEFAULT_TIMEOUT_MS = 1000;
 
-  beforeAll(async () => {
-    await browser.manage().timeouts().implicitlyWait(DEFAULT_TIMEOUT_MS);
-    await E2eTestUtils.checkServerIsUp('Winscope', E2eTestUtils.WINSCOPE_URL);
-  });
-
   beforeEach(async () => {
-    await browser.get(E2eTestUtils.WINSCOPE_URL);
+    await setTimeouts(DEFAULT_TIMEOUT_MS);
+    await browser.get(WINSCOPE_URL);
   });
 
   it('can go between home and trace view pages correctly', async () => {
-    await E2eTestUtils.uploadFixture(
-      'traces/perfetto/layers_trace.perfetto-trace',
-    );
+    await uploadFixture('traces/perfetto/layers_trace.perfetto-trace');
     await checkHomepage();
-    await E2eTestUtils.closeSnackBarIfNeeded();
-    await E2eTestUtils.clickViewTracesButton();
+    await closeSnackBar();
+    await clickViewTracesButton(false);
     await checkTraceViewPage();
 
-    await E2eTestUtils.clickUploadNewButton();
+    await clickUploadNewButton();
     await checkHomepage();
   });
 
@@ -63,7 +64,6 @@ describe('Trace navigation', () => {
       toolbar.element(by.css('.file-descriptor')),
       toolbar.element(by.css('.upload-new')),
       toolbar.element(by.css('.save-button')),
-      toolbar.element(by.css('.trace-file-info')),
       toolbar.element(by.css('.documentation')),
       toolbar.element(by.css('.report-bug')),
       toolbar.element(by.css('.dark-mode')),

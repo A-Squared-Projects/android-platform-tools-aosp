@@ -14,10 +14,17 @@
  * limitations under the License.
  */
 
+#if !defined(BINDER_NO_KERNEL_IPC_TESTING) && !defined(__TRUSTY__)
+#include <linux/android/binder.h>
+#endif //  !defined(BINDER_NO_KERNEL_IPC_TESTING) && !defined(__TRUSTY__)
+#ifndef BINDER_DISABLE_BLOB
+#include <sys/mman.h>
+#endif // BINDER_DISABLE_BLOB
 #include <chrono>
 #include <cstdlib>
 #include <type_traits>
 
+#include "binderKernelRpcCommon.h"
 #include "binderRpcTestCommon.h"
 #include "binderRpcTestFixture.h"
 
@@ -75,7 +82,7 @@ TEST_P(BinderRpc, MultipleSessions) {
         GTEST_SKIP() << "This test requires a multi-threaded service";
     }
 
-    auto proc = createRpcTestSocketServerProcess({.numThreads = 1, .numSessions = 5});
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = 1, .numSessions = 5});
     for (auto session : proc.proc->sessions) {
         ASSERT_NE(nullptr, session.root);
         EXPECT_EQ(OK, session.root->pingBinder());
@@ -138,6 +145,41 @@ TEST_P(BinderRpc, AppendSeparateFormats) {
 
     EXPECT_EQ(BAD_TYPE, p1.appendFrom(&p2, 0, p2.dataSize()));
     EXPECT_EQ(BAD_TYPE, p2.appendFrom(&p1, 0, p1.dataSize()));
+}
+
+TEST_P(BinderRpc, ObjectCountRight) {
+    auto proc = createRpcTestSocketServerProcess({});
+    Parcel data;
+    data.markForBinder(proc.rootBinder);
+
+    EXPECT_EQ(OK, data.writeStrongBinder(nullptr)); // not considered an object
+    EXPECT_EQ(0u, data.objectsCount());
+    EXPECT_EQ(OK, data.writeStrongBinder(sp<BBinder>::make()));
+
+    const bool binderInObjects = proc.proc->sessions.at(0).session->getProtocolVersion() >=
+            RPC_WIRE_PROTOCOL_VERSION_RPC_HEADER_INCLUDES_BINDER_POSITIONS;
+
+    if (binderInObjects) {
+        EXPECT_EQ(1u, data.objectsCount());
+    } else {
+        EXPECT_EQ(0u, data.objectsCount());
+    }
+
+    Parcel data2;
+    data2.markForBinder(proc.rootBinder);
+    EXPECT_EQ(OK, data2.writeStrongBinder(sp<BBinder>::make()));
+    EXPECT_EQ(OK, data.appendFrom(&data2, 0, data2.dataSize()));
+
+    if (binderInObjects) {
+        EXPECT_EQ(2u, data.objectsCount());
+        EXPECT_EQ(1u, data2.objectsCount());
+    } else {
+        EXPECT_EQ(0u, data.objectsCount());
+        EXPECT_EQ(0u, data2.objectsCount());
+
+        // the old protocol will leak the binder object in this case
+        proc.forceShutdown();
+    }
 }
 
 TEST_P(BinderRpc, UnknownTransaction) {
@@ -207,6 +249,29 @@ TEST_P(BinderRpc, RepeatBinder) {
     EXPECT_EQ(nullptr, weak.promote());
 
     EXPECT_EQ(0, MyBinderRpcSession::gNum);
+}
+
+TEST_P(BinderRpc, SendLargeVector) {
+    auto proc = createRpcTestSocketServerProcess({});
+
+    // see libbinder internal Constants.h
+    // We use a smaller size for TIPC because a 15MB test is too slow and times out
+    size_t kLargeSize = socketType() == SocketType::TIPC ? 128 * 1024 : 550 * 1024;
+    const std::vector<uint8_t> kTestValue(kLargeSize / sizeof(uint8_t), 42);
+
+    std::vector<uint8_t> result;
+    EXPECT_OK(proc.rootIface->repeatBytes(kTestValue, &result));
+    EXPECT_EQ(result, kTestValue);
+}
+
+TEST_P(BinderRpc, SendStringVector) {
+    auto proc = createRpcTestSocketServerProcess({});
+
+    const std::vector<std::string> kTestValue = {"a vector", "containing a few", "strings"};
+
+    std::vector<std::string> result;
+    EXPECT_OK(proc.rootIface->repeatStrings(kTestValue, &result));
+    EXPECT_EQ(result, kTestValue);
 }
 
 TEST_P(BinderRpc, RepeatTheirBinder) {
@@ -285,7 +350,7 @@ TEST_P(BinderRpc, CannotMixBindersBetweenTwoSessionsToTheSameServer) {
         GTEST_SKIP() << "This test requires a multi-threaded service";
     }
 
-    auto proc = createRpcTestSocketServerProcess({.numThreads = 1, .numSessions = 2});
+    auto proc = createRpcTestSocketServerProcess({.numMaxThreads = 1, .numSessions = 2});
 
     sp<IBinder> outBinder;
     EXPECT_EQ(INVALID_OPERATION,
@@ -301,7 +366,8 @@ TEST_P(BinderRpc, CannotSendRegularBinderOverSocketBinder) {
 
     auto proc = createRpcTestSocketServerProcess({});
 
-    sp<IBinder> someRealBinder = IInterface::asBinder(defaultServiceManager());
+    sp<IBinder> someRealBinder = defaultServiceManager()->getService(String16("activity"));
+    ASSERT_NE(someRealBinder, nullptr);
     sp<IBinder> outBinder;
     EXPECT_EQ(INVALID_OPERATION,
               proc.rootIface->repeatBinder(someRealBinder, &outBinder).transactionError());
@@ -322,6 +388,22 @@ TEST_P(BinderRpc, CannotSendSocketBinderOverRegularBinder) {
 }
 
 // END TESTS FOR LIMITATIONS OF SOCKET BINDER
+
+class TestFrozenStateChangeCallback : public IBinder::FrozenStateChangeCallback {
+public:
+    virtual void onStateChanged(const wp<IBinder>&, State) {}
+};
+
+TEST_P(BinderRpc, RpcBinderShouldFailOnFrozenStateCallbacks) {
+    auto proc = createRpcTestSocketServerProcess({});
+
+    sp<IBinder> a;
+    sp<TestFrozenStateChangeCallback> callback = sp<TestFrozenStateChangeCallback>::make();
+    EXPECT_OK(proc.rootIface->alwaysGiveMeTheSameBinder(&a));
+    EXPECT_DEATH_IF_SUPPORTED(
+            { std::ignore = a->addFrozenStateChangeCallback(callback); },
+            "addFrozenStateChangeCallback\\(\\) is not supported for RPC Binder.");
+}
 
 TEST_P(BinderRpc, RepeatRootObject) {
     auto proc = createRpcTestSocketServerProcess({});
@@ -464,7 +546,7 @@ TEST_P(BinderRpc, Callbacks) {
 
                 size_t numIncomingConnections = clientOrServerSingleThreaded() ? 0 : 1;
                 auto proc = createRpcTestSocketServerProcess(
-                        {.numThreads = 1,
+                        {.numMaxThreads = 1,
                          .numSessions = 1,
                          .numIncomingConnectionsBySession = {numIncomingConnections}});
                 auto cb = sp<MyBinderRpcCallback>::make();
@@ -481,9 +563,9 @@ TEST_P(BinderRpc, Callbacks) {
                 // same thread, everything should have happened in a nested call. Otherwise,
                 // the callback will be processed on another thread.
                 if (callIsOneway || callbackIsOneway || delayed) {
-                    using std::literals::chrono_literals::operator""s;
+                    using std::literals::chrono_literals::operator""ms;
                     RpcMutexUniqueLock _l(cb->mMutex);
-                    cb->mCv.wait_for(_l, 1s, [&] { return !cb->mValues.empty(); });
+                    cb->mCv.wait_for(_l, 1500ms, [&] { return !cb->mValues.empty(); });
                 }
 
                 EXPECT_EQ(cb->mValues.size(), 1UL)
@@ -516,6 +598,89 @@ TEST_P(BinderRpc, AidlDelegatorTest) {
     std::string doubled;
     EXPECT_OK(myDelegator->doubleString("cool ", &doubled));
     EXPECT_EQ("cool cool ", doubled);
+}
+
+TEST_P(BinderRpc, WriteReadLocalRpcBinder) {
+    auto proc = createRpcTestSocketServerProcess({});
+    const bool binderInObjects = proc.proc->sessions.at(0).session->getProtocolVersion() >=
+            RPC_WIRE_PROTOCOL_VERSION_RPC_HEADER_INCLUDES_BINDER_POSITIONS;
+
+    sp<IBinder> b = sp<BBinder>::make();
+    Parcel p;
+    p.markForRpc(proc.proc->sessions[0].session);
+
+    EXPECT_EQ(OK, p.writeStrongBinder(b));
+
+    p.setDataPosition(0);
+
+    sp<IBinder> b2;
+    EXPECT_EQ(OK, p.readStrongBinder(&b2));
+    EXPECT_NE(b2, nullptr);
+    EXPECT_EQ(b, b2);
+    if (!binderInObjects) {
+        // the old protocol will leak the binder object in this case
+        proc.forceShutdown();
+    }
+}
+
+#if !defined(BINDER_DISABLE_BLOB) && !defined(BINDER_NO_KERNEL_IPC_TESTING)
+
+TEST_P(BinderRpc, RpcValidateReadFds) {
+    auto fileDescriptorTransportMode = RpcSession::FileDescriptorTransportMode::UNIX;
+    if (socketType() == SocketType::TIPC) {
+        // TIPC does not support file descriptors yet
+        GTEST_SKIP() << "Test is not relevant if we don't support FDs";
+    }
+    auto proc = createRpcTestSocketServerProcess({
+            .clientFileDescriptorTransportMode = fileDescriptorTransportMode,
+            .serverSupportedFileDescriptorTransportModes = {fileDescriptorTransportMode},
+    });
+    int fd = memfd_create("test", MFD_CLOEXEC);
+    Parcel p1;
+    p1.markForRpc(proc.proc->sessions[0].session);
+    readFdsTest(p1, fd);
+    close(fd);
+}
+
+TEST_P(BinderRpc, RpcValidateReadOverFds) {
+    auto fileDescriptorTransportMode = RpcSession::FileDescriptorTransportMode::UNIX;
+    if (socketType() == SocketType::TIPC) {
+        // TIPC does not support file descriptors yet
+        GTEST_SKIP() << "Test is not relevant if we don't support FDs";
+    }
+    auto proc = createRpcTestSocketServerProcess({
+            .clientFileDescriptorTransportMode = fileDescriptorTransportMode,
+            .serverSupportedFileDescriptorTransportModes = {fileDescriptorTransportMode},
+    });
+    int fd = memfd_create("test", MFD_CLOEXEC);
+    Parcel p1;
+    p1.markForRpc(proc.proc->sessions[0].session);
+    readOverFdsTest(p1, fd, sizeof(int32_t) * 2);
+    close(fd);
+}
+
+#endif // !defined(BINDER_DISABLE_BLOB) && !defined(BINDER_NO_KERNEL_IPC_TESTING)
+
+TEST_P(BinderRpc, RpcValidateReadBinders) {
+    auto proc = createRpcTestSocketServerProcess({});
+    const bool binderInObjects = proc.proc->sessions.at(0).session->getProtocolVersion() >=
+            RPC_WIRE_PROTOCOL_VERSION_RPC_HEADER_INCLUDES_BINDER_POSITIONS;
+    if (!binderInObjects) GTEST_SKIP() << "Test is not relevant if we don't track binders";
+    sp<IBinder> b1 = sp<BBinder>::make();
+    Parcel p1;
+    p1.markForRpc(proc.proc->sessions[0].session);
+    readBindersTest(p1, b1);
+}
+
+TEST_P(BinderRpc, RpcValidateReadOverBinders) {
+    auto proc = createRpcTestSocketServerProcess({});
+    const bool binderInObjects = proc.proc->sessions.at(0).session->getProtocolVersion() >=
+            RPC_WIRE_PROTOCOL_VERSION_RPC_HEADER_INCLUDES_BINDER_POSITIONS;
+    if (!binderInObjects) GTEST_SKIP() << "Test is not relevant if we don't track binders";
+    sp<IBinder> b1 = sp<BBinder>::make();
+    Parcel p1;
+    p1.markForRpc(proc.proc->sessions[0].session);
+    readOverBindersTest(p1, b1, sizeof(int32_t) + sizeof(uint64_t));
 }
 
 } // namespace android

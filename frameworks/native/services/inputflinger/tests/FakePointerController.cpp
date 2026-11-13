@@ -32,8 +32,12 @@ void FakePointerController::clearBounds() {
     mHaveBounds = false;
 }
 
-const std::map<int32_t, std::vector<int32_t>>& FakePointerController::getSpots() {
+const std::map<ui::LogicalDisplayId, std::vector<int32_t>>& FakePointerController::getSpots() {
     return mSpotsByDisplay;
+}
+
+void FakePointerController::setTransform(ui::Transform transform) {
+    mTransform = transform;
 }
 
 void FakePointerController::setPosition(float x, float y) {
@@ -43,7 +47,7 @@ void FakePointerController::setPosition(float x, float y) {
     mY = y;
 }
 
-FloatPoint FakePointerController::getPosition() const {
+vec2 FakePointerController::getPosition() const {
     if (!mEnabled) {
         return {0, 0};
     }
@@ -51,9 +55,17 @@ FloatPoint FakePointerController::getPosition() const {
     return {mX, mY};
 }
 
-int32_t FakePointerController::getDisplayId() const {
+vec2 FakePointerController::getPositionInLogicalDisplay() const {
+    if (!mEnabled) {
+        return {0, 0};
+    }
+
+    return mTransform.transform(mX, mY);
+}
+
+ui::LogicalDisplayId FakePointerController::getDisplayId() const {
     if (!mEnabled || !mDisplayId) {
-        return ADISPLAY_ID_NONE;
+        return ui::LogicalDisplayId::INVALID;
     }
     return *mDisplayId;
 }
@@ -76,7 +88,17 @@ void FakePointerController::setCustomPointerIcon(const SpriteIcon& icon) {
     mCustomIconStyle = icon.style;
 }
 
-void FakePointerController::assertViewportSet(int32_t displayId) {
+void FakePointerController::setSkipScreenshotFlagForDisplay(ui::LogicalDisplayId displayId) {
+    mDisplaysToSkipScreenshotFlagChanged = true;
+    mDisplaysToSkipScreenshot.insert(displayId);
+}
+
+void FakePointerController::clearSkipScreenshotFlags() {
+    mDisplaysToSkipScreenshotFlagChanged = true;
+    mDisplaysToSkipScreenshot.clear();
+}
+
+void FakePointerController::assertViewportSet(ui::LogicalDisplayId displayId) {
     ASSERT_TRUE(mDisplayId);
     ASSERT_EQ(displayId, mDisplayId);
 }
@@ -86,12 +108,12 @@ void FakePointerController::assertViewportNotSet() {
 }
 
 void FakePointerController::assertPosition(float x, float y) {
-    const auto [actualX, actualY] = getPosition();
-    ASSERT_NEAR(x, actualX, 1);
-    ASSERT_NEAR(y, actualY, 1);
+    const auto actual = getPosition();
+    ASSERT_NEAR(x, actual.x, 1);
+    ASSERT_NEAR(y, actual.y, 1);
 }
 
-void FakePointerController::assertSpotCount(int32_t displayId, int32_t count) {
+void FakePointerController::assertSpotCount(ui::LogicalDisplayId displayId, int32_t count) {
     auto it = mSpotsByDisplay.find(displayId);
     ASSERT_TRUE(it != mSpotsByDisplay.end()) << "Spots not found for display " << displayId;
     ASSERT_EQ(static_cast<size_t>(count), it->second.size());
@@ -117,25 +139,41 @@ void FakePointerController::assertCustomPointerIconNotSet() {
     ASSERT_EQ(std::nullopt, mCustomIconStyle);
 }
 
+void FakePointerController::assertIsSkipScreenshotFlagSet(ui::LogicalDisplayId displayId) {
+    ASSERT_TRUE(mDisplaysToSkipScreenshot.find(displayId) != mDisplaysToSkipScreenshot.end());
+}
+
+void FakePointerController::assertIsSkipScreenshotFlagNotSet(ui::LogicalDisplayId displayId) {
+    ASSERT_TRUE(mDisplaysToSkipScreenshot.find(displayId) == mDisplaysToSkipScreenshot.end());
+}
+
+void FakePointerController::assertSkipScreenshotFlagChanged() {
+    ASSERT_TRUE(mDisplaysToSkipScreenshotFlagChanged);
+    mDisplaysToSkipScreenshotFlagChanged = false;
+}
+
+void FakePointerController::assertSkipScreenshotFlagNotChanged() {
+    ASSERT_FALSE(mDisplaysToSkipScreenshotFlagChanged);
+}
+
 bool FakePointerController::isPointerShown() {
     return mIsPointerShown;
 }
 
-std::optional<FloatRect> FakePointerController::getBounds() const {
-    if (!mEnabled) return std::nullopt;
-
-    return mHaveBounds ? std::make_optional<FloatRect>(mMinX, mMinY, mMaxX, mMaxY) : std::nullopt;
-}
-
-void FakePointerController::move(float deltaX, float deltaY) {
-    if (!mEnabled) return;
+vec2 FakePointerController::move(float deltaX, float deltaY) {
+    if (!mEnabled) return {0, 0};
 
     mX += deltaX;
+    mY += deltaY;
+
+    const vec2 position(mX, mY);
+
     if (mX < mMinX) mX = mMinX;
     if (mX > mMaxX) mX = mMaxX;
-    mY += deltaY;
     if (mY < mMinY) mY = mMinY;
     if (mY > mMaxY) mY = mMaxY;
+
+    return {position.x - mX, position.y - mY};
 }
 
 void FakePointerController::fade(Transition) {
@@ -150,7 +188,7 @@ void FakePointerController::unfade(Transition) {
 }
 
 void FakePointerController::setSpots(const PointerCoords*, const uint32_t*, BitSet32 spotIdBits,
-                                     int32_t displayId) {
+                                     ui::LogicalDisplayId displayId) {
     if (!mEnabled) return;
 
     std::vector<int32_t> newSpots;
@@ -167,6 +205,10 @@ void FakePointerController::clearSpots() {
     if (!mEnabled) return;
 
     mSpotsByDisplay.clear();
+}
+
+ui::Transform FakePointerController::getDisplayTransform() const {
+    return mTransform;
 }
 
 } // namespace android

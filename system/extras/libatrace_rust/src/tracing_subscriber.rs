@@ -166,7 +166,7 @@ impl<S: Subscriber + for<'lookup> LookupSpan<'lookup>> Layer<S> for AtraceSubscr
                     value: &dyn std::fmt::Debug,
                 ) {
                     if field == self.field {
-                        atrace::atrace_instant(self.tag, &format!("{:?}", value));
+                        atrace::atrace_instant(self.tag, &format!("{value:?}"));
                     }
                 }
             }
@@ -203,7 +203,7 @@ impl FieldFormatter {
     fn as_str(&self) -> &str {
         &self.s
     }
-    fn add_delimeter_if_needed(&mut self) {
+    fn add_delimiter_if_needed(&mut self) {
         if !self.s.is_empty() {
             self.s.push_str(", ");
         }
@@ -212,7 +212,7 @@ impl FieldFormatter {
 
 impl Visit for FieldFormatter {
     fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-        self.add_delimeter_if_needed();
+        self.add_delimiter_if_needed();
         if self.is_event && field.name() == "message" {
             self.s.push_str(value);
         } else {
@@ -220,9 +220,9 @@ impl Visit for FieldFormatter {
         }
     }
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        self.add_delimeter_if_needed();
+        self.add_delimiter_if_needed();
         if self.is_event && field.name() == "message" {
-            write!(&mut self.s, "{:?}", value).unwrap();
+            write!(&mut self.s, "{value:?}").unwrap();
         } else {
             write!(&mut self.s, "{} = {:?}", field.name(), value).unwrap();
         }

@@ -102,7 +102,7 @@ public:                                                                         
     static const ::android::sp<I##INTERFACE>& getDefaultImpl();                                   \
                                                                                                   \
 private:                                                                                          \
-    static ::android::sp<I##INTERFACE> default_impl;                                              \
+    [[clang::no_destroy]] static ::android::sp<I##INTERFACE> default_impl;                        \
                                                                                                   \
 public:
 
@@ -157,10 +157,11 @@ public:
     ITYPE::~INAME() {}
 
 // Macro for an interface type.
-#define DO_NOT_DIRECTLY_USE_ME_IMPLEMENT_META_INTERFACE(INTERFACE, NAME)                        \
-    const ::android::StaticString16 I##INTERFACE##_descriptor_static_str16(                     \
-            __IINTF_CONCAT(u, NAME));                                                           \
-    const ::android::String16 I##INTERFACE::descriptor(I##INTERFACE##_descriptor_static_str16); \
+#define DO_NOT_DIRECTLY_USE_ME_IMPLEMENT_META_INTERFACE(INTERFACE, NAME)                          \
+    [[clang::no_destroy]] const ::android::StaticString16 I##INTERFACE##_descriptor_static_str16( \
+            __IINTF_CONCAT(u, NAME));                                                             \
+    [[clang::no_destroy]] const ::android::String16 I##INTERFACE::descriptor(                     \
+            I##INTERFACE##_descriptor_static_str16);                                              \
     DO_NOT_DIRECTLY_USE_ME_IMPLEMENT_META_INTERFACE0(I##INTERFACE, I##INTERFACE, Bp##INTERFACE)
 
 // Macro for "nested" interface type.
@@ -219,9 +220,6 @@ namespace internal {
 constexpr const char* const kManualInterfaces[] = {
         "android.app.IActivityManager",
         "android.app.IUidObserver",
-        "android.drm.IDrm",
-        "android.dvr.IVsyncCallback",
-        "android.dvr.IVsyncService",
         "android.gfx.tests.ICallback",
         "android.gfx.tests.IIPCTest",
         "android.gfx.tests.ISafeInterfaceTest",
@@ -235,22 +233,17 @@ constexpr const char* const kManualInterfaces[] = {
         "android.hardware.ICameraClient",
         "android.hardware.ICameraRecordingProxy",
         "android.hardware.ICameraRecordingProxyListener",
-        "android.hardware.ICrypto",
         "android.hardware.IOMXObserver",
         "android.hardware.IStreamListener",
         "android.hardware.IStreamSource",
         "android.media.IAudioService",
         "android.media.IDataSource",
-        "android.media.IDrmClient",
         "android.media.IMediaCodecList",
-        "android.media.IMediaDrmService",
         "android.media.IMediaExtractor",
-        "android.media.IMediaExtractorService",
         "android.media.IMediaHTTPConnection",
         "android.media.IMediaHTTPService",
         "android.media.IMediaLogService",
         "android.media.IMediaMetadataRetriever",
-        "android.media.IMediaMetricsService",
         "android.media.IMediaPlayer",
         "android.media.IMediaPlayerClient",
         "android.media.IMediaPlayerService",
@@ -260,35 +253,22 @@ constexpr const char* const kManualInterfaces[] = {
         "android.media.IMediaSource",
         "android.media.IRemoteDisplay",
         "android.media.IRemoteDisplayClient",
-        "android.media.IResourceManagerClient",
-        "android.media.IResourceManagerService",
-        "android.os.IComplexTypeInterface",
         "android.os.IPermissionController",
-        "android.os.IPingResponder",
-        "android.os.IProcessInfoService",
         "android.os.ISchedulingPolicyService",
-        "android.os.IStringConstants",
         "android.os.storage.IObbActionListener",
         "android.os.storage.IStorageEventListener",
         "android.os.storage.IStorageManager",
         "android.os.storage.IStorageShutdownObserver",
-        "android.service.vr.IPersistentVrStateCallbacks",
-        "android.service.vr.IVrManager",
-        "android.service.vr.IVrStateCallbacks",
         "android.ui.ISurfaceComposer",
         "android.utils.IMemory",
         "android.utils.IMemoryHeap",
         "com.android.car.procfsinspector.IProcfsInspector",
-        "com.android.internal.app.IAppOpsCallback",
         "com.android.internal.app.IAppOpsService",
         "com.android.internal.app.IBatteryStats",
         "com.android.internal.os.IResultReceiver",
         "com.android.internal.os.IShellCallback",
         "drm.IDrmManagerService",
         "drm.IDrmServiceListener",
-        "IAAudioClient",
-        "IAAudioService",
-        "VtsFuzzer",
         nullptr,
 };
 

@@ -19,6 +19,7 @@
 #include "CancelationOptions.h"
 #include "Entry.h"
 
+#include <ftl/flags.h>
 #include <utils/Timers.h>
 #include <bitset>
 
@@ -36,7 +37,7 @@ public:
 
     // Returns true if the specified source is known to have received a hover enter
     // motion event.
-    bool isHovering(DeviceId deviceId, uint32_t source, int32_t displayId) const;
+    bool isHovering(DeviceId deviceId, uint32_t source, ui::LogicalDisplayId displayId) const;
 
     // Records tracking information for a key event that has just been published.
     // Returns true if the event should be delivered, false if it is inconsistent
@@ -46,7 +47,7 @@ public:
     // Records tracking information for a motion event that has just been published.
     // Returns true if the event should be delivered, false if it is inconsistent
     // and should be skipped.
-    bool trackMotion(const MotionEntry& entry, int32_t flags);
+    bool trackMotion(const MotionEntry& entry, ftl::Flags<MotionFlag> flags);
 
     /**
      * Return the PointerProperties and the PointerCoords for the last event, if found. Return
@@ -90,7 +91,7 @@ private:
     struct KeyMemento {
         DeviceId deviceId;
         uint32_t source;
-        int32_t displayId;
+        ui::LogicalDisplayId displayId{ui::LogicalDisplayId::INVALID};
         int32_t keyCode;
         int32_t scanCode;
         int32_t metaState;
@@ -102,8 +103,8 @@ private:
     struct MotionMemento {
         DeviceId deviceId;
         uint32_t source;
-        int32_t displayId;
-        int32_t flags;
+        ui::LogicalDisplayId displayId{ui::LogicalDisplayId::INVALID};
+        ftl::Flags<MotionFlag> flags;
         float xPrecision;
         float yPrecision;
         float xCursorPosition;
@@ -131,7 +132,7 @@ private:
     ssize_t findMotionMemento(const MotionEntry& entry, bool hovering) const;
 
     void addKeyMemento(const KeyEntry& entry, int32_t flags);
-    void addMotionMemento(const MotionEntry& entry, int32_t flags, bool hovering);
+    void addMotionMemento(const MotionEntry& entry, ftl::Flags<MotionFlag> flags, bool hovering);
 
     static bool shouldCancelKey(const KeyMemento& memento, const CancelationOptions& options);
     static bool shouldCancelMotion(const MotionMemento& memento, const CancelationOptions& options);

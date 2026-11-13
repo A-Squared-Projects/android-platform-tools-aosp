@@ -22,6 +22,7 @@
 #pragma clang diagnostic ignored "-Wconversion"
 #pragma clang diagnostic ignored "-Wextra"
 
+#include <com_android_graphics_surfaceflinger_flags.h>
 #include <cutils/properties.h>
 #include <gtest/gtest.h>
 #include <renderengine/ExternalTexture.h>
@@ -33,9 +34,12 @@
 #include <ui/ColorSpace.h>
 #include <ui/PixelFormat.h>
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <filesystem>
 #include <fstream>
+#include <system_error>
 
 #include "../skia/SkiaGLRenderEngine.h"
 #include "../skia/SkiaVkRenderEngine.h"
@@ -50,46 +54,6 @@ namespace android {
 namespace renderengine {
 
 namespace {
-
-double EOTF_PQ(double channel) {
-    float m1 = (2610.0 / 4096.0) / 4.0;
-    float m2 = (2523.0 / 4096.0) * 128.0;
-    float c1 = (3424.0 / 4096.0);
-    float c2 = (2413.0 / 4096.0) * 32.0;
-    float c3 = (2392.0 / 4096.0) * 32.0;
-
-    float tmp = std::pow(std::clamp(channel, 0.0, 1.0), 1.0 / m2);
-    tmp = std::fmax(tmp - c1, 0.0) / (c2 - c3 * tmp);
-    return std::pow(tmp, 1.0 / m1);
-}
-
-vec3 EOTF_PQ(vec3 color) {
-    return vec3(EOTF_PQ(color.r), EOTF_PQ(color.g), EOTF_PQ(color.b));
-}
-
-double EOTF_HLG(double channel) {
-    const float a = 0.17883277;
-    const float b = 0.28466892;
-    const float c = 0.55991073;
-    return channel <= 0.5 ? channel * channel / 3.0 : (exp((channel - c) / a) + b) / 12.0;
-}
-
-vec3 EOTF_HLG(vec3 color) {
-    return vec3(EOTF_HLG(color.r), EOTF_HLG(color.g), EOTF_HLG(color.b));
-}
-
-double OETF_sRGB(double channel) {
-    return channel <= 0.0031308 ? channel * 12.92 : (pow(channel, 1.0 / 2.4) * 1.055) - 0.055;
-}
-
-int sign(float in) {
-    return in >= 0.0 ? 1 : -1;
-}
-
-vec3 OETF_sRGB(vec3 linear) {
-    return vec3(sign(linear.r) * OETF_sRGB(linear.r), sign(linear.g) * OETF_sRGB(linear.g),
-                sign(linear.b) * OETF_sRGB(linear.b));
-}
 
 // clang-format off
 // Converts red channels to green channels, and zeroes out an existing green channel.
@@ -107,6 +71,7 @@ public:
 
     virtual std::string name() = 0;
     virtual renderengine::RenderEngine::GraphicsApi graphicsApi() = 0;
+    virtual renderengine::RenderEngine::SkiaBackend skiaBackend() = 0;
     bool apiSupported() { return renderengine::RenderEngine::canSupport(graphicsApi()); }
     std::unique_ptr<renderengine::RenderEngine> createRenderEngine() {
         renderengine::RenderEngineCreationArgs reCreationArgs =
@@ -115,21 +80,13 @@ public:
                         .setImageCacheSize(1)
                         .setEnableProtectedContext(false)
                         .setPrecacheToneMapperShaderOnly(false)
-                        .setSupportsBackgroundBlur(true)
-                        .setContextPriority(renderengine::RenderEngine::ContextPriority::MEDIUM)
-                        .setThreaded(renderengine::RenderEngine::Threaded::NO)
+                        .setBlurAlgorithm(renderengine::RenderEngine::BlurAlgorithm::Kawase)
+                        .setContextPriority(renderengine::RenderEngine::ContextPriority::Medium)
+                        .setThreaded(renderengine::RenderEngine::Threaded::No)
                         .setGraphicsApi(graphicsApi())
+                        .setSkiaBackend(skiaBackend())
                         .build();
         return renderengine::RenderEngine::create(reCreationArgs);
-    }
-};
-
-class SkiaVkRenderEngineFactory : public RenderEngineFactory {
-public:
-    std::string name() override { return "SkiaVkRenderEngineFactory"; }
-
-    renderengine::RenderEngine::GraphicsApi graphicsApi() override {
-        return renderengine::RenderEngine::GraphicsApi::VK;
     }
 };
 
@@ -139,6 +96,36 @@ public:
 
     renderengine::RenderEngine::GraphicsApi graphicsApi() {
         return renderengine::RenderEngine::GraphicsApi::GL;
+    }
+
+    renderengine::RenderEngine::SkiaBackend skiaBackend() override {
+        return renderengine::RenderEngine::SkiaBackend::Ganesh;
+    }
+};
+
+class GaneshVkRenderEngineFactory : public RenderEngineFactory {
+public:
+    std::string name() override { return "GaneshVkRenderEngineFactory"; }
+
+    renderengine::RenderEngine::GraphicsApi graphicsApi() override {
+        return renderengine::RenderEngine::GraphicsApi::Vk;
+    }
+
+    renderengine::RenderEngine::SkiaBackend skiaBackend() override {
+        return renderengine::RenderEngine::SkiaBackend::Ganesh;
+    }
+};
+
+class GraphiteVkRenderEngineFactory : public RenderEngineFactory {
+public:
+    std::string name() override { return "GraphiteVkRenderEngineFactory"; }
+
+    renderengine::RenderEngine::GraphicsApi graphicsApi() override {
+        return renderengine::RenderEngine::GraphicsApi::Vk;
+    }
+
+    renderengine::RenderEngine::SkiaBackend skiaBackend() override {
+        return renderengine::RenderEngine::SkiaBackend::Graphite;
     }
 };
 
@@ -219,27 +206,56 @@ public:
     RenderEngineTest() {
         const ::testing::TestInfo* const test_info =
                 ::testing::UnitTest::GetInstance()->current_test_info();
-        ALOGD("**** Setting up for %s.%s\n", test_info->test_case_name(), test_info->name());
+        ALOGI("**** Setting up for %s.%s\n", test_info->test_case_name(), test_info->name());
     }
 
     ~RenderEngineTest() {
         if (WRITE_BUFFER_TO_FILE_ON_FAILURE && ::testing::Test::HasFailure()) {
-            writeBufferToFile("/data/texture_out_");
+            writeBufferToFile("/data/local/tmp/RenderEngineTest/");
         }
         const ::testing::TestInfo* const test_info =
                 ::testing::UnitTest::GetInstance()->current_test_info();
-        ALOGD("**** Tearing down after %s.%s\n", test_info->test_case_name(), test_info->name());
+        ALOGI("**** Tearing down after %s.%s\n", test_info->test_case_name(), test_info->name());
     }
 
-    void writeBufferToFile(const char* basename) {
-        std::string filename(basename);
-        filename.append(::testing::UnitTest::GetInstance()->current_test_info()->name());
-        filename.append(".ppm");
-        std::ofstream file(filename.c_str(), std::ios::binary);
+    // If called during e.g.
+    // `PerRenderEngineType/RenderEngineTest#drawLayers_fillBufferCheckersRotate90_colorSource/0`
+    // with a directory of `/data/local/tmp/RenderEngineTest`, then mBuffer will be dumped to
+    // `/data/local/tmp/RenderEngineTest/drawLayers_fillBufferCheckersRotate90_colorSource-0.ppm`
+    //
+    // Note: if `directory` does not exist, then its full path will be recursively created with 777
+    // permissions. If `directory` already exists but does not grant the executing user write
+    // permissions, then saving the buffer will fail.
+    //
+    // Since this is test-only code, no security considerations are made.
+    void writeBufferToFile(const filesystem::path& directory) {
+        const auto currentTestInfo = ::testing::UnitTest::GetInstance()->current_test_info();
+        LOG_ALWAYS_FATAL_IF(!currentTestInfo,
+                            "writeBufferToFile must be called during execution of a test");
+
+        std::string fileName(currentTestInfo->name());
+        // Test names may include the RenderEngine variant separated by '/', which would separate
+        // the file name into a subdirectory if not corrected.
+        std::replace(fileName.begin(), fileName.end(), '/', '-');
+        fileName.append(".ppm");
+
+        std::error_code err;
+        filesystem::create_directories(directory, err);
+        if (err.value()) {
+            ALOGE("Unable to create directory %s for writing %s (%d: %s)", directory.c_str(),
+                  fileName.c_str(), err.value(), err.message().c_str());
+            return;
+        }
+
+        // Append operator ("/") ensures exactly one "/" directly before the argument.
+        const filesystem::path filePath = directory / fileName;
+        std::ofstream file(filePath.c_str(), std::ios::binary);
         if (!file.is_open()) {
-            ALOGE("Unable to open file: %s", filename.c_str());
-            ALOGE("You may need to do: \"adb shell setenforce 0\" to enable "
-                  "surfaceflinger to write debug images");
+            ALOGE("Unable to open file: %s", filePath.c_str());
+            ALOGE("You may need to do: \"adb shell setenforce 0\" to enable surfaceflinger to "
+                  "write debug images, or the %s directory might not give the executing user write "
+                  "permission",
+                  directory.c_str());
             return;
         }
 
@@ -269,6 +285,7 @@ public:
             }
         }
         file.write(reinterpret_cast<char*>(outBuffer.data()), outBuffer.size());
+        ALOGI("Image of incorrect output written to %s", filePath.c_str());
         mBuffer->getBuffer()->unlock();
     }
 
@@ -355,19 +372,47 @@ public:
                            const ubyte4& backgroundColor) {
         const Rect casterRect(castingLayer.geometry.boundaries);
         Region casterRegion = Region(casterRect);
-        const float casterCornerRadius = (castingLayer.geometry.roundedCornersRadius.x +
-                                          castingLayer.geometry.roundedCornersRadius.y) /
+        // Calculate the average radius for each corner
+        const float casterCornerRadiusTL = (castingLayer.geometry.roundedCornersRadii.topLeft.x +
+                                            castingLayer.geometry.roundedCornersRadii.topLeft.y) /
                 2.0;
-        if (casterCornerRadius > 0.0f) {
-            // ignore the corners if a corner radius is set
-            Rect cornerRect(casterCornerRadius, casterCornerRadius);
+        const float casterCornerRadiusTR = (castingLayer.geometry.roundedCornersRadii.topRight.x +
+                                            castingLayer.geometry.roundedCornersRadii.topRight.y) /
+                2.0;
+        const float casterCornerRadiusBL =
+                (castingLayer.geometry.roundedCornersRadii.bottomLeft.x +
+                 castingLayer.geometry.roundedCornersRadii.bottomLeft.y) /
+                2.0;
+        const float casterCornerRadiusBR =
+                (castingLayer.geometry.roundedCornersRadii.bottomRight.x +
+                 castingLayer.geometry.roundedCornersRadii.bottomRight.y) /
+                2.0;
+
+        // Correctly subtract each corner's bounding box from the caster region
+        // so we only test the flat edges, not the rounded corners.
+
+        if (casterCornerRadiusTL > 0.0f) {
+            Rect cornerRect(casterCornerRadiusTL, casterCornerRadiusTL);
             casterRegion.subtractSelf(cornerRect.offsetTo(casterRect.left, casterRect.top));
+        }
+
+        if (casterCornerRadiusTR > 0.0f) {
+            Rect cornerRect(casterCornerRadiusTR, casterCornerRadiusTR);
             casterRegion.subtractSelf(
-                    cornerRect.offsetTo(casterRect.right - casterCornerRadius, casterRect.top));
+                    cornerRect.offsetTo(casterRect.right - casterCornerRadiusTR, casterRect.top));
+        }
+
+        if (casterCornerRadiusBL > 0.0f) {
+            Rect cornerRect(casterCornerRadiusBL, casterCornerRadiusBL);
             casterRegion.subtractSelf(
-                    cornerRect.offsetTo(casterRect.left, casterRect.bottom - casterCornerRadius));
-            casterRegion.subtractSelf(cornerRect.offsetTo(casterRect.right - casterCornerRadius,
-                                                          casterRect.bottom - casterCornerRadius));
+                    cornerRect.offsetTo(casterRect.left, casterRect.bottom - casterCornerRadiusBL));
+        }
+
+        if (casterCornerRadiusBR > 0.0f) {
+            Rect cornerRect(casterCornerRadiusBR, casterCornerRadiusBR);
+            casterRegion.subtractSelf(
+                    cornerRect.offsetTo(casterRect.right - casterCornerRadiusBR,
+                                        casterRect.bottom - casterCornerRadiusBR));
         }
 
         const float shadowInset = shadow.length * -1.0f;
@@ -554,12 +599,6 @@ public:
 
     void drawShadowWithoutCaster(const FloatRect& castingBounds, const ShadowSettings& shadow,
                                  const ubyte4& backgroundColor);
-
-    // Tonemaps grey values from sourceDataspace -> Display P3 and checks that GPU and CPU
-    // implementations are identical Also implicitly checks that the injected tonemap shader
-    // compiles
-    void tonemap(ui::Dataspace sourceDataspace, std::function<vec3(vec3)> eotf,
-                 std::function<vec3(vec3, float)> scaleOotf);
 
     void initializeRenderEngine();
 
@@ -915,8 +954,8 @@ template <typename SourceVariant>
 void RenderEngineTest::fillBufferColorTransformAndSourceDataspace() {
     unordered_map<ui::Dataspace, ubyte4> dataspaceToColorMap;
     dataspaceToColorMap[ui::Dataspace::V0_BT709] = {77, 0, 0, 255};
-    dataspaceToColorMap[ui::Dataspace::BT2020] = {101, 0, 0, 255};
-    dataspaceToColorMap[ui::Dataspace::ADOBE_RGB] = {75, 0, 0, 255};
+    dataspaceToColorMap[ui::Dataspace::BT2020] = {188, 0, 0, 255};
+    dataspaceToColorMap[ui::Dataspace::ADOBE_RGB] = {108, 0, 0, 255};
     ui::Dataspace customizedDataspace = static_cast<ui::Dataspace>(
             ui::Dataspace::STANDARD_BT709 | ui::Dataspace::TRANSFER_GAMMA2_2 |
             ui::Dataspace::RANGE_FULL);
@@ -961,8 +1000,8 @@ template <typename SourceVariant>
 void RenderEngineTest::fillBufferColorTransformAndOutputDataspace() {
     unordered_map<ui::Dataspace, ubyte4> dataspaceToColorMap;
     dataspaceToColorMap[ui::Dataspace::V0_BT709] = {198, 0, 0, 255};
-    dataspaceToColorMap[ui::Dataspace::BT2020] = {187, 0, 0, 255};
-    dataspaceToColorMap[ui::Dataspace::ADOBE_RGB] = {192, 0, 0, 255};
+    dataspaceToColorMap[ui::Dataspace::BT2020] = {153, 0, 0, 255};
+    dataspaceToColorMap[ui::Dataspace::ADOBE_RGB] = {168, 0, 0, 255};
     ui::Dataspace customizedDataspace = static_cast<ui::Dataspace>(
             ui::Dataspace::STANDARD_BT709 | ui::Dataspace::TRANSFER_GAMMA2_6 |
             ui::Dataspace::RANGE_FULL);
@@ -1015,7 +1054,7 @@ void RenderEngineTest::fillRedBufferWithRoundedCorners() {
     renderengine::LayerSettings layer;
     layer.sourceDataspace = ui::Dataspace::V0_SRGB_LINEAR;
     layer.geometry.boundaries = fullscreenRect().toFloatRect();
-    layer.geometry.roundedCornersRadius = {5.0f, 5.0f};
+    layer.geometry.roundedCornersRadii = gui::CornerRadii(5.0f);
     layer.geometry.roundedCornersCrop = fullscreenRect().toFloatRect();
     SourceVariant::fillColor(layer, 1.0f, 0.0f, 0.0f, this);
     layer.alpha = 1.0f;
@@ -1242,7 +1281,12 @@ void RenderEngineTest::fillRedBufferWithPremultiplyAlpha() {
 
 void RenderEngineTest::fillBufferWithPremultiplyAlpha() {
     fillRedBufferWithPremultiplyAlpha();
-    expectBufferColor(fullscreenRect(), 128, 0, 0, 128);
+    // Different backends and GPUs may round 255 * 0.5 = 127.5 differently, but
+    // either 127 or 128 are acceptable. Checking both 127 and 128 with a
+    // tolerance of 1 allows either 127 or 128 to pass, while preventing 126 or
+    // 129 from erroneously passing.
+    expectBufferColor(fullscreenRect(), 127, 0, 0, 127, 1);
+    expectBufferColor(fullscreenRect(), 128, 0, 0, 128, 1);
 }
 
 void RenderEngineTest::fillRedBufferWithoutPremultiplyAlpha() {
@@ -1350,128 +1394,10 @@ void RenderEngineTest::drawShadowWithoutCaster(const FloatRect& castingBounds,
     invokeDraw(settings, layers);
 }
 
-void RenderEngineTest::tonemap(ui::Dataspace sourceDataspace, std::function<vec3(vec3)> eotf,
-                               std::function<vec3(vec3, float)> scaleOotf) {
-    constexpr int32_t kGreyLevels = 256;
-
-    const auto rect = Rect(0, 0, kGreyLevels, 1);
-
-    constexpr float kMaxLuminance = 750.f;
-    constexpr float kCurrentLuminanceNits = 500.f;
-    const renderengine::DisplaySettings display{
-            .physicalDisplay = rect,
-            .clip = rect,
-            .maxLuminance = kMaxLuminance,
-            .currentLuminanceNits = kCurrentLuminanceNits,
-            .outputDataspace = ui::Dataspace::DISPLAY_P3,
-    };
-
-    auto buf = std::make_shared<
-            renderengine::impl::
-                    ExternalTexture>(sp<GraphicBuffer>::make(kGreyLevels, 1,
-                                                             HAL_PIXEL_FORMAT_RGBA_8888, 1,
-                                                             GRALLOC_USAGE_SW_READ_OFTEN |
-                                                                     GRALLOC_USAGE_SW_WRITE_OFTEN |
-                                                                     GRALLOC_USAGE_HW_RENDER |
-                                                                     GRALLOC_USAGE_HW_TEXTURE,
-                                                             "input"),
-                                     *mRE,
-                                     renderengine::impl::ExternalTexture::Usage::READABLE |
-                                             renderengine::impl::ExternalTexture::Usage::WRITEABLE);
-    ASSERT_EQ(0, buf->getBuffer()->initCheck());
-    {
-        uint8_t* pixels;
-        buf->getBuffer()->lock(GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN,
-                               reinterpret_cast<void**>(&pixels));
-
-        uint8_t color = 0;
-        for (int32_t j = 0; j < buf->getBuffer()->getHeight(); j++) {
-            uint8_t* dest = pixels + (buf->getBuffer()->getStride() * j * 4);
-            for (int32_t i = 0; i < buf->getBuffer()->getWidth(); i++) {
-                dest[0] = color;
-                dest[1] = color;
-                dest[2] = color;
-                dest[3] = 255;
-                color++;
-                dest += 4;
-            }
-        }
-        buf->getBuffer()->unlock();
-    }
-
-    mBuffer = std::make_shared<
-            renderengine::impl::
-                    ExternalTexture>(sp<GraphicBuffer>::make(kGreyLevels, 1,
-                                                             HAL_PIXEL_FORMAT_RGBA_8888, 1,
-                                                             GRALLOC_USAGE_SW_READ_OFTEN |
-                                                                     GRALLOC_USAGE_SW_WRITE_OFTEN |
-                                                                     GRALLOC_USAGE_HW_RENDER |
-                                                                     GRALLOC_USAGE_HW_TEXTURE,
-                                                             "output"),
-                                     *mRE,
-                                     renderengine::impl::ExternalTexture::Usage::READABLE |
-                                             renderengine::impl::ExternalTexture::Usage::WRITEABLE);
-    ASSERT_EQ(0, mBuffer->getBuffer()->initCheck());
-
-    const renderengine::LayerSettings layer{.geometry.boundaries = rect.toFloatRect(),
-                                            .source =
-                                                    renderengine::PixelSource{
-                                                            .buffer =
-                                                                    renderengine::Buffer{
-                                                                            .buffer =
-                                                                                    std::move(buf),
-                                                                            .usePremultipliedAlpha =
-                                                                                    true,
-                                                                    },
-                                                    },
-                                            .alpha = 1.0f,
-                                            .sourceDataspace = sourceDataspace};
-
-    std::vector<renderengine::LayerSettings> layers{layer};
-    invokeDraw(display, layers);
-
-    ColorSpace displayP3 = ColorSpace::DisplayP3();
-    ColorSpace bt2020 = ColorSpace::BT2020();
-
-    tonemap::Metadata metadata{.displayMaxLuminance = 750.0f};
-
-    auto generator = [=](Point location) {
-        const double normColor = static_cast<double>(location.x) / (kGreyLevels - 1);
-        const vec3 rgb = vec3(normColor, normColor, normColor);
-
-        const vec3 linearRGB = eotf(rgb);
-
-        const vec3 xyz = bt2020.getRGBtoXYZ() * linearRGB;
-
-        const vec3 scaledXYZ = scaleOotf(xyz, kCurrentLuminanceNits);
-        const auto gains =
-                tonemap::getToneMapper()
-                        ->lookupTonemapGain(static_cast<aidl::android::hardware::graphics::common::
-                                                                Dataspace>(sourceDataspace),
-                                            static_cast<aidl::android::hardware::graphics::common::
-                                                                Dataspace>(
-                                                    ui::Dataspace::DISPLAY_P3),
-                                            {tonemap::
-                                                     Color{.linearRGB =
-                                                                   scaleOotf(linearRGB,
-                                                                             kCurrentLuminanceNits),
-                                                           .xyz = scaledXYZ}},
-                                            metadata);
-        EXPECT_EQ(1, gains.size());
-        const double gain = gains.front();
-        const vec3 normalizedXYZ = scaledXYZ * gain / metadata.displayMaxLuminance;
-
-        const vec3 targetRGB = OETF_sRGB(displayP3.getXYZtoRGB() * normalizedXYZ) * 255;
-        return ubyte4(static_cast<uint8_t>(targetRGB.r), static_cast<uint8_t>(targetRGB.g),
-                      static_cast<uint8_t>(targetRGB.b), 255);
-    };
-
-    expectBufferColor(Rect(kGreyLevels, 1), generator, 2);
-}
-
 INSTANTIATE_TEST_SUITE_P(PerRenderEngineType, RenderEngineTest,
                          testing::Values(std::make_shared<SkiaGLESRenderEngineFactory>(),
-                                         std::make_shared<SkiaVkRenderEngineFactory>()));
+                                         std::make_shared<GaneshVkRenderEngineFactory>(),
+                                         std::make_shared<GraphiteVkRenderEngineFactory>()));
 
 TEST_P(RenderEngineTest, drawLayers_noLayersToDraw) {
     if (!GetParam()->apiSupported()) {
@@ -2142,7 +2068,7 @@ TEST_P(RenderEngineTest, drawLayers_fillShadow_casterWithRoundedCorner) {
     casterBounds.offsetBy(shadowLength + 1, shadowLength + 1);
     renderengine::LayerSettings castingLayer;
     castingLayer.geometry.boundaries = casterBounds.toFloatRect();
-    castingLayer.geometry.roundedCornersRadius = {3.0f, 3.0f};
+    castingLayer.geometry.roundedCornersRadii = gui::CornerRadii(3.0f);
     castingLayer.geometry.roundedCornersCrop = casterBounds.toFloatRect();
     castingLayer.alpha = 1.0f;
     ShadowSettings settings = getShadowSettings(vec2(casterBounds.left, casterBounds.top),
@@ -2219,7 +2145,7 @@ TEST_P(RenderEngineTest, cleanupPostRender_cleansUpOnce) {
     if (mRE->canSkipPostRenderCleanup()) {
         // Skia's Vk backend may keep the texture alive beyond drawLayersInternal, so
         // it never gets added to the cleanup list. In those cases, we can skip.
-        EXPECT_TRUE(GetParam()->graphicsApi() == renderengine::RenderEngine::GraphicsApi::VK);
+        EXPECT_TRUE(GetParam()->graphicsApi() == renderengine::RenderEngine::GraphicsApi::Vk);
     } else {
         mRE->cleanupPostRender();
         EXPECT_TRUE(mRE->canSkipPostRenderCleanup());
@@ -2242,7 +2168,7 @@ TEST_P(RenderEngineTest, testRoundedCornersCrop) {
     renderengine::LayerSettings redLayer;
     redLayer.sourceDataspace = ui::Dataspace::V0_SRGB_LINEAR;
     redLayer.geometry.boundaries = fullscreenRect().toFloatRect();
-    redLayer.geometry.roundedCornersRadius = {5.0f, 5.0f};
+    redLayer.geometry.roundedCornersRadii = gui::CornerRadii(5.0f);
 
     redLayer.geometry.roundedCornersCrop = fullscreenRect().toFloatRect();
     // Red background.
@@ -2255,7 +2181,7 @@ TEST_P(RenderEngineTest, testRoundedCornersCrop) {
     renderengine::LayerSettings greenLayer;
     greenLayer.sourceDataspace = ui::Dataspace::V0_SRGB_LINEAR;
     greenLayer.geometry.boundaries = fullscreenRect().toFloatRect();
-    greenLayer.geometry.roundedCornersRadius = {5.0f, 5.0f};
+    greenLayer.geometry.roundedCornersRadii = gui::CornerRadii(5.0f);
     // Bottom right corner is not going to be rounded.
     greenLayer.geometry.roundedCornersCrop =
             Rect(DEFAULT_DISPLAY_WIDTH / 3, DEFAULT_DISPLAY_HEIGHT / 3, DEFAULT_DISPLAY_HEIGHT,
@@ -2295,7 +2221,7 @@ TEST_P(RenderEngineTest, testRoundedCornersParentCrop) {
     renderengine::LayerSettings redLayer;
     redLayer.sourceDataspace = ui::Dataspace::V0_SRGB_LINEAR;
     redLayer.geometry.boundaries = fullscreenRect().toFloatRect();
-    redLayer.geometry.roundedCornersRadius = {5.0f, 5.0f};
+    redLayer.geometry.roundedCornersRadii = gui::CornerRadii(5.0f);
     redLayer.geometry.roundedCornersCrop = fullscreenRect().toFloatRect();
     // Red background.
     redLayer.source.solidColor = half3(1.0f, 0.0f, 0.0f);
@@ -2343,7 +2269,7 @@ TEST_P(RenderEngineTest, testRoundedCornersParentCropSmallBounds) {
     renderengine::LayerSettings redLayer;
     redLayer.sourceDataspace = ui::Dataspace::V0_SRGB_LINEAR;
     redLayer.geometry.boundaries = FloatRect(0, 0, DEFAULT_DISPLAY_WIDTH, 32);
-    redLayer.geometry.roundedCornersRadius = {64.0f, 64.0f};
+    redLayer.geometry.roundedCornersRadii = gui::CornerRadii(64.0f);
     redLayer.geometry.roundedCornersCrop = FloatRect(0, 0, DEFAULT_DISPLAY_WIDTH, 128);
     // Red background.
     redLayer.source.solidColor = half3(1.0f, 0.0f, 0.0f);
@@ -2381,7 +2307,16 @@ TEST_P(RenderEngineTest, testRoundedCornersXY) {
     renderengine::LayerSettings redLayer;
     redLayer.sourceDataspace = ui::Dataspace::V0_SRGB_LINEAR;
     redLayer.geometry.boundaries = fullscreenRect().toFloatRect();
-    redLayer.geometry.roundedCornersRadius = {5.0f, 20.0f};
+    gui::CornerRadii radius;
+    radius.topLeft.x = 5.0f;
+    radius.topLeft.y = 20.0f;
+    radius.topRight.x = 5.0f;
+    radius.topRight.y = 20.0f;
+    radius.bottomLeft.x = 5.0f;
+    radius.bottomLeft.y = 20.0f;
+    radius.bottomRight.x = 5.0f;
+    radius.bottomRight.y = 20.0f;
+    redLayer.geometry.roundedCornersRadii = radius;
     redLayer.geometry.roundedCornersCrop = fullscreenRect().toFloatRect();
     // Red background.
     redLayer.source.solidColor = half3(1.0f, 0.0f, 0.0f);
@@ -2488,51 +2423,6 @@ TEST_P(RenderEngineTest, testDisableBlendingBuffer) {
     std::vector<renderengine::LayerSettings> layers{redLayer, greenLayer};
     invokeDraw(display, layers);
     expectBufferColor(rect, 0, 128, 0, 128);
-}
-
-TEST_P(RenderEngineTest, testBorder) {
-    if (!GetParam()->apiSupported()) {
-        GTEST_SKIP();
-    }
-
-    initializeRenderEngine();
-
-    const ui::Dataspace dataspace = ui::Dataspace::V0_SRGB;
-
-    const auto displayRect = Rect(1080, 2280);
-    renderengine::DisplaySettings display{
-            .physicalDisplay = displayRect,
-            .clip = displayRect,
-            .outputDataspace = dataspace,
-    };
-    display.borderInfoList.clear();
-    renderengine::BorderRenderInfo info;
-    info.combinedRegion = Region(Rect(99, 99, 199, 199));
-    info.width = 20.0f;
-    info.color = half4{1.0f, 128.0f / 255.0f, 0.0f, 1.0f};
-    display.borderInfoList.emplace_back(info);
-
-    const auto greenBuffer = allocateAndFillSourceBuffer(1, 1, ubyte4(0, 255, 0, 255));
-    const renderengine::LayerSettings greenLayer{
-            .geometry.boundaries = FloatRect(0.f, 0.f, 1.f, 1.f),
-            .source =
-                    renderengine::PixelSource{
-                            .buffer =
-                                    renderengine::Buffer{
-                                            .buffer = greenBuffer,
-                                            .usePremultipliedAlpha = true,
-                                    },
-                    },
-            .alpha = 1.0f,
-            .sourceDataspace = dataspace,
-            .whitePointNits = 200.f,
-    };
-
-    std::vector<renderengine::LayerSettings> layers;
-    layers.emplace_back(greenLayer);
-    invokeDraw(display, layers);
-
-    expectBufferColor(Rect(99, 99, 101, 101), 255, 128, 0, 255, 1);
 }
 
 TEST_P(RenderEngineTest, testDimming) {
@@ -2919,40 +2809,6 @@ TEST_P(RenderEngineTest, test_isOpaque) {
     expectBufferColor(rect, 117, 251, 76, 255);
 }
 
-TEST_P(RenderEngineTest, test_tonemapPQMatches) {
-    if (!GetParam()->apiSupported()) {
-        GTEST_SKIP();
-    }
-
-    initializeRenderEngine();
-
-    tonemap(
-            static_cast<ui::Dataspace>(HAL_DATASPACE_STANDARD_BT2020 |
-                                       HAL_DATASPACE_TRANSFER_ST2084 | HAL_DATASPACE_RANGE_FULL),
-            [](vec3 color) { return EOTF_PQ(color); },
-            [](vec3 color, float) {
-                static constexpr float kMaxPQLuminance = 10000.f;
-                return color * kMaxPQLuminance;
-            });
-}
-
-TEST_P(RenderEngineTest, test_tonemapHLGMatches) {
-    if (!GetParam()->apiSupported()) {
-        GTEST_SKIP();
-    }
-
-    initializeRenderEngine();
-
-    tonemap(
-            static_cast<ui::Dataspace>(HAL_DATASPACE_STANDARD_BT2020 | HAL_DATASPACE_TRANSFER_HLG |
-                                       HAL_DATASPACE_RANGE_FULL),
-            [](vec3 color) { return EOTF_HLG(color); },
-            [](vec3 color, float currentLuminaceNits) {
-                static constexpr float kMaxHLGLuminance = 1000.f;
-                return color * kMaxHLGLuminance;
-            });
-}
-
 TEST_P(RenderEngineTest, r8_behaves_as_mask) {
     if (!GetParam()->apiSupported()) {
         GTEST_SKIP();
@@ -3146,13 +3002,230 @@ TEST_P(RenderEngineTest, r8_respects_color_transform_when_device_handles) {
     expectBufferColor(Rect(0, 0, 1, 1), 0,  70, 0, 255);
 }
 
-TEST_P(RenderEngineTest, primeShaderCache) {
+TEST_P(RenderEngineTest, localTonemap_preservesFullscreenSdr) {
+    if (!GetParam()->apiSupported()) {
+        GTEST_SKIP();
+    }
+
+    initializeRenderEngine();
+
+    mBuffer = std::make_shared<
+            renderengine::impl::
+                    ExternalTexture>(sp<GraphicBuffer>::make(1, 1, HAL_PIXEL_FORMAT_RGBA_8888, 1,
+                                                             GRALLOC_USAGE_SW_READ_OFTEN |
+                                                                     GRALLOC_USAGE_SW_WRITE_OFTEN |
+                                                                     GRALLOC_USAGE_HW_RENDER |
+                                                                     GRALLOC_USAGE_HW_TEXTURE,
+                                                             "output"),
+                                     *mRE,
+                                     renderengine::impl::ExternalTexture::Usage::READABLE |
+                                             renderengine::impl::ExternalTexture::Usage::WRITEABLE);
+    ASSERT_EQ(0, mBuffer->getBuffer()->initCheck());
+
+    const auto whiteBuffer = allocateAndFillSourceBuffer(1, 1, ubyte4(51, 51, 51, 255));
+
+    const auto rect = Rect(0, 0, 1, 1);
+    const renderengine::DisplaySettings display{
+            .physicalDisplay = rect,
+            .clip = rect,
+            .outputDataspace = ui::Dataspace::SRGB,
+            .targetLuminanceNits = 40,
+            .tonemapStrategy = renderengine::DisplaySettings::TonemapStrategy::Local,
+    };
+
+    const renderengine::LayerSettings whiteLayer{
+            .geometry.boundaries = rect.toFloatRect(),
+            .source =
+                    renderengine::PixelSource{
+                            .buffer =
+                                    renderengine::Buffer{
+                                            .buffer = whiteBuffer,
+                                    },
+                    },
+            .alpha = 1.0f,
+            .sourceDataspace = ui::Dataspace::V0_SCRGB_LINEAR,
+            .whitePointNits = 200,
+    };
+
+    std::vector<renderengine::LayerSettings> layers{whiteLayer};
+    invokeDraw(display, layers);
+
+    expectBufferColor(Rect(0, 0, 1, 1), 255, 255, 255, 255);
+}
+
+TEST_P(RenderEngineTest, localTonemap_preservesFarawaySdrRegions) {
+    if (!GetParam()->apiSupported()) {
+        GTEST_SKIP();
+    }
+
+    initializeRenderEngine();
+
+    const auto blockWidth = 256;
+    const auto width = blockWidth * 4;
+
+    const auto buffer = allocateSourceBuffer(width, 1);
+
+    mBuffer = std::make_shared<
+            renderengine::impl::
+                    ExternalTexture>(sp<GraphicBuffer>::make(width, 1, HAL_PIXEL_FORMAT_RGBA_8888,
+                                                             1,
+                                                             GRALLOC_USAGE_SW_READ_OFTEN |
+                                                                     GRALLOC_USAGE_SW_WRITE_OFTEN |
+                                                                     GRALLOC_USAGE_HW_RENDER |
+                                                                     GRALLOC_USAGE_HW_TEXTURE,
+                                                             "output"),
+                                     *mRE,
+                                     renderengine::impl::ExternalTexture::Usage::READABLE |
+                                             renderengine::impl::ExternalTexture::Usage::WRITEABLE);
+
+    {
+        uint8_t* pixels;
+        buffer->getBuffer()->lock(GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN,
+                                  reinterpret_cast<void**>(&pixels));
+        uint8_t* dst = pixels;
+        for (uint32_t i = 0; i < width; i++) {
+            uint8_t value = 0;
+            if (i < blockWidth) {
+                value = 51;
+            } else if (i >= blockWidth * 3) {
+                value = 255;
+            }
+            dst[0] = value;
+            dst[1] = value;
+            dst[2] = value;
+            dst[3] = 255;
+            dst += 4;
+        }
+        buffer->getBuffer()->unlock();
+    }
+
+    const auto rect = Rect(0, 0, width, 1);
+    const renderengine::DisplaySettings display{
+            .physicalDisplay = rect,
+            .clip = rect,
+            .outputDataspace = ui::Dataspace::V0_SRGB_LINEAR,
+            .targetLuminanceNits = 40,
+            .tonemapStrategy = renderengine::DisplaySettings::TonemapStrategy::Local,
+    };
+
+    const renderengine::LayerSettings whiteLayer{
+            .geometry.boundaries = rect.toFloatRect(),
+            .source =
+                    renderengine::PixelSource{
+                            .buffer =
+                                    renderengine::Buffer{
+                                            .buffer = buffer,
+                                    },
+                    },
+            .alpha = 1.0f,
+            .sourceDataspace = ui::Dataspace::V0_SCRGB_LINEAR,
+            .whitePointNits = 200,
+    };
+
+    std::vector<renderengine::LayerSettings> layers{whiteLayer};
+    invokeDraw(display, layers);
+
+    // SDR regions are boosted to preserve SDR detail.
+    expectBufferColor(Rect(0, 0, blockWidth, 1), 255, 255, 255, 255);
+    expectBufferColor(Rect(blockWidth, 0, blockWidth * 2, 1), 0, 0, 0, 255);
+    expectBufferColor(Rect(blockWidth * 2, 0, blockWidth * 3, 1), 0, 0, 0, 255);
+    expectBufferColor(Rect(blockWidth * 3, 0, blockWidth * 4, 1), 255, 255, 255, 255);
+}
+
+TEST_P(RenderEngineTest, localTonemap_tonemapsNearbySdrRegions) {
+    if (!GetParam()->apiSupported()) {
+        GTEST_SKIP();
+    }
+
+    initializeRenderEngine();
+
+    const auto blockWidth = 2;
+    const auto width = blockWidth * 2;
+
+    mBuffer = std::make_shared<
+            renderengine::impl::
+                    ExternalTexture>(sp<GraphicBuffer>::make(width, 1, HAL_PIXEL_FORMAT_RGBA_8888,
+                                                             1,
+                                                             GRALLOC_USAGE_SW_READ_OFTEN |
+                                                                     GRALLOC_USAGE_SW_WRITE_OFTEN |
+                                                                     GRALLOC_USAGE_HW_RENDER |
+                                                                     GRALLOC_USAGE_HW_TEXTURE,
+                                                             "output"),
+                                     *mRE,
+                                     renderengine::impl::ExternalTexture::Usage::READABLE |
+                                             renderengine::impl::ExternalTexture::Usage::WRITEABLE);
+
+    const auto buffer = allocateSourceBuffer(width, 1);
+
+    {
+        uint8_t* pixels;
+        buffer->getBuffer()->lock(GRALLOC_USAGE_SW_READ_OFTEN | GRALLOC_USAGE_SW_WRITE_OFTEN,
+                                  reinterpret_cast<void**>(&pixels));
+        uint8_t* dst = pixels;
+        for (uint32_t i = 0; i < width; i++) {
+            uint8_t value = 0;
+            if (i < blockWidth) {
+                value = 51;
+            } else if (i >= blockWidth) {
+                value = 255;
+            }
+            dst[0] = value;
+            dst[1] = value;
+            dst[2] = value;
+            dst[3] = 255;
+            dst += 4;
+        }
+        buffer->getBuffer()->unlock();
+    }
+
+    const auto rect = Rect(0, 0, width, 1);
+    const renderengine::DisplaySettings display{
+            .physicalDisplay = rect,
+            .clip = rect,
+            .outputDataspace = ui::Dataspace::V0_SRGB_LINEAR,
+            .targetLuminanceNits = 40,
+            .tonemapStrategy = renderengine::DisplaySettings::TonemapStrategy::Local,
+    };
+
+    const renderengine::LayerSettings whiteLayer{
+            .geometry.boundaries = rect.toFloatRect(),
+            .source =
+                    renderengine::PixelSource{
+                            .buffer =
+                                    renderengine::Buffer{
+                                            .buffer = buffer,
+                                    },
+                    },
+            .alpha = 1.0f,
+            .sourceDataspace = ui::Dataspace::V0_SCRGB_LINEAR,
+            .whitePointNits = 200,
+    };
+
+    std::vector<renderengine::LayerSettings> layers{whiteLayer};
+    invokeDraw(display, layers);
+
+    // SDR regions remain "dimmed", but preserve detail with a roll-off curve.
+    expectBufferColor(Rect(0, 0, blockWidth, 1), 132, 132, 132, 255, 2);
+    // HDR regions are not dimmed.
+    expectBufferColor(Rect(blockWidth, 0, blockWidth * 2, 1), 255, 255, 255, 255);
+}
+
+// TODO: Figure out how to make this play nice with graphite & ShaderCache
+// Or remove it if it's no longer useful.
+TEST_P(RenderEngineTest, DISABLED_primeShaderCache) {
+    // TODO: b/331447071 - Fix in Graphite and re-enable.
+    if (GetParam()->skiaBackend() == renderengine::RenderEngine::SkiaBackend::Graphite) {
+        GTEST_SKIP();
+    }
+
     if (!GetParam()->apiSupported()) {
         GTEST_SKIP();
     }
     initializeRenderEngine();
 
-    auto fut = mRE->primeCache(false);
+    PrimeCacheConfig config;
+    config.cacheUltraHDR = false;
+    auto fut = mRE->primeCache(config);
     if (fut.valid()) {
         fut.wait();
     }

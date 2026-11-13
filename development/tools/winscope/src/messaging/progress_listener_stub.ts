@@ -14,14 +14,17 @@
  * limitations under the License.
  */
 
-import {ProgressListener} from 'messaging/progress_listener';
+import {ProgressListener} from './progress_listener';
 
+/**
+ * A stub implementation of the ProgressListener interface.
+ */
 export class ProgressListenerStub implements ProgressListener {
   onProgressUpdate() {
     // do nothing
   }
 
-  onOperationFinished() {
+  onOperationFinished(success = true) {
     // do nothing
   }
 }

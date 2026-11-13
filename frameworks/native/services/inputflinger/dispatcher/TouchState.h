@@ -43,30 +43,31 @@ struct TouchState {
     void removeTouchingPointer(DeviceId deviceId, int32_t pointerId);
     void removeTouchingPointerFromWindow(DeviceId deviceId, int32_t pointerId,
                                          const sp<android::gui::WindowInfoHandle>& windowHandle);
-    void addOrUpdateWindow(const sp<android::gui::WindowInfoHandle>& windowHandle,
-                           InputTarget::DispatchMode dispatchMode,
-                           ftl::Flags<InputTarget::Flags> targetFlags, DeviceId deviceId,
-                           const std::vector<PointerProperties>& touchingPointers,
-                           std::optional<nsecs_t> firstDownTimeInTarget = std::nullopt);
+    android::base::Result<void> addOrUpdateWindow(
+            const sp<android::gui::WindowInfoHandle>& windowHandle,
+            InputTarget::DispatchMode dispatchMode, ftl::Flags<InputTarget::Flags> targetFlags,
+            DeviceId deviceId, const std::vector<PointerProperties>& touchingPointers,
+            std::optional<nsecs_t> firstDownTimeInTarget, sp<IBinder> forwardingWindowToken);
     void addHoveringPointerToWindow(const sp<android::gui::WindowInfoHandle>& windowHandle,
-                                    DeviceId deviceId, const PointerProperties& pointer);
+                                    DeviceId deviceId, const PointerProperties& pointer, float x,
+                                    float y);
     void removeHoveringPointer(DeviceId deviceId, int32_t pointerId);
     void clearHoveringPointers(DeviceId deviceId);
 
     void removeAllPointersForDevice(DeviceId deviceId);
     void removeWindowByToken(const sp<IBinder>& token);
 
-    // Cancel pointers for current set of windows except the window with particular binder token.
-    void cancelPointersForWindowsExcept(DeviceId deviceId,
-                                        std::bitset<MAX_POINTER_ID + 1> pointerIds,
-                                        const sp<IBinder>& token);
+    // Cancel pointers for current set of windows for a pilfering request.
+    void cancelPointersForPilferingRequest(DeviceId deviceId,
+                                           std::bitset<MAX_POINTER_ID + 1> pointerIds,
+                                           const sp<IBinder>& token);
     // Cancel pointers for current set of non-pilfering windows i.e. windows with isPilferingWindow
     // set to false.
     void cancelPointersForNonPilferingWindows();
 
-    sp<android::gui::WindowInfoHandle> getFirstForegroundWindowHandle() const;
-    bool isSlippery() const;
-    sp<android::gui::WindowInfoHandle> getWallpaperWindow() const;
+    sp<android::gui::WindowInfoHandle> getFirstForegroundWindowHandle(DeviceId deviceId) const;
+    bool isSlippery(DeviceId deviceId) const;
+    sp<android::gui::WindowInfoHandle> getWallpaperWindow(DeviceId deviceId) const;
     const TouchedWindow& getTouchedWindow(
             const sp<android::gui::WindowInfoHandle>& windowHandle) const;
     // Whether any of the windows are currently being touched

@@ -21,6 +21,7 @@
 #include <binder/AppOpsManager.h>
 #include <binder/IPermissionController.h>
 #include <binder/IServiceManager.h>
+#include <android_permission_flags.h>
 
 /*
  * The permission to use for activity recognition sensors (like step counter).
@@ -28,6 +29,11 @@
  * permission.
  */
 #define SENSOR_PERMISSION_ACTIVITY_RECOGNITION "android.permission.ACTIVITY_RECOGNITION"
+
+/*
+* The permission to detect moisture intrusion within chassis of a devices
+*/
+#define SENSOR_PERMISSION_MOISTURE_INTRUSION "android.permission.MOISTURE_INTRUSION"
 
 // ----------------------------------------------------------------------------
 namespace android {
@@ -121,7 +127,9 @@ Sensor::Sensor(struct sensor_t const& hwSensor, const uuid_t& uuid, int halVersi
         break;
     case SENSOR_TYPE_HEART_RATE: {
         mStringType = SENSOR_STRING_TYPE_HEART_RATE;
-        mRequiredPermission = SENSOR_PERMISSION_BODY_SENSORS;
+        mRequiredPermission =
+          android::permission::flags::replace_body_sensor_permission_enabled() ?
+            SENSOR_PERMISSION_READ_HEART_RATE : SENSOR_PERMISSION_BODY_SENSORS;
         AppOpsManager appOps;
         mRequiredAppOp = appOps.permissionToOpCode(String16(mRequiredPermission));
         mFlags |= SENSOR_FLAG_ON_CHANGE_MODE;
@@ -296,6 +304,11 @@ Sensor::Sensor(struct sensor_t const& hwSensor, const uuid_t& uuid, int halVersi
         mStringType = SENSOR_STRING_TYPE_HEADING;
         mFlags |= SENSOR_FLAG_CONTINUOUS_MODE;
         break;
+    case SENSOR_TYPE_MOISTURE_INTRUSION:
+        mStringType = SENSOR_STRING_TYPE_MOISTURE_INTRUSION;
+        mRequiredPermission = SENSOR_PERMISSION_MOISTURE_INTRUSION;
+        mFlags |= SENSOR_FLAG_ON_CHANGE_MODE;
+        break;
     default:
         // Only pipe the stringType, requiredPermission and flags for custom sensors.
         if (halVersion > SENSORS_DEVICE_API_VERSION_1_0 && hwSensor.stringType) {
@@ -303,7 +316,18 @@ Sensor::Sensor(struct sensor_t const& hwSensor, const uuid_t& uuid, int halVersi
         }
         if (halVersion > SENSORS_DEVICE_API_VERSION_1_0 && hwSensor.requiredPermission) {
             mRequiredPermission = hwSensor.requiredPermission;
-            if (!strcmp(mRequiredPermission, SENSOR_PERMISSION_BODY_SENSORS)) {
+            bool requiresBodySensorPermission =
+                    !strcmp(mRequiredPermission, SENSOR_PERMISSION_BODY_SENSORS);
+            if (android::permission::flags::replace_body_sensor_permission_enabled()) {
+                if (requiresBodySensorPermission) {
+                  ALOGE("Sensor %s using deprecated Body Sensor permission", mName.c_str());
+                }
+
+                AppOpsManager appOps;
+                // Lookup to see if an AppOp exists for the permission. If none
+                // does, the default value of -1 is used.
+                mRequiredAppOp = appOps.permissionToOpCode(String16(mRequiredPermission));
+            } else if (requiresBodySensorPermission) {
                 AppOpsManager appOps;
                 mRequiredAppOp = appOps.permissionToOpCode(String16(SENSOR_PERMISSION_BODY_SENSORS));
             }

@@ -24,7 +24,6 @@
 #include <android-base/stringprintf.h>
 #include <attestation/HmacKeyManager.h>
 #include <gtest/gtest.h>
-#include <gui/constants.h>
 #include <input/VelocityTracker.h>
 
 using std::literals::chrono_literals::operator""ms;
@@ -34,7 +33,7 @@ using android::base::StringPrintf;
 
 namespace android {
 
-constexpr int32_t DISPLAY_ID = ADISPLAY_ID_DEFAULT; // default display id
+constexpr ui::LogicalDisplayId DISPLAY_ID = ui::LogicalDisplayId::DEFAULT; // default display id
 
 constexpr int32_t DEFAULT_POINTER_ID = 0; // pointer ID used for manually defined tests
 
@@ -156,8 +155,8 @@ static std::vector<MotionEvent> createAxisScrollMotionEventStream(
         MotionEvent event;
         ui::Transform identityTransform;
         event.initialize(InputEvent::nextId(), /*deviceId=*/5, AINPUT_SOURCE_ROTARY_ENCODER,
-                         ADISPLAY_ID_NONE, INVALID_HMAC, AMOTION_EVENT_ACTION_SCROLL,
-                         /*actionButton=*/0, /*flags=*/0, AMOTION_EVENT_EDGE_FLAG_NONE, AMETA_NONE,
+                         ui::LogicalDisplayId::INVALID, INVALID_HMAC, AMOTION_EVENT_ACTION_SCROLL,
+                         /*actionButton=*/0, /*flags=*/{}, AMOTION_EVENT_EDGE_FLAG_NONE, AMETA_NONE,
                          /*buttonState=*/0, MotionClassification::NONE, identityTransform,
                          /*xPrecision=*/0, /*yPrecision=*/0, AMOTION_EVENT_INVALID_CURSOR_POSITION,
                          AMOTION_EVENT_INVALID_CURSOR_POSITION, identityTransform, /*downTime=*/0,
@@ -216,7 +215,7 @@ static std::vector<MotionEvent> createTouchMotionEventStream(
         MotionEvent event;
         ui::Transform identityTransform;
         event.initialize(InputEvent::nextId(), /*deviceId=*/0, AINPUT_SOURCE_TOUCHSCREEN,
-                         DISPLAY_ID, INVALID_HMAC, action, /*actionButton=*/0, /*flags=*/0,
+                         DISPLAY_ID, INVALID_HMAC, action, /*actionButton=*/0, /*flags=*/{},
                          AMOTION_EVENT_EDGE_FLAG_NONE, AMETA_NONE, /*buttonState=*/0,
                          MotionClassification::NONE, identityTransform, /*xPrecision=*/0,
                          /*yPrecision=*/0, AMOTION_EVENT_INVALID_CURSOR_POSITION,
@@ -508,7 +507,7 @@ TEST_F(VelocityTrackerTest, ActionCancelResultsInZeroVelocity) {
     // ACTION_UP. We need to manually change it to ACTION_CANCEL.
     MotionEvent& lastEvent = events.back();
     lastEvent.setAction(AMOTION_EVENT_ACTION_CANCEL);
-    lastEvent.setFlags(lastEvent.getFlags() | AMOTION_EVENT_FLAG_CANCELED);
+    lastEvent.setFlags(lastEvent.getFlags() | MotionFlag::CANCELED);
     const int32_t pointerId = lastEvent.getPointerId(0);
     checkVelocity(computeVelocity(VelocityTracker::Strategy::IMPULSE, events, AMOTION_EVENT_AXIS_X,
                                   pointerId),
@@ -539,7 +538,7 @@ TEST_F(VelocityTrackerTest, ActionPointerCancelResultsInZeroVelocityForThatPoint
     std::vector<MotionEvent> events = createTouchMotionEventStream(motions);
     // Cancel the lifting pointer of the ACTION_POINTER_UP event
     MotionEvent& pointerUpEvent = events.rbegin()[1];
-    pointerUpEvent.setFlags(pointerUpEvent.getFlags() | AMOTION_EVENT_FLAG_CANCELED);
+    pointerUpEvent.setFlags(pointerUpEvent.getFlags() | MotionFlag::CANCELED);
     const int32_t pointerId = pointerUpEvent.getPointerId(pointerUpEvent.getActionIndex());
     // Double check the stream
     ASSERT_EQ(1, pointerId);

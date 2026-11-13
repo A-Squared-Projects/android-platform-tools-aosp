@@ -42,7 +42,7 @@ public:
      * through saved callback. */
     class BufferListener : public ConsumerBase::FrameAvailableListener {
     public:
-        BufferListener(sp<IGraphicBufferConsumer> consumer, BufferCallback callback)
+        BufferListener(sp<BufferItemConsumer> consumer, BufferCallback callback)
               : mConsumer(consumer), mCallback(callback) {}
 
         void onFrameAvailable(const BufferItem& /*item*/) {
@@ -55,7 +55,7 @@ public:
         }
 
     private:
-        sp<IGraphicBufferConsumer> mConsumer;
+        sp<BufferItemConsumer> mConsumer;
         BufferCallback mCallback;
     };
 
@@ -63,20 +63,14 @@ public:
      * queue. */
     void initialize(uint32_t width, uint32_t height, android_pixel_format_t format,
                     BufferCallback callback) {
-        sp<IGraphicBufferProducer> producer;
-        sp<IGraphicBufferConsumer> consumer;
-        BufferQueue::createBufferQueue(&producer, &consumer);
+        mBufferItemConsumer = sp<BufferItemConsumer>::make(GraphicBuffer::USAGE_HW_TEXTURE);
+        mBufferItemConsumer->setDefaultBufferSize(width, height);
+        mBufferItemConsumer->setDefaultBufferFormat(format);
 
-        consumer->setDefaultBufferSize(width, height);
-        consumer->setDefaultBufferFormat(format);
-
-        mBufferItemConsumer =
-                sp<BufferItemConsumer>::make(consumer, GraphicBuffer::USAGE_HW_TEXTURE);
-
-        mListener = sp<BufferListener>::make(consumer, callback);
+        mListener = sp<BufferListener>::make(mBufferItemConsumer, callback);
         mBufferItemConsumer->setFrameAvailableListener(mListener);
 
-        mSurface = sp<Surface>::make(producer, true);
+        mSurface = mBufferItemConsumer->getSurface();
     }
 
     /* Used by Egl manager. The surface is never displayed. */

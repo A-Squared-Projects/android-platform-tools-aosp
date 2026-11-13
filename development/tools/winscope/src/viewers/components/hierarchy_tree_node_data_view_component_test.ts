@@ -13,32 +13,59 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {
-  ComponentFixture,
-  ComponentFixtureAutoDetect,
-  TestBed,
-} from '@angular/core/testing';
+import {TestBed} from '@angular/core/testing';
 import {MatTooltipModule} from '@angular/material/tooltip';
+import {DOMTestHelper} from 'test/unit/dom_test_helpers';
+import {makeUiHierarchyNode} from 'test/unit/ui_tree_node_utils';
+import {VISIBLE_CHIP} from 'viewers/common/chip';
+import {UiHierarchyTreeNode} from 'viewers/common/ui_hierarchy_tree_node';
 import {HierarchyTreeNodeDataViewComponent} from './hierarchy_tree_node_data_view_component';
 
 describe('HierarchyTreeNodeDataViewComponent', () => {
-  let fixture: ComponentFixture<HierarchyTreeNodeDataViewComponent>;
+  let testNode: UiHierarchyTreeNode;
   let component: HierarchyTreeNodeDataViewComponent;
+  let dom: DOMTestHelper<HierarchyTreeNodeDataViewComponent>;
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     await TestBed.configureTestingModule({
-      providers: [{provide: ComponentFixtureAutoDetect, useValue: true}],
-      declarations: [HierarchyTreeNodeDataViewComponent],
-      imports: [MatTooltipModule],
+      imports: [HierarchyTreeNodeDataViewComponent, MatTooltipModule],
     }).compileComponents();
-  });
-
-  beforeEach(() => {
-    fixture = TestBed.createComponent(HierarchyTreeNodeDataViewComponent);
+    const fixture = TestBed.createComponent(HierarchyTreeNodeDataViewComponent);
     component = fixture.componentInstance;
+    dom = new DOMTestHelper(fixture, fixture.nativeElement);
+    dom.detectChanges();
+    testNode = makeUiHierarchyNode({
+      id: 1,
+      name: 'test node',
+    });
   });
 
-  it('can be created', () => {
+  it('is robust to no node', () => {
     expect(component).toBeTruthy();
+  });
+
+  it('shows node heading if set', () => {
+    component.node = testNode;
+    dom.detectChanges();
+    dom.checkTextExact('1 - test node');
+    testNode.setShowHeading(false);
+    dom.detectChanges();
+    dom.checkTextExact('test node');
+  });
+
+  it('shows display name if set, with full name on hover', async () => {
+    testNode.setDisplayName('display name');
+    component.node = testNode;
+    dom.detectChanges();
+    dom.checkTextExact('1 - display name');
+    await dom.get('.display-name').checkTooltip('test node');
+  });
+
+  it('shows chips with tooltip on hover', async () => {
+    testNode.addChip(VISIBLE_CHIP);
+    component.node = testNode;
+    dom.detectChanges();
+    dom.checkTextExact(`1 - test node ${VISIBLE_CHIP.short}`);
+    await dom.get('.tree-view-chip').checkTooltip(VISIBLE_CHIP.long);
   });
 });

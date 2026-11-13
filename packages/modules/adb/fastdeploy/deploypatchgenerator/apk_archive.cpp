@@ -36,9 +36,9 @@ static const uint32_t kGPBDDFlagMask = 0x0008;
 namespace {
 struct FileRegion {
     FileRegion(borrowed_fd fd, off64_t offset, size_t length)
-        : mapped_(android::base::MappedFile::FromOsHandle(adb_get_os_handle(fd), offset, length,
-                                                          PROT_READ)) {
-        if (mapped_ != nullptr) {
+        : mapped_(android::base::MappedFile::Create(adb_get_os_handle(fd), offset, length,
+                                                    PROT_READ)) {
+        if (mapped_) {
             return;
         }
 
@@ -59,7 +59,7 @@ struct FileRegion {
     FileRegion() = default;
     DISALLOW_COPY_AND_ASSIGN(FileRegion);
 
-    std::unique_ptr<android::base::MappedFile> mapped_;
+    std::optional<android::base::MappedFile> mapped_;
     std::string buffer_;
 };
 }  // namespace

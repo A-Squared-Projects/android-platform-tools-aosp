@@ -33,7 +33,7 @@ using testing::Return;
 
 class TestableFlagManager : public FlagManager {
 public:
-    TestableFlagManager() : FlagManager(ConstructorTag{}) { markBootCompleted(); }
+    TestableFlagManager() { markBootCompleted(); }
     ~TestableFlagManager() = default;
 
     MOCK_METHOD(std::optional<bool>, getBoolProperty, (const char*), (const, override));
@@ -62,11 +62,6 @@ TEST_F(FlagManagerTest, isSingleton) {
     EXPECT_EQ(&FlagManager::getInstance(), &FlagManager::getInstance());
 }
 
-TEST_F(FlagManagerTest, legacyCreashesIfQueriedBeforeBoot) {
-    mFlagManager.markBootIncomplete();
-    EXPECT_DEATH(FlagManager::getInstance().test_flag(), "");
-}
-
 TEST_F(FlagManagerTest, legacyReturnsOverride) {
     EXPECT_CALL(mFlagManager, getBoolProperty).WillOnce(Return(true));
     EXPECT_EQ(true, mFlagManager.test_flag());
@@ -85,12 +80,6 @@ TEST_F(FlagManagerTest, legacyReturnsValue) {
     EXPECT_EQ(false, mFlagManager.test_flag());
 }
 
-TEST_F(FlagManagerTest, creashesIfQueriedBeforeBoot) {
-    mFlagManager.markBootIncomplete();
-    EXPECT_DEATH(FlagManager::getInstance()
-        .refresh_rate_overlay_on_external_display(), "");
-}
-
 TEST_F(FlagManagerTest, returnsOverrideTrue) {
     mFlagManager.markBootCompleted();
 
@@ -103,15 +92,6 @@ TEST_F(FlagManagerTest, returnsOverrideTrue) {
 
     // Further calls will not result in further calls to getBoolProperty.
     EXPECT_TRUE(mFlagManager.refresh_rate_overlay_on_external_display());
-}
-
-TEST_F(FlagManagerTest, returnsOverrideReadonly) {
-    SET_FLAG_FOR_TEST(flags::add_sf_skipped_frames_to_trace, false);
-
-    // This is stored in a static variable, so this test depends on the fact
-    // that this flag has not been read in this process.
-    EXPECT_CALL(mFlagManager, getBoolProperty).WillOnce(Return(true));
-    EXPECT_TRUE(mFlagManager.add_sf_skipped_frames_to_trace());
 }
 
 // disabling this test since we need to use a unique flag for this test,
@@ -131,13 +111,13 @@ TEST_F(FlagManagerTest, DISABLED_returnsOverrideFalse) {
 TEST_F(FlagManagerTest, ignoresOverrideInUnitTestMode) {
     mFlagManager.setUnitTestMode();
 
-    SET_FLAG_FOR_TEST(flags::multithreaded_present, true);
+    SET_FLAG_FOR_TEST(flags::no_vsyncs_on_screen_off, true);
 
     // If this has not been called in this process, it will be called.
     // Regardless, the result is ignored.
     EXPECT_CALL(mFlagManager, getBoolProperty).WillRepeatedly(Return(false));
 
-    EXPECT_EQ(true, mFlagManager.multithreaded_present());
+    EXPECT_EQ(true, mFlagManager.no_vsyncs_on_screen_off());
 }
 
 TEST_F(FlagManagerTest, returnsValue) {
@@ -162,13 +142,13 @@ TEST_F(FlagManagerTest, readonlyReturnsValue) {
     EXPECT_CALL(mFlagManager, getBoolProperty).WillRepeatedly(Return(std::nullopt));
 
     {
-        SET_FLAG_FOR_TEST(flags::misc1, true);
-        EXPECT_EQ(true, mFlagManager.misc1());
+        SET_FLAG_FOR_TEST(flags::hdcp_level_hal, true);
+        EXPECT_EQ(true, mFlagManager.hdcp_level_hal());
     }
 
     {
-        SET_FLAG_FOR_TEST(flags::misc1, false);
-        EXPECT_EQ(false, mFlagManager.misc1());
+        SET_FLAG_FOR_TEST(flags::hdcp_level_hal, false);
+        EXPECT_EQ(false, mFlagManager.hdcp_level_hal());
     }
 }
 

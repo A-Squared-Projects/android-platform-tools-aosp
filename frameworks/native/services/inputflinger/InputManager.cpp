@@ -18,12 +18,16 @@
 
 //#define LOG_NDEBUG 0
 
-#include "InputManager.h"
+#include <memory>
+
 #include "InputDispatcherFactory.h"
-#include "InputReaderFactory.h"
+#include "InputManager.h"
+#include "InputReader.h"
+#include "InputTracingThreadedBackend.h"
 #include "UnwantedInteractionBlocker.h"
 
 #include <aidl/com/android/server/inputflinger/IInputFlingerRust.h>
+#include <android-base/properties.h>
 #include <android/binder_interface_utils.h>
 #include <android/sysprop/InputProperties.sysprop.h>
 #include <binder/IPCThreadState.h>
@@ -40,9 +44,6 @@ namespace {
 
 const bool ENABLE_INPUT_DEVICE_USAGE_METRICS =
         sysprop::InputProperties::enable_input_device_usage_metrics().value_or(true);
-
-const bool ENABLE_POINTER_CHOREOGRAPHER = input_flags::enable_pointer_choreographer();
-const bool ENABLE_INPUT_FILTER_RUST = input_flags::enable_input_filter_rust_impl();
 
 int32_t exceptionCodeFromStatusT(status_t status) {
     switch (status) {
@@ -128,19 +129,19 @@ std::shared_ptr<IInputFlingerRust> createInputFlingerRust() {
 InputManager::InputManager(const sp<InputReaderPolicyInterface>& readerPolicy,
                            InputDispatcherPolicyInterface& dispatcherPolicy,
                            PointerChoreographerPolicyInterface& choreographerPolicy,
-                           InputFilterPolicyInterface& inputFilterPolicy) {
+                           InputFilterPolicyInterface& inputFilterPolicy, JNIEnv* env) {
     mInputFlingerRust = createInputFlingerRust();
 
-    mDispatcher = createInputDispatcher(dispatcherPolicy);
+    std::shared_ptr<input_trace::InputTracingBackendInterface> tracingBackend =
+            input_trace::impl::createInputTracingBackendIfEnabled(env);
+    mDispatcher = createInputDispatcher(dispatcherPolicy, env, tracingBackend);
     mTracingStages.emplace_back(
             std::make_unique<TracedInputListener>("InputDispatcher", *mDispatcher));
 
-    if (ENABLE_INPUT_FILTER_RUST) {
-        mInputFilter = std::make_unique<InputFilter>(*mTracingStages.back(), *mInputFlingerRust,
-                                                     inputFilterPolicy);
-        mTracingStages.emplace_back(
-                std::make_unique<TracedInputListener>("InputFilter", *mInputFilter));
-    }
+    mInputFilter = std::make_unique<InputFilter>(*mTracingStages.back(), *mInputFlingerRust,
+                                                 inputFilterPolicy, env);
+    mTracingStages.emplace_back(
+            std::make_unique<TracedInputListener>("InputFilter", *mInputFilter));
 
     if (ENABLE_INPUT_DEVICE_USAGE_METRICS) {
         mCollector = std::make_unique<InputDeviceMetricsCollector>(*mTracingStages.back());
@@ -152,18 +153,17 @@ InputManager::InputManager(const sp<InputReaderPolicyInterface>& readerPolicy,
     mTracingStages.emplace_back(
             std::make_unique<TracedInputListener>("InputProcessor", *mProcessor));
 
-    if (ENABLE_POINTER_CHOREOGRAPHER) {
-        mChoreographer =
-                std::make_unique<PointerChoreographer>(*mTracingStages.back(), choreographerPolicy);
-        mTracingStages.emplace_back(
-                std::make_unique<TracedInputListener>("PointerChoreographer", *mChoreographer));
-    }
+    mChoreographer =
+            std::make_unique<PointerChoreographer>(*mTracingStages.back(), choreographerPolicy);
+    mTracingStages.emplace_back(
+            std::make_unique<TracedInputListener>("PointerChoreographer", *mChoreographer));
 
     mBlocker = std::make_unique<UnwantedInteractionBlocker>(*mTracingStages.back());
     mTracingStages.emplace_back(
             std::make_unique<TracedInputListener>("UnwantedInteractionBlocker", *mBlocker));
 
-    mReader = createInputReader(readerPolicy, *mTracingStages.back());
+    mReader = std::make_unique<InputReader>(std::make_unique<EventHub>(), readerPolicy,
+                                            *mTracingStages.back(), env, tracingBackend);
 }
 
 InputManager::~InputManager() {
@@ -245,16 +245,16 @@ void InputManager::dump(std::string& dump) {
     dump += '\n';
     mBlocker->dump(dump);
     dump += '\n';
-    if (ENABLE_POINTER_CHOREOGRAPHER) {
-        mChoreographer->dump(dump);
-        dump += '\n';
-    }
+    mChoreographer->dump(dump);
+    dump += '\n';
     mProcessor->dump(dump);
     dump += '\n';
     if (ENABLE_INPUT_DEVICE_USAGE_METRICS) {
         mCollector->dump(dump);
         dump += '\n';
     }
+    mInputFilter->dump(dump);
+    dump += '\n';
     mDispatcher->dump(dump);
     dump += '\n';
 }

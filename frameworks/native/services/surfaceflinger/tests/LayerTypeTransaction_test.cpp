@@ -18,6 +18,7 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wconversion"
 
+#include <gui/AidlUtil.h>
 #include <gui/BufferItemConsumer.h>
 #include <private/android_filesystem_config.h>
 #include "TransactionTestHarnesses.h"
@@ -64,7 +65,7 @@ TEST_P(LayerTypeTransactionTest, SetRelativeZNegative) {
     // only layerB is in this range
     LayerCaptureArgs captureArgs;
     captureArgs.layerHandle = parent->getHandle();
-    captureArgs.sourceCrop = {0, 0, 32, 32};
+    captureArgs.captureArgs.sourceCrop = gui::aidl_utils::toARect(32, 32);
     ScreenCapture::captureLayers(&screenshot, captureArgs);
     screenshot->expectColor(Rect(0, 0, 32, 32), Color::BLUE);
 }
@@ -191,7 +192,10 @@ TEST_P(LayerTypeTransactionTest, RefreshRateIsInitialized) {
     FrameStats frameStats;
     mClient->getLayerFrameStats(handle, &frameStats);
 
-    ASSERT_GT(frameStats.refreshPeriodNano, static_cast<nsecs_t>(0));
+    // 10000 FPS is a decent upper limit.
+    ASSERT_GT(frameStats.refreshPeriodNano, static_cast<nsecs_t>(100000));
+    // 1 FPS is an unlikely lower limit
+    ASSERT_LT(frameStats.refreshPeriodNano, static_cast<nsecs_t>(1000000000));
 }
 
 } // namespace android

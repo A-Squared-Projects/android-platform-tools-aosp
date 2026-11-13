@@ -22,6 +22,8 @@
 #include <SkRuntimeEffect.h>
 #include <SkSurface.h>
 
+#include "RuntimeEffectManager.h"
+
 using namespace std;
 
 namespace android {
@@ -38,11 +40,11 @@ public:
     // Maximum number of render passes
     static constexpr uint32_t kMaxPasses = 4;
 
-    explicit KawaseBlurFilter();
+    explicit KawaseBlurFilter(RuntimeEffectManager& effectManager);
     virtual ~KawaseBlurFilter(){}
 
     // Execute blur, saving it to a texture
-    sk_sp<SkImage> generate(GrRecordingContext* context, const uint32_t radius,
+    sk_sp<SkImage> generate(SkiaGpuContext* context, const uint32_t radius,
                             const sk_sp<SkImage> blurInput, const SkRect& blurRect) const override;
 
 private:

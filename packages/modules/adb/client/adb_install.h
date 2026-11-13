@@ -17,6 +17,12 @@
 #pragma once
 
 #include <string>
+#include <string_view>
+
+// secure dex metadata, for cloud compilation
+constexpr std::string_view kSdmExtension = ".sdm";
+// dex metadata, for cloud profile and cloud verification
+constexpr std::string_view kDmExtension = ".dm";
 
 int install_app(int argc, const char** argv);
 int install_multiple_app(int argc, const char** argv);

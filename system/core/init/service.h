@@ -144,8 +144,6 @@ class Service {
     std::optional<std::chrono::seconds> timeout_period() const { return timeout_period_; }
     const std::vector<std::string>& args() const { return args_; }
     bool is_updatable() const { return updatable_; }
-    bool is_post_data() const { return post_data_; }
-    bool is_from_apex() const { return base::StartsWith(filename_, "/apex/"); }
     void set_oneshot(bool value) {
         if (value) {
             flags_ |= SVC_ONESHOT;
@@ -160,6 +158,7 @@ class Service {
         static int sigchld_fd = CreateSigchldFd().release();
         return sigchld_fd;
     }
+    static void OpenAndSaveStaticKallsymsFd();
 
   private:
     void NotifyStateChange(const std::string& new_state) const;
@@ -173,6 +172,7 @@ class Service {
                     InterprocessFifo setsid_finished);
     void SetMountNamespace();
     static ::android::base::unique_fd CreateSigchldFd();
+    static Result<Descriptor> CreateSharedKallsymsFd();
 
     static unsigned long next_start_order_;
     static bool is_exec_service_running_;
@@ -190,6 +190,7 @@ class Service {
     std::optional<std::string> fatal_reboot_target_;  // reboot target of fatal handler
     bool was_last_exit_ok_ =
             true;  // true if the service never exited, or exited with status code 0
+    bool shared_kallsyms_file_ = false; // pass the service a pre-opened fd to /proc/kallsyms
 
     std::optional<CapSet> capabilities_;
     ProcessAttributes proc_attr_;
@@ -238,13 +239,11 @@ class Service {
 
     bool updatable_ = false;
 
-    const std::vector<std::string> args_;
+    std::vector<std::string> args_;
 
     std::vector<std::function<void(const siginfo_t& siginfo)>> reap_callbacks_;
 
     std::optional<MountNamespace> mount_namespace_;
-
-    bool post_data_ = false;
 
     std::optional<std::string> on_failure_reboot_target_;
 

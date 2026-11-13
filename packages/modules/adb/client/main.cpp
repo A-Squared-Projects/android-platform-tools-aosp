@@ -36,8 +36,11 @@
 #include "adb_listeners.h"
 #include "adb_mdns.h"
 #include "adb_utils.h"
-#include "adb_wifi.h"
+#include "client/adb_wifi.h"
+#include "client/mdns_utils.h"
+#include "client/transport_client.h"
 #include "client/usb.h"
+#include "client/usb_libusb_hotplug.h"
 #include "commandline.h"
 #include "sysdeps/chrono.h"
 #include "transport.h"
@@ -68,11 +71,9 @@ void adb_server_cleanup() {
     //   1. close_smartsockets, so that we don't get any new clients
     //   2. kick_all_transports, to avoid writing only part of a packet to a transport.
     //   3. usb_cleanup, to tear down the USB stack.
-    //   4. mdns_cleanup, to tear down mdns stack.
     close_smartsockets();
     kick_all_transports();
     usb_cleanup();
-    mdns_cleanup();
 }
 
 static void intentionally_leak() {
@@ -132,7 +133,7 @@ int adb_server_main(int is_daemon, const std::string& socket_spec, const char* o
 
     init_reconnect_handler();
 
-    if (!getenv("ADB_MDNS") || strcmp(getenv("ADB_MDNS"), "0") != 0) {
+    if (mdns::is_enabled()) {
         init_mdns_transport_discovery();
     }
 
@@ -147,7 +148,8 @@ int adb_server_main(int is_daemon, const std::string& socket_spec, const char* o
     }
 
     if (!getenv("ADB_EMU") || strcmp(getenv("ADB_EMU"), "0") != 0) {
-        local_init(android::base::StringPrintf("tcp:%d", DEFAULT_ADB_LOCAL_TRANSPORT_PORT));
+        init_emulator_scanner(
+                android::base::StringPrintf("tcp:%d", DEFAULT_ADB_LOCAL_TRANSPORT_PORT));
     }
 
     std::string error;

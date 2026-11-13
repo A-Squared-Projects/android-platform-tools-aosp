@@ -20,10 +20,12 @@
 #include <unistd.h>
 #include <ctype.h>
 
+#include <android-base/file.h>
+#include <android-base/logging.h>
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
 #include <ftl/enum.h>
-#include <gui/constants.h>
+#include <input/Input.h>
 #include <input/InputDevice.h>
 #include <input/InputEventLabels.h>
 
@@ -31,6 +33,9 @@ using android::base::GetProperty;
 using android::base::StringPrintf;
 
 namespace android {
+
+// Set to true to log detailed debugging messages about IDC file probing.
+static constexpr bool DEBUG_PROBE = false;
 
 static const char* CONFIGURATION_FILE_DIR[] = {
         "idc/",
@@ -109,21 +114,28 @@ std::string getInputDeviceConfigurationFilePathByName(
         pathPrefixes.push_back("/apex/" + apex + "/etc/usr/");
     }
     // ANDROID_ROOT may not be set on host
-    if (auto android_root = getenv("ANDROID_ROOT"); android_root != nullptr) {
-        pathPrefixes.push_back(std::string(android_root) + "/usr/");
+    if (auto androidRoot = getenv("ANDROID_ROOT"); androidRoot != nullptr) {
+        pathPrefixes.push_back(std::string(androidRoot) + "/usr/");
+    } else {
+        // To support host-based tests, use the data contained near the executable test binary.
+        pathPrefixes.push_back(base::GetExecutableDirectory() + "/system/usr/");
     }
+
     for (const auto& prefix : pathPrefixes) {
         path = prefix;
         appendInputDeviceConfigurationFileRelativePath(path, name, type);
-#if DEBUG_PROBE
-        ALOGD("Probing for system provided input device configuration file: path='%s'",
-              path.c_str());
-#endif
         if (!access(path.c_str(), R_OK)) {
-#if DEBUG_PROBE
-            ALOGD("Found");
-#endif
+            LOG_IF(INFO, DEBUG_PROBE)
+                    << "Found system-provided input device configuration file at " << path;
             return path;
+        } else if (errno != ENOENT) {
+            LOG(WARNING) << "Couldn't find a system-provided input device configuration file at "
+                         << path << " due to error " << errno << " (" << strerror(errno)
+                         << "); there may be an IDC file there that cannot be loaded.";
+        } else {
+            LOG_IF(ERROR, DEBUG_PROBE)
+                    << "Didn't find system-provided input device configuration file at " << path
+                    << ": " << strerror(errno);
         }
     }
 
@@ -136,21 +148,22 @@ std::string getInputDeviceConfigurationFilePathByName(
     }
     path += "/system/devices/";
     appendInputDeviceConfigurationFileRelativePath(path, name, type);
-#if DEBUG_PROBE
-    ALOGD("Probing for system user input device configuration file: path='%s'", path.c_str());
-#endif
     if (!access(path.c_str(), R_OK)) {
-#if DEBUG_PROBE
-        ALOGD("Found");
-#endif
+        LOG_IF(INFO, DEBUG_PROBE) << "Found system user input device configuration file at "
+                                  << path;
         return path;
+    } else if (errno != ENOENT) {
+        LOG(WARNING) << "Couldn't find a system user input device configuration file at " << path
+                     << " due to error " << errno << " (" << strerror(errno)
+                     << "); there may be an IDC file there that cannot be loaded.";
+    } else {
+        LOG_IF(ERROR, DEBUG_PROBE) << "Didn't find system user input device configuration file at "
+                                   << path << ": " << strerror(errno);
     }
 
     // Not found.
-#if DEBUG_PROBE
-    ALOGD("Probe failed to find input device configuration file: name='%s', type=%d",
-            name.c_str(), type);
-#endif
+    LOG_IF(INFO, DEBUG_PROBE) << "Probe failed to find input device configuration file with name '"
+                              << name << "' and type " << ftl::enum_string(type);
     return "";
 }
 
@@ -166,11 +179,11 @@ std::string InputDeviceIdentifier::getCanonicalName() const {
     return replacedName;
 }
 
-
 // --- InputDeviceInfo ---
-
 InputDeviceInfo::InputDeviceInfo() {
-    initialize(-1, 0, -1, InputDeviceIdentifier(), "", false, false, ADISPLAY_ID_NONE);
+    initialize(/*id=*/-1, /*generation=*/0, /*controllerNumber=*/-1, InputDeviceIdentifier(),
+               /*alias=*/"", /*isExternal=*/false, /*isVirtualDevice=*/false, /*hasMic=*/false,
+               ui::LogicalDisplayId::INVALID);
 }
 
 InputDeviceInfo::InputDeviceInfo(const InputDeviceInfo& other)
@@ -180,42 +193,75 @@ InputDeviceInfo::InputDeviceInfo(const InputDeviceInfo& other)
         mIdentifier(other.mIdentifier),
         mAlias(other.mAlias),
         mIsExternal(other.mIsExternal),
+        mIsVirtualDevice(other.mIsVirtualDevice),
         mHasMic(other.mHasMic),
         mKeyboardLayoutInfo(other.mKeyboardLayoutInfo),
         mSources(other.mSources),
         mKeyboardType(other.mKeyboardType),
-        mKeyCharacterMap(other.mKeyCharacterMap),
+        mKeyCharacterMap(other.mKeyCharacterMap
+                                 ? std::make_unique<KeyCharacterMap>(*other.mKeyCharacterMap)
+                                 : nullptr),
         mUsiVersion(other.mUsiVersion),
         mAssociatedDisplayId(other.mAssociatedDisplayId),
+        mEnabled(other.mEnabled),
         mHasVibrator(other.mHasVibrator),
         mHasBattery(other.mHasBattery),
-        mHasButtonUnderPad(other.mHasButtonUnderPad),
         mHasSensor(other.mHasSensor),
         mMotionRanges(other.mMotionRanges),
         mSensors(other.mSensors),
         mLights(other.mLights),
         mViewBehavior(other.mViewBehavior) {}
 
+InputDeviceInfo& InputDeviceInfo::operator=(const InputDeviceInfo& other) {
+    mId = other.mId;
+    mGeneration = other.mGeneration;
+    mControllerNumber = other.mControllerNumber;
+    mIdentifier = other.mIdentifier;
+    mAlias = other.mAlias;
+    mIsExternal = other.mIsExternal;
+    mIsVirtualDevice = other.mIsVirtualDevice;
+    mHasMic = other.mHasMic;
+    mKeyboardLayoutInfo = other.mKeyboardLayoutInfo;
+    mSources = other.mSources;
+    mKeyboardType = other.mKeyboardType;
+    mKeyCharacterMap = other.mKeyCharacterMap
+            ? std::make_unique<KeyCharacterMap>(*other.mKeyCharacterMap)
+            : nullptr;
+    mUsiVersion = other.mUsiVersion;
+    mAssociatedDisplayId = other.mAssociatedDisplayId;
+    mEnabled = other.mEnabled;
+    mHasVibrator = other.mHasVibrator;
+    mHasBattery = other.mHasBattery;
+    mHasSensor = other.mHasSensor;
+    mMotionRanges = other.mMotionRanges;
+    mSensors = other.mSensors;
+    mLights = other.mLights;
+    mViewBehavior = other.mViewBehavior;
+    return *this;
+}
+
 InputDeviceInfo::~InputDeviceInfo() {
 }
 
-void InputDeviceInfo::initialize(int32_t id, int32_t generation, int32_t controllerNumber,
+void InputDeviceInfo::initialize(DeviceId id, int32_t generation, int32_t controllerNumber,
                                  const InputDeviceIdentifier& identifier, const std::string& alias,
-                                 bool isExternal, bool hasMic, int32_t associatedDisplayId,
-                                 InputDeviceViewBehavior viewBehavior) {
+                                 bool isExternal, bool isVirtualDevice, bool hasMic,
+                                 ui::LogicalDisplayId associatedDisplayId,
+                                 InputDeviceViewBehavior viewBehavior, bool enabled) {
     mId = id;
     mGeneration = generation;
     mControllerNumber = controllerNumber;
     mIdentifier = identifier;
     mAlias = alias;
     mIsExternal = isExternal;
+    mIsVirtualDevice = isVirtualDevice;
     mHasMic = hasMic;
     mSources = 0;
     mKeyboardType = AINPUT_KEYBOARD_TYPE_NONE;
     mAssociatedDisplayId = associatedDisplayId;
+    mEnabled = enabled;
     mHasVibrator = false;
     mHasBattery = false;
-    mHasButtonUnderPad = false;
     mHasSensor = false;
     mViewBehavior = viewBehavior;
     mUsiVersion.reset();
@@ -271,10 +317,7 @@ void InputDeviceInfo::addLightInfo(const InputDeviceLightInfo& info) {
 }
 
 void InputDeviceInfo::setKeyboardType(int32_t keyboardType) {
-    static_assert(AINPUT_KEYBOARD_TYPE_NONE < AINPUT_KEYBOARD_TYPE_NON_ALPHABETIC);
-    static_assert(AINPUT_KEYBOARD_TYPE_NON_ALPHABETIC < AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-    // There can be multiple subdevices with different keyboard types, set it to the highest type
-    mKeyboardType = std::max(mKeyboardType, keyboardType);
+    mKeyboardType = keyboardType;
 }
 
 void InputDeviceInfo::setKeyboardLayoutInfo(KeyboardLayoutInfo layoutInfo) {

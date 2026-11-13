@@ -14,8 +14,23 @@
  * limitations under the License.
  */
 
+/**
+ * Abstract base class for building tree structures.
+ *
+ * This class provides a common structure for test builders that construct
+ * tree-like data models. It handles the setting of a name and children,
+ * and ensures that essential properties like id and name are set before
+ * the build process.
+ *
+ * Subclasses must implement `makeRootNode` to create the specific root node type
+ * and `addOrReplaceChildNode` to define how child elements (`U`) are integrated
+ * into the tree structure (`T`).
+ *
+ * @template T The type of the root node being built.
+ * @template U The type of the children used to build the tree.
+ */
 export abstract class TreeBuilder<T, U> {
-  protected id: string | undefined;
+  protected id: string | number | undefined;
   protected name: string | undefined;
   protected children: U[] = [];
 
@@ -31,17 +46,17 @@ export abstract class TreeBuilder<T, U> {
 
   build(): T {
     if (this.id === undefined) {
-      throw Error('id not set');
+      throw new Error('id not set');
     }
     if (this.name === undefined) {
-      throw Error('name not set');
+      throw new Error('name not set');
     }
 
     const rootNode = this.makeRootNode();
 
-    this.children.forEach((child) =>
-      this.addOrReplaceChildNode(rootNode, child),
-    );
+    this.children.forEach((child) => {
+      this.addOrReplaceChildNode(rootNode, child);
+    });
 
     return rootNode;
   }

@@ -15,129 +15,38 @@
  */
 
 #include "mdns.h"
+
 #include "adb_mdns.h"
+#include "adb_trace.h"
 #include "sysdeps.h"
 
 #include <dns_sd.h>
 #include <endian.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
+#include <condition_variable>
+#include <map>
 #include <mutex>
+#include <queue>
 #include <random>
+#include <string>
 #include <thread>
+#include <vector>
 
 #include <android-base/logging.h>
 #include <android-base/properties.h>
+#include <android-base/thread_annotations.h>
 
 using namespace std::chrono_literals;
 
-static std::mutex& mdns_lock = *new std::mutex();
-static int port;
+// All mdns operations MUST happen on the mDNS thread. This TU is mono-threaded.
+// This is done so operations requested by Frameworks are executed in the order
+// they were issued. As a result, there are no mutex to protect the datastructures.
+
+// Bonjour handles for registered services.
 static DNSServiceRef mdns_refs[kNumADBDNSServices];
-static bool mdns_registered[kNumADBDNSServices];
-
-void start_mdnsd() {
-    if (android::base::GetProperty("init.svc.mdnsd", "") == "running") {
-        return;
-    }
-
-    android::base::SetProperty("ctl.start", "mdnsd");
-
-    if (! android::base::WaitForProperty("init.svc.mdnsd", "running", 5s)) {
-        LOG(ERROR) << "Could not start mdnsd.";
-    }
-}
-
-static void mdns_callback(DNSServiceRef /*ref*/,
-                          DNSServiceFlags /*flags*/,
-                          DNSServiceErrorType errorCode,
-                          const char* /*name*/,
-                          const char* /*regtype*/,
-                          const char* /*domain*/,
-                          void* /*context*/) {
-    if (errorCode != kDNSServiceErr_NoError) {
-        LOG(ERROR) << "Encountered mDNS registration error ("
-            << errorCode << ").";
-    }
-}
-
-static void register_mdns_service(int index, int port, const std::string service_name) {
-    std::lock_guard<std::mutex> lock(mdns_lock);
-
-
-    // https://tools.ietf.org/html/rfc6763
-    // """
-    // The format of the data within a DNS TXT record is one or more
-    // strings, packed together in memory without any intervening gaps or
-    // padding bytes for word alignment.
-    //
-    // The format of each constituent string within the DNS TXT record is a
-    // single length byte, followed by 0-255 bytes of text data.
-    // """
-    //
-    // Therefore:
-    // 1. Begin with the string length
-    // 2. No null termination
-
-    std::vector<char> txtRecord;
-
-    if (kADBDNSServiceTxtRecords[index]) {
-        size_t txtRecordStringLength = strlen(kADBDNSServiceTxtRecords[index]);
-
-        txtRecord.resize(1 +                    // length byte
-                         txtRecordStringLength  // string bytes
-        );
-
-        txtRecord[0] = (char)txtRecordStringLength;
-        memcpy(txtRecord.data() + 1, kADBDNSServiceTxtRecords[index], txtRecordStringLength);
-    }
-
-    auto error = DNSServiceRegister(
-            &mdns_refs[index], 0, 0, service_name.c_str(), kADBDNSServices[index], nullptr, nullptr,
-            htobe16((uint16_t)port), (uint16_t)txtRecord.size(),
-            txtRecord.empty() ? nullptr : txtRecord.data(), mdns_callback, nullptr);
-
-    if (error != kDNSServiceErr_NoError) {
-        LOG(ERROR) << "Could not register mDNS service " << kADBDNSServices[index] << ", error ("
-                   << error << ").";
-        mdns_registered[index] = false;
-    } else {
-        mdns_registered[index] = true;
-    }
-    LOG(INFO) << "adbd mDNS service " << kADBDNSServices[index]
-            << " registered: " << mdns_registered[index];
-}
-
-static void unregister_mdns_service(int index) {
-    std::lock_guard<std::mutex> lock(mdns_lock);
-
-    if (mdns_registered[index]) {
-        DNSServiceRefDeallocate(mdns_refs[index]);
-    }
-}
-
-static void register_base_mdns_transport() {
-    std::string hostname = "adb-";
-    hostname += android::base::GetProperty("ro.serialno", "unidentified");
-    register_mdns_service(kADBTransportServiceRefIndex, port, hostname);
-}
-
-static void setup_mdns_thread() {
-    start_mdnsd();
-
-    // We will now only set up the normal transport mDNS service
-    // instead of registering all the adb secure mDNS services
-    // in the beginning. This is to provide more privacy/security.
-    register_base_mdns_transport();
-}
-
-// This also tears down any adb secure mDNS services, if they exist.
-static void teardown_mdns() {
-    for (int i = 0; i < kNumADBDNSServices; ++i) {
-        unregister_mdns_service(i);
-    }
-}
 
 static std::string RandomAlphaNumString(size_t len) {
     std::string ret;
@@ -184,35 +93,176 @@ static std::string ReadDeviceGuid() {
     return guid;
 }
 
-// Public interface/////////////////////////////////////////////////////////////
-
-void setup_mdns(int port_in) {
-    // Make sure the adb wifi guid is generated.
-    std::string guid = ReadDeviceGuid();
-    CHECK(!guid.empty());
-    port = port_in;
-    std::thread(setup_mdns_thread).detach();
-
-    // TODO: Make this more robust against a hard kill.
-    atexit(teardown_mdns);
+static void mdns_callback(DNSServiceRef /*ref*/,
+                          DNSServiceFlags /*flags*/,
+                          DNSServiceErrorType errorCode,
+                          const char* /*name*/,
+                          const char* /*regtype*/,
+                          const char* /*domain*/,
+                          void* /*context*/) {
+    if (errorCode != kDNSServiceErr_NoError) {
+        LOG(ERROR) << "Encountered mDNS registration error (" << errorCode << ").";
+    }
 }
 
-void register_adb_secure_connect_service(int port) {
-    std::thread([port]() {
+static std::vector<char> buildTxtRecord() {
+    std::map<std::string, std::string> attributes;
+    attributes["v"] = std::to_string(ADB_SECURE_SERVICE_VERSION);
+    attributes["name"] = android::base::GetProperty("ro.product.model", "");
+    attributes["api"] = android::base::GetProperty("ro.build.version.sdk_full", "");
+
+    // See https://tools.ietf.org/html/rfc6763 for the format of DNS TXT record.
+    std::vector<char> record;
+    for (auto const& [key, val] : attributes) {
+        size_t length = key.size() + val.size() + 1;
+        if (length > 255) {
+            LOG(INFO) << "DNS TXT Record property " << key << "='" << val << "' is too large.";
+            continue;
+        }
+        record.emplace_back(length);
+        std::copy(key.begin(), key.end(), std::back_inserter(record));
+        record.emplace_back('=');
+        std::copy(val.begin(), val.end(), std::back_inserter(record));
+    }
+
+    return record;
+}
+
+static void register_mdns_service(int index, int port, const std::string& service_name) {
+    if (mdns_refs[index] != nullptr) {
+        LOG(ERROR) << "Unable to register mDNS service " << service_name << " (slot occupied)";
+        return;
+    }
+
+    auto txtRecord = buildTxtRecord();
+    auto error = DNSServiceRegister(
+            &mdns_refs[index], 0, 0, service_name.c_str(), kADBDNSServices[index], nullptr, nullptr,
+            htobe16((uint16_t)port), (uint16_t)txtRecord.size(),
+            txtRecord.empty() ? nullptr : txtRecord.data(), mdns_callback, nullptr);
+
+    if (error != kDNSServiceErr_NoError) {
+        LOG(ERROR) << "Could not register mDNS service " << kADBDNSServices[index] << ", error ("
+                   << error << ").";
+    } else {
+        VLOG(MDNS) << "adbd mDNS service " << kADBDNSServices[index] << " registered";
+    }
+}
+
+static void unregister_mdns_service(int index) {
+    VLOG(MDNS) << "Unregistering TLS service";
+    if (mdns_refs[index] == nullptr) {
+        return;
+    }
+
+    DNSServiceRefDeallocate(mdns_refs[index]);
+    mdns_refs[index] = nullptr;
+}
+
+/**
+ * All mdns operations happen on the same mdns thread.
+ * This includes starting mdnsd, registering a service, and unregistering a service.
+ * Tasks are pushed onto a FIFO and consumed by the mdns worker thread.
+ */
+class MdnsWorkerThread {
+  public:
+    static MdnsWorkerThread& Get() {
+        static MdnsWorkerThread* worker = new MdnsWorkerThread();
+        return *worker;
+    }
+
+    void AddTask(std::function<void()> task) {
+        std::lock_guard<std::mutex> lock(worker_lock);
+        tasks.push(std::move(task));
+        cv.notify_one();
+    }
+
+  private:
+    MdnsWorkerThread() {
+        std::thread(&MdnsWorkerThread::Run, this).detach();
+
+        // TODO Check if this is needed.
+        //  If the process exists, all its fds will be closed, mdnsd will detect it and unregister
+        //  the services.
+        atexit(Teardown);
+    }
+
+    // This also tears down any adb secure mDNS services, if they exist.
+    static void Teardown() {
+        VLOG(MDNS) << "Tearing down mdns";
+        MdnsWorkerThread::Get().AddTask([] {
+            VLOG(MDNS) << "Unregistering tcp mDNS service";
+            unregister_mdns_service(kADBTransportServiceRefIndex);
+        });
+        MdnsWorkerThread::Get().AddTask([] {
+            VLOG(MDNS) << "Unregistering tls mDNS service";
+            unregister_mdns_service(kADBSecureConnectServiceRefIndex);
+        });
+    }
+
+    void EnsureMdnsdStarted() {
+#if defined(__ANDROID__)
+        if (android::base::GetProperty("init.svc.mdnsd", "") == "running") {
+            return;
+        }
+
+        android::base::SetProperty("ctl.start", "mdnsd");
+
+        if (!android::base::WaitForProperty("init.svc.mdnsd", "running", 5s)) {
+            LOG(ERROR) << "Could not start mdnsd.";
+        }
+#endif
+    }
+
+    void Run() {
+        // Make sure the adb wifi guid is generated.
+        std::string guid = ReadDeviceGuid();
+        CHECK(!guid.empty());
+
+        while (true) {
+            std::function<void()> task;
+            {
+                std::unique_lock<std::mutex> lock(worker_lock);
+                android::base::ScopedLockAssertion assume_locked(worker_lock);
+                cv.wait(lock, [this]() REQUIRES(worker_lock) { return !tasks.empty(); });
+                task = tasks.front();
+                tasks.pop();
+            }
+
+            EnsureMdnsdStarted();
+            task();
+        }
+    }
+
+    std::mutex worker_lock;
+    std::condition_variable cv GUARDED_BY(worker_lock);
+    std::queue<std::function<void()>> tasks GUARDED_BY(worker_lock);
+};
+
+// Public interface/////////////////////////////////////////////////////////////
+
+void register_adb_tcp_service(int tcp_port) {
+    MdnsWorkerThread::Get().AddTask([tcp_port] {
+        std::string hostname = "adb-";
+        hostname += android::base::GetProperty("ro.serialno", "unidentified");
+        VLOG(MDNS) << "Registering tcp service on port: " << tcp_port;
+        register_mdns_service(kADBTransportServiceRefIndex, tcp_port, hostname);
+    });
+}
+
+void register_adb_tls_service(int tls_port) {
+    MdnsWorkerThread::Get().AddTask([tls_port] {
         auto service_name = ReadDeviceGuid();
         if (service_name.empty()) {
             return;
         }
-        LOG(INFO) << "Registering secure_connect service (" << service_name << ")";
-        register_mdns_service(kADBSecureConnectServiceRefIndex, port, service_name);
-    }).detach();
+        VLOG(MDNS) << "Registering tls service (" << service_name << ") on port: " << tls_port;
+        register_mdns_service(kADBSecureConnectServiceRefIndex, tls_port, service_name);
+    });
 }
 
-void unregister_adb_secure_connect_service() {
-    std::thread([]() { unregister_mdns_service(kADBSecureConnectServiceRefIndex); }).detach();
-}
-
-bool is_adb_secure_connect_service_registered() {
-    std::lock_guard<std::mutex> lock(mdns_lock);
-    return mdns_registered[kADBSecureConnectServiceRefIndex];
+void unregister_adb_tls_service() {
+    MdnsWorkerThread::Get().AddTask([] {
+        VLOG(MDNS) << "Unregistering tls service";
+        unregister_mdns_service(kADBSecureConnectServiceRefIndex);
+    });
 }

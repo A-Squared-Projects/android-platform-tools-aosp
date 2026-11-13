@@ -18,12 +18,21 @@
 
 #include <ftl/flags.h>
 #include <input/DisplayViewport.h>
+#include <input/Input.h>
 #include <input/InputDevice.h>
 #include <input/PropertyMap.h>
 
+#include <chrono>
 #include <cstdint>
+#include <filesystem>
+#include <functional>
+#include <list>
+#include <map>
+#include <memory>
 #include <optional>
+#include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "EventHub.h"
@@ -41,14 +50,14 @@ class InputMapper;
 /* Represents the state of a single input device. */
 class InputDevice {
 public:
-    InputDevice(InputReaderContext* context, int32_t id, int32_t generation,
+    InputDevice(InputReaderContext* context, DeviceId id, int32_t generation,
                 const InputDeviceIdentifier& identifier);
-    ~InputDevice();
+    virtual ~InputDevice();
 
     inline InputReaderContext* getContext() { return mContext; }
-    inline int32_t getId() const { return mId; }
+    inline DeviceId getId() const { return mId; }
     inline int32_t getControllerNumber() const { return mControllerNumber; }
-    inline int32_t getGeneration() const { return mGeneration; }
+    inline virtual int32_t getGeneration() const { return mGeneration; }
     inline const std::string getName() const { return mIdentifier.name; }
     inline const std::string getDescriptor() { return mIdentifier.descriptor; }
     inline std::optional<std::string> getBluetoothAddress() const {
@@ -56,33 +65,41 @@ public:
     }
     inline const std::string getLocation() const { return mIdentifier.location; }
     inline ftl::Flags<InputDeviceClass> getClasses() const { return mClasses; }
-    inline uint32_t getSources() const { return mSources; }
+    inline virtual uint32_t getSources() const { return mSources; }
     inline bool hasEventHubDevices() const { return !mDevices.empty(); }
 
-    inline bool isExternal() { return mIsExternal; }
+    inline virtual bool isExternal() { return mIsExternal; }
+    inline virtual bool isVirtualDevice() const { return mIsVirtualDevice; }
     inline std::optional<uint8_t> getAssociatedDisplayPort() const {
         return mAssociatedDisplayPort;
     }
-    inline std::optional<std::string> getAssociatedDisplayUniqueId() const {
-        return mAssociatedDisplayUniqueId;
+    inline std::optional<std::string> getAssociatedDisplayUniqueIdByPort() const {
+        return mAssociatedDisplayUniqueIdByPort;
+    }
+    inline std::optional<std::string> getAssociatedDisplayUniqueIdByDescriptor() const {
+        return mAssociatedDisplayUniqueIdByDescriptor;
     }
     inline std::optional<std::string> getDeviceTypeAssociation() const {
         return mAssociatedDeviceType;
     }
-    inline std::optional<DisplayViewport> getAssociatedViewport() const {
+    inline virtual std::optional<DisplayViewport> getAssociatedViewport() const {
         return mAssociatedViewport;
     }
     inline bool hasMic() const { return mHasMic; }
 
     inline bool isIgnored() { return !getMapperCount() && !mController; }
 
+    inline virtual KeyboardType getKeyboardType() const { return mKeyboardType; }
+
+    inline std::filesystem::path getSysfsRootPath() const { return mSysfsRootPath; }
+
     bool isEnabled();
 
     void dump(std::string& dump, const std::string& eventHubDevStr);
-    void addEmptyEventHubDevice(int32_t eventHubId);
+    void addEmptyEventHubDevice(RawDeviceId eventHubId);
     [[nodiscard]] std::list<NotifyArgs> addEventHubDevice(
-            nsecs_t when, int32_t eventHubId, const InputReaderConfiguration& readerConfig);
-    void removeEventHubDevice(int32_t eventHubId);
+            nsecs_t when, RawDeviceId eventHubId, const InputReaderConfiguration& readerConfig);
+    void removeEventHubDevice(RawDeviceId eventHubId);
     [[nodiscard]] std::list<NotifyArgs> configure(nsecs_t when,
                                                   const InputReaderConfiguration& readerConfig,
                                                   ConfigurationChanges changes);
@@ -117,26 +134,28 @@ public:
     std::optional<int32_t> getLightPlayerId(int32_t lightId);
 
     int32_t getMetaState();
-    void updateMetaState(int32_t keyCode);
+    void setKeyboardType(KeyboardType keyboardType);
 
-    void addKeyRemapping(int32_t fromKeyCode, int32_t toKeyCode);
-
-    void bumpGeneration();
+    virtual void bumpGeneration();
 
     [[nodiscard]] NotifyDeviceResetArgs notifyReset(nsecs_t when);
 
-    inline const PropertyMap& getConfiguration() { return mConfiguration; }
+    inline virtual const PropertyMap& getConfiguration() const { return mConfiguration; }
     inline EventHubInterface* getEventHub() { return mContext->getEventHub(); }
 
-    std::optional<int32_t> getAssociatedDisplayId();
+    std::optional<ui::LogicalDisplayId> getAssociatedDisplayId();
 
     void updateLedState(bool reset);
 
     size_t getMapperCount();
 
+    std::optional<HardwareProperties> getTouchpadHardwareProperties();
+
+    bool setKernelWakeEnabled(bool enabled);
+
     // construct and add a mapper to the input device
     template <class T, typename... Args>
-    T& addMapper(int32_t eventHubId, Args... args) {
+    T& addMapper(RawDeviceId eventHubId, Args... args) {
         // ensure a device entry exists for this eventHubId
         addEmptyEventHubDevice(eventHubId);
 
@@ -150,7 +169,7 @@ public:
     }
 
     template <class T, typename... Args>
-    T& constructAndAddMapper(int32_t eventHubId, Args... args) {
+    T& constructAndAddMapper(RawDeviceId eventHubId, Args... args) {
         // create mapper
         auto& devicePair = mDevices[eventHubId];
         auto& deviceContext = devicePair.first;
@@ -161,7 +180,7 @@ public:
 
     // construct and add a controller to the input device
     template <class T>
-    T& addController(int32_t eventHubId) {
+    T& addController(RawDeviceId eventHubId) {
         // ensure a device entry exists for this eventHubId
         addEmptyEventHubDevice(eventHubId);
 
@@ -175,7 +194,7 @@ public:
 
 private:
     InputReaderContext* mContext;
-    int32_t mId;
+    DeviceId mId;
     int32_t mGeneration;
     int32_t mControllerNumber;
     InputDeviceIdentifier mIdentifier;
@@ -186,20 +205,24 @@ private:
     using MapperVector = std::vector<std::unique_ptr<InputMapper>>;
     using DevicePair = std::pair<std::unique_ptr<InputDeviceContext>, MapperVector>;
     // Map from EventHub ID to pair of device context and vector of mapper.
-    std::unordered_map<int32_t, DevicePair> mDevices;
+    std::unordered_map<RawDeviceId, DevicePair> mDevices;
     // Misc devices controller for lights, battery, etc.
     std::unique_ptr<PeripheralControllerInterface> mController;
 
     uint32_t mSources;
     bool mIsWaking;
     bool mIsExternal;
+    bool mIsVirtualDevice;
+    KeyboardType mKeyboardType = KeyboardType::NONE;
     std::optional<uint8_t> mAssociatedDisplayPort;
-    std::optional<std::string> mAssociatedDisplayUniqueId;
+    std::optional<std::string> mAssociatedDisplayUniqueIdByPort;
+    std::optional<std::string> mAssociatedDisplayUniqueIdByDescriptor;
     std::optional<std::string> mAssociatedDeviceType;
     std::optional<DisplayViewport> mAssociatedViewport;
     bool mHasMic;
     bool mDropUntilNextSync;
     std::optional<bool> mShouldSmoothScroll;
+    std::filesystem::path mSysfsRootPath;
 
     typedef int32_t (InputMapper::*GetStateFunc)(uint32_t sourceMask, int32_t code);
     int32_t getState(uint32_t sourceMask, int32_t code, GetStateFunc getStateFunc);
@@ -233,7 +256,7 @@ private:
     }
 
     // run a function against every mapper on a specific subdevice
-    inline void for_each_mapper_in_subdevice(int32_t eventHubDevice,
+    inline void for_each_mapper_in_subdevice(RawDeviceId eventHubDevice,
                                              std::function<void(InputMapper&)> f) {
         auto deviceIt = mDevices.find(eventHubDevice);
         if (deviceIt != mDevices.end()) {
@@ -280,35 +303,34 @@ private:
  */
 class InputDeviceContext {
 public:
-    InputDeviceContext(InputDevice& device, int32_t eventHubId);
+    InputDeviceContext(InputDevice& device, RawDeviceId eventHubId);
     virtual ~InputDeviceContext();
 
     inline InputReaderContext* getContext() { return mContext; }
-    inline int32_t getId() { return mDeviceId; }
-    inline int32_t getEventHubId() { return mId; }
+    inline DeviceId getId() { return mDeviceId; }
+    inline RawDeviceId getEventHubId() { return mId; }
 
     inline ftl::Flags<InputDeviceClass> getDeviceClasses() const {
         return mEventHub->getDeviceClasses(mId);
     }
+    inline uint32_t getDeviceSources() const { return mDevice.getSources(); }
     inline InputDeviceIdentifier getDeviceIdentifier() const {
         return mEventHub->getDeviceIdentifier(mId);
     }
     inline int32_t getDeviceControllerNumber() const {
         return mEventHub->getDeviceControllerNumber(mId);
     }
-    inline status_t getAbsoluteAxisInfo(int32_t code, RawAbsoluteAxisInfo* axisInfo) const {
-        if (const auto status = mEventHub->getAbsoluteAxisInfo(mId, code, axisInfo); status != OK) {
-            return status;
-        }
+    inline std::optional<RawAbsoluteAxisInfo> getAbsoluteAxisInfo(int32_t code) const {
+        std::optional<RawAbsoluteAxisInfo> info = mEventHub->getAbsoluteAxisInfo(mId, code);
 
         // Validate axis info for InputDevice.
-        if (axisInfo->valid && axisInfo->minValue == axisInfo->maxValue) {
+        if (info && info->minValue == info->maxValue) {
             // Historically, we deem axes with the same min and max values as invalid to avoid
             // dividing by zero when scaling by max - min.
             // TODO(b/291772515): Perform axis info validation on a per-axis basis when it is used.
-            axisInfo->valid = false;
+            return std::nullopt;
         }
-        return OK;
+        return info;
     }
     inline bool hasRelativeAxis(int32_t code) const {
         return mEventHub->hasRelativeAxis(mId, code);
@@ -319,8 +341,8 @@ public:
 
     inline bool hasMscEvent(int mscEvent) const { return mEventHub->hasMscEvent(mId, mscEvent); }
 
-    inline void addKeyRemapping(int32_t fromKeyCode, int32_t toKeyCode) const {
-        mEventHub->addKeyRemapping(mId, fromKeyCode, toKeyCode);
+    inline void setKeyRemapping(const std::map<int32_t, int32_t>& keyRemapping) const {
+        mEventHub->setKeyRemapping(mId, keyRemapping);
     }
 
     inline status_t mapKey(int32_t scanCode, int32_t usageCode, int32_t metaState,
@@ -370,8 +392,8 @@ public:
         return mEventHub->getKeyCodeForKeyLocation(mId, locationKeyCode);
     }
     inline int32_t getSwitchState(int32_t sw) const { return mEventHub->getSwitchState(mId, sw); }
-    inline status_t getAbsoluteAxisValue(int32_t code, int32_t* outValue) const {
-        return mEventHub->getAbsoluteAxisValue(mId, code, outValue);
+    inline std::optional<int32_t> getAbsoluteAxisValue(int32_t code) const {
+        return mEventHub->getAbsoluteAxisValue(mId, code);
     }
     inline base::Result<std::vector<int32_t>> getMtSlotValues(int32_t axis,
                                                               size_t slotCount) const {
@@ -423,20 +445,13 @@ public:
     }
 
     inline bool hasAbsoluteAxis(int32_t code) const {
-        RawAbsoluteAxisInfo info;
-        mEventHub->getAbsoluteAxisInfo(mId, code, &info);
-        return info.valid;
+        return mEventHub->getAbsoluteAxisInfo(mId, code).has_value();
     }
     inline bool isKeyPressed(int32_t scanCode) const {
         return mEventHub->getScanCodeState(mId, scanCode) == AKEY_STATE_DOWN;
     }
     inline bool isKeyCodePressed(int32_t keyCode) const {
         return mEventHub->getKeyCodeState(mId, keyCode) == AKEY_STATE_DOWN;
-    }
-    inline int32_t getAbsoluteAxisValue(int32_t code) const {
-        int32_t value;
-        mEventHub->getAbsoluteAxisValue(mId, code, &value);
-        return value;
     }
     inline bool isDeviceEnabled() { return mEventHub->isDeviceEnabled(mId); }
     inline status_t enableDevice() { return mEventHub->enableDevice(mId); }
@@ -446,11 +461,15 @@ public:
     inline const std::string getDescriptor() { return mDevice.getDescriptor(); }
     inline const std::string getLocation() { return mDevice.getLocation(); }
     inline bool isExternal() const { return mDevice.isExternal(); }
+    inline bool isVirtualDevice() const { return mDevice.isVirtualDevice(); }
     inline std::optional<uint8_t> getAssociatedDisplayPort() const {
         return mDevice.getAssociatedDisplayPort();
     }
-    inline std::optional<std::string> getAssociatedDisplayUniqueId() const {
-        return mDevice.getAssociatedDisplayUniqueId();
+    inline std::optional<std::string> getAssociatedDisplayUniqueIdByPort() const {
+        return mDevice.getAssociatedDisplayUniqueIdByPort();
+    }
+    inline std::optional<std::string> getAssociatedDisplayUniqueIdByDescriptor() const {
+        return mDevice.getAssociatedDisplayUniqueIdByDescriptor();
     }
     inline std::optional<std::string> getDeviceTypeAssociation() const {
         return mDevice.getDeviceTypeAssociation();
@@ -463,13 +482,23 @@ public:
     }
     inline void bumpGeneration() { mDevice.bumpGeneration(); }
     inline const PropertyMap& getConfiguration() const { return mDevice.getConfiguration(); }
+    inline KeyboardType getKeyboardType() const { return mDevice.getKeyboardType(); }
+    inline void setKeyboardType(KeyboardType keyboardType) {
+        return mDevice.setKeyboardType(keyboardType);
+    }
+    inline std::filesystem::path getSysfsRootPath() const {
+        return mEventHub->getSysfsRootPath(mId);
+    }
+    inline bool setKernelWakeEnabled(bool enabled) {
+        return mEventHub->setKernelWakeEnabled(mId, enabled);
+    }
 
 private:
     InputDevice& mDevice;
     InputReaderContext* mContext;
     EventHubInterface* mEventHub;
-    int32_t mId;
-    int32_t mDeviceId;
+    RawDeviceId mId;
+    DeviceId mDeviceId;
 };
 
 } // namespace android

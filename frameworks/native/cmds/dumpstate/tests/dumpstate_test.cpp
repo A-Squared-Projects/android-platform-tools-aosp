@@ -239,7 +239,7 @@ TEST_F(DumpOptionsTest, InitializeAdbShellBugreport) {
 }
 
 TEST_F(DumpOptionsTest, InitializeFullBugReport) {
-    options_.Initialize(Dumpstate::BugreportMode::BUGREPORT_FULL, 0, fd, fd, true);
+    options_.Initialize(Dumpstate::BugreportMode::BUGREPORT_FULL, 0, fd, fd, true, false);
     EXPECT_TRUE(options_.do_screenshot);
 
     // Other options retain default values
@@ -253,7 +253,7 @@ TEST_F(DumpOptionsTest, InitializeFullBugReport) {
 }
 
 TEST_F(DumpOptionsTest, InitializeInteractiveBugReport) {
-    options_.Initialize(Dumpstate::BugreportMode::BUGREPORT_INTERACTIVE, 0, fd, fd, true);
+    options_.Initialize(Dumpstate::BugreportMode::BUGREPORT_INTERACTIVE, 0, fd, fd, true, false);
     EXPECT_TRUE(options_.do_progress_updates);
     EXPECT_TRUE(options_.do_screenshot);
 
@@ -267,7 +267,7 @@ TEST_F(DumpOptionsTest, InitializeInteractiveBugReport) {
 }
 
 TEST_F(DumpOptionsTest, InitializeRemoteBugReport) {
-    options_.Initialize(Dumpstate::BugreportMode::BUGREPORT_REMOTE, 0, fd, fd, false);
+    options_.Initialize(Dumpstate::BugreportMode::BUGREPORT_REMOTE, 0, fd, fd, false, false);
     EXPECT_TRUE(options_.is_remote_mode);
     EXPECT_FALSE(options_.do_vibrate);
     EXPECT_FALSE(options_.do_screenshot);
@@ -281,7 +281,7 @@ TEST_F(DumpOptionsTest, InitializeRemoteBugReport) {
 }
 
 TEST_F(DumpOptionsTest, InitializeWearBugReport) {
-    options_.Initialize(Dumpstate::BugreportMode::BUGREPORT_WEAR, 0, fd, fd, true);
+    options_.Initialize(Dumpstate::BugreportMode::BUGREPORT_WEAR, 0, fd, fd, true, false);
     EXPECT_TRUE(options_.do_screenshot);
     EXPECT_TRUE(options_.do_progress_updates);
 
@@ -296,7 +296,7 @@ TEST_F(DumpOptionsTest, InitializeWearBugReport) {
 }
 
 TEST_F(DumpOptionsTest, InitializeTelephonyBugReport) {
-    options_.Initialize(Dumpstate::BugreportMode::BUGREPORT_TELEPHONY, 0, fd, fd, false);
+    options_.Initialize(Dumpstate::BugreportMode::BUGREPORT_TELEPHONY, 0, fd, fd, false, false);
     EXPECT_FALSE(options_.do_screenshot);
     EXPECT_TRUE(options_.telephony_only);
     EXPECT_TRUE(options_.do_progress_updates);
@@ -311,7 +311,7 @@ TEST_F(DumpOptionsTest, InitializeTelephonyBugReport) {
 }
 
 TEST_F(DumpOptionsTest, InitializeWifiBugReport) {
-    options_.Initialize(Dumpstate::BugreportMode::BUGREPORT_WIFI, 0, fd, fd, false);
+    options_.Initialize(Dumpstate::BugreportMode::BUGREPORT_WIFI, 0, fd, fd, false, false);
     EXPECT_FALSE(options_.do_screenshot);
     EXPECT_TRUE(options_.wifi_only);
 
@@ -491,12 +491,12 @@ TEST_F(DumpOptionsTest, InitializeBugreportFlags) {
     int flags = Dumpstate::BugreportFlag::BUGREPORT_USE_PREDUMPED_UI_DATA |
                 Dumpstate::BugreportFlag::BUGREPORT_FLAG_DEFER_CONSENT;
     options_.Initialize(
-      Dumpstate::BugreportMode::BUGREPORT_FULL, flags, fd, fd, true);
+      Dumpstate::BugreportMode::BUGREPORT_FULL, flags, fd, fd, true, false);
     EXPECT_TRUE(options_.is_consent_deferred);
     EXPECT_TRUE(options_.use_predumped_ui_data);
 
     options_.Initialize(
-      Dumpstate::BugreportMode::BUGREPORT_FULL, 0, fd, fd, true);
+      Dumpstate::BugreportMode::BUGREPORT_FULL, 0, fd, fd, true, false);
     EXPECT_FALSE(options_.is_consent_deferred);
     EXPECT_FALSE(options_.use_predumped_ui_data);
 }
@@ -1001,14 +1001,7 @@ TEST_F(DumpstateTest, DumpPool_withParallelRunDisabled_isNull) {
 TEST_F(DumpstateTest, PreDumpUiData) {
     // These traces are always enabled, i.e. they are always pre-dumped
     std::vector<std::filesystem::path> uiTraces;
-    if (!android_tracing_perfetto_transition_tracing()) {
-        uiTraces.push_back(
-            std::filesystem::path{"/data/misc/wmtrace/wm_transition_trace.winscope"});
-        uiTraces.push_back(
-            std::filesystem::path{"/data/misc/wmtrace/shell_transition_trace.winscope"});
-    }
-
-    for (const auto traceFile : uiTraces) {
+    for (const auto& traceFile : uiTraces) {
         std::system(("rm -f " + traceFile.string()).c_str());
         EXPECT_FALSE(std::filesystem::exists(traceFile)) << traceFile << " was not deleted.";
 
@@ -1080,6 +1073,78 @@ TEST_F(ZippedBugReportStreamTest, DISABLED_StreamLimitedOnlyReport) {
     EXPECT_THAT(bugreport_txt_name,
                 testing::ContainsRegex("(bugreport-.+(-[[:digit:]]+){6}\\.txt)"));
     VerifyEntry(handle_, bugreport_txt_name, &entry);
+}
+
+TEST_F(ZippedBugReportStreamTest, ScreenShotFileCreated) {
+    std::string out_path = kTestDataPath + "ScreenShotCapturedOut.zip";
+    android::base::unique_fd out_fd;
+    CreateFd(out_path, &out_fd);
+    ds_.options_->limited_only = true;
+    ds_.options_->stream_to_socket = true;
+    ds_.options_->do_screenshot = false;
+    ds_.options_->is_consent_deferred = true;
+    RedirectOutputToFd(out_fd);
+
+    GenerateBugreport();
+
+    std::string screenshot = ds_.GetPath(ds_.CalledByApi() ? "-png.tmp" : ".png");
+    EXPECT_TRUE(std::filesystem::exists(screenshot)) << screenshot << " was not created.";
+    android::base::RemoveFileIfExists(screenshot);
+}
+
+TEST_F(ZippedBugReportStreamTest, ScreenShotFileIsNotCreated) {
+    std::string out_path = kTestDataPath + "ScreenShotCapturedOut.zip";
+    android::base::unique_fd out_fd;
+    CreateFd(out_path, &out_fd);
+    ds_.options_->limited_only = true;
+    ds_.options_->stream_to_socket = true;
+    ds_.options_->do_screenshot = false;
+    ds_.options_->is_consent_deferred = false;
+    RedirectOutputToFd(out_fd);
+
+    GenerateBugreport();
+
+    std::string screenshot = ds_.GetPath(ds_.CalledByApi() ? "-png.tmp" : ".png");
+    EXPECT_FALSE(std::filesystem::exists(screenshot)) << screenshot << " was created.";
+}
+
+TEST_F(ZippedBugReportStreamTest, ScreenShotZipFileCreated) {
+    std::string out_path = kTestDataPath + "ScreenShotCapturedOut.zip";
+    android::base::unique_fd out_fd;
+    CreateFd(out_path, &out_fd);
+    ds_.options_->limited_only = true;
+    ds_.options_->stream_to_socket = true;
+    ds_.options_->do_screenshot = false;
+    ds_.options_->multi_display_screenshot = true;
+    RedirectOutputToFd(out_fd);
+
+    GenerateBugreport();
+
+    std::string screenshot = ds_.GetPath(ds_.CalledByApi() ? "-screenshots-zip.tmp" : ".zip");
+    EXPECT_TRUE(std::filesystem::exists(screenshot)) << screenshot << " was not created.";
+    android::base::RemoveFileIfExists(screenshot);
+}
+
+TEST_F(ZippedBugReportStreamTest, ScreenShotsAreIncludedInScreenShotZipFile) {
+    std::string out_path = kTestDataPath + "ScreenShotCapturedOut.zip";
+    android::base::unique_fd out_fd;
+    CreateFd(out_path, &out_fd);
+    ds_.options_->limited_only = true;
+    ds_.options_->stream_to_socket = true;
+    ds_.options_->do_screenshot = false;
+    ds_.options_->multi_display_screenshot = true;
+    RedirectOutputToFd(out_fd);
+
+    GenerateBugreport();
+    std::string screenshot_path = ds_.GetPath(ds_.CalledByApi() ? "-screenshots-zip.tmp" : ".zip");
+    OpenArchive(screenshot_path.c_str(), &handle_);
+
+    ZipEntry entry;
+    for (auto& [_, path] : ds_.screenshot_path_by_display_id_) {
+        std::filesystem::path p(path);
+        VerifyEntry(handle_, p.filename().string(), &entry);
+    }
+    android::base::RemoveFileIfExists(screenshot_path);
 }
 
 class ProgressTest : public DumpstateBaseTest {

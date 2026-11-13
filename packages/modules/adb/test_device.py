@@ -36,7 +36,7 @@ import threading
 import time
 import unittest
 
-import proto.adb_host_pb2 as adb_host_proto
+import adb_host_pb2 as adb_host_proto
 
 from datetime import datetime
 
@@ -1192,8 +1192,8 @@ class FileOperationsTest:
                 dev_md5, _ = device.shell(['md5sum', device_full_path])[0].split()
                 self.assertEqual(temp_file.checksum, dev_md5)
 
-        def test_sync(self):
-            """Sync a host directory to the data partition."""
+        def do_test_sync(self, partition):
+            """Sync a host directory to the given partition."""
 
             try:
                 base_dir = tempfile.mkdtemp()
@@ -1212,7 +1212,7 @@ class FileOperationsTest:
 
                 old_product_out = os.environ.get('ANDROID_PRODUCT_OUT')
                 os.environ['ANDROID_PRODUCT_OUT'] = base_dir
-                device.sync('data')
+                device.sync(partition)
                 if old_product_out is None:
                     del os.environ['ANDROID_PRODUCT_OUT']
                 else:
@@ -1224,6 +1224,16 @@ class FileOperationsTest:
             finally:
                 if base_dir is not None:
                     shutil.rmtree(base_dir)
+
+        def test_sync_data(self):
+            """Sync a host directory to the data partition."""
+
+            self.do_test_sync('data')
+
+        def test_sync_slash_data(self):
+            """Sync a host directory to the data partition with a leading slash."""
+
+            self.do_test_sync('/data')
 
         def test_push_sync(self):
             """Sync a host directory to a specific path."""
@@ -1839,20 +1849,44 @@ class DevicesListing(DeviceTest):
             self.assertFalse(device.model == "")
             self.assertFalse(device.device == "")
             self.assertTrue(device.negotiated_speed == int(device.negotiated_speed))
+            self.assertTrue(int(device.negotiated_speed) != 0)
             self.assertTrue(device.max_speed == int(device.max_speed))
+            self.assertTrue(int(device.max_speed) != 0)
             self.assertTrue(device.transport_id == int(device.transport_id))
 
             proc.terminate()
 
+class MdnsTracking(DeviceTest):
+    def test_track_mdns_proto_binary(self):
+        with subprocess.Popen(['adb', 'mdns' ,'track-services', '--proto-binary'], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as proc:
+            output_size = int(proc.stdout.read(4).decode("utf-8"), 16)
+            self.assertTrue(output_size == 0)
+            #TODO Use a mdns client to publish fake services and detect them here
+            proc.kill()
+
+    def test_track_mdns_proto_text(self):
+        with subprocess.Popen(['adb', 'mdns' ,'track-services', '--proto-text'], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as proc:
+            with io.TextIOWrapper(proc.stdout, encoding='utf8') as reader:
+               out = reader.read(9)
+               #TODO Use a mdns client to publish fake services and detect them here
+               self.assertTrue("Services" in out)
+               proc.kill()
+
+def invoke(*args):
+    print(args)
+    try:
+        output = subprocess.check_output(args, stderr=subprocess.STDOUT).strip().decode("utf-8")
+        print(output)
+        return output
+    except subprocess.CalledProcessError as e:
+        return "ErrorCode " + str(e.returncode) + ":" + e.output.decode("utf-8")
+
+
 class DevicesListing(DeviceTest):
 
-    serial = subprocess.check_output(['adb', 'get-serialno']).strip().decode("utf-8")
-
     def test_track_app_appinfo(self):
-        return # Disabled until b/301491148 is fixed.
-        # (Exported FeatureFlags cannot be read-only)
-        subprocess.check_output(['adb', 'install', '-t', 'adb1.apk']).strip().decode("utf-8")
-        subprocess.check_output(['adb', 'install', '-t', 'adb2.apk']).strip().decode("utf-8")
+        subprocess.check_output(['adb', 'install', '-r', '-t', 'adb_test_app1.apk']).strip().decode("utf-8")
+        subprocess.check_output(['adb', 'install', '-r', '-t', 'adb_test_app2.apk']).strip().decode("utf-8")
         subprocess.check_output(['adb', 'shell', 'am', 'start', '-W', 'adb.test.app1/.MainActivity']).strip().decode("utf-8")
         subprocess.check_output(['adb', 'shell', 'am', 'start', '-W', 'adb.test.app2/.MainActivity']).strip().decode("utf-8")
         subprocess.check_output(['adb', 'shell', 'am', 'start', '-W', 'adb.test.app1/.OwnProcessActivity']).strip().decode("utf-8")
@@ -1891,6 +1925,223 @@ class ServerStatus(unittest.TestCase):
             self.assertTrue("build" in lines[3])
             self.assertTrue("executable_absolute_path" in lines[4])
             self.assertTrue("log_absolute_path" in lines[5])
+            self.assertTrue("os" in lines[6])
+            self.assertTrue("trace_level" in lines[7])
+            self.assertTrue("burst_mode" in lines[8])
+
+
+class DetachSingleServer(unittest.TestCase):
+    serial = invoke("adb", "get-serialno")
+
+    def wait_for_device(self):
+        count = 0
+        while True:
+            devices = invoke("adb", "devices")
+            if (self.serial in devices and "attached" in devices):
+                return
+            count = count + 1
+            if count > 10:
+                return
+
+    def test_detach_then_attach(self):
+        # Check device is there with comm working
+        who = invoke("adb", "shell", "whoami")
+        self.assertTrue(who == "shell" or who == "root")
+        devices = invoke("adb", "devices")
+        self.assertFalse("detached" in devices, devices)
+        self.assertTrue(self.serial in devices, devices)
+
+        invoke("adb", "detach")
+
+        # Verify detach did not remove the device from list
+        devices = invoke("adb", "devices")
+        self.assertTrue(self.serial in devices, devices)
+        self.assertTrue("detached" in devices, devices)
+
+        # Verify detach makes device unreachable
+        who = invoke("adb", "shell", "whoami")
+        self.assertFalse(who == "shell" or who == "root", who)
+
+        # Re-attach
+        invoke("adb", "attach")
+        time.sleep(2)
+        self.wait_for_device()
+
+        # Check devices is there
+        devices = invoke("adb", "devices")
+        self.assertTrue(self.serial in devices, devices)
+        self.assertFalse("detached" in devices, devices)
+
+        # Check device comm was started
+        who = invoke("adb", "shell", "whoami")
+        self.assertTrue(who == "shell" or who == "root", who)
+
+    def tearDown(self):
+        invoke("adb", "kill-server")
+
+class DetachMultiServer(unittest.TestCase):
+    server1_port = "5038"
+    server2_port = "5039"
+    env_var_detached = "ADB_LIBUSB_START_DETACHED"
+    serial = invoke("adb", "get-serialno")
+
+    def wait_for_device(self, server_id):
+        count = 0
+        while True:
+            devices = invoke("adb", "-P", server_id, "devices")
+            if (self.serial in devices and "attached" in devices):
+                return
+            count = count + 1
+            if count > 10:
+                return
+
+    def test_device_exchange(self):
+       # Enable once we support invoke with env variable
+       return
+       # Start two "detached" servers with ADB_LIBUSB_START_DETACHED
+       # Attach device to server 1, test it.
+       # Detach device from server 1.
+       # Attach device to server 2. test it.
+
+       # Make sure everything is clean
+       invoke("adb", "-P", self.server1_port, "start-server")
+       invoke("adb", "-P", self.server2_port, "start-server")
+
+       # Make sure server1 sees device as detached
+       devices1= invoke("adb", "-P", self.server1_port, "devices")
+       self.assertTrue("detached" in devices1)
+       self.assertTrue(self.serial in devices1)
+
+       # Make sure server2 sees device as detached
+       devices2= invoke("adb", "-P", self.server2_port, "devices")
+       self.assertTrue("detached" in devices2)
+       self.assertTrue(self.serial in devices2)
+
+       # Attach device to server 1. Verify.
+       invoke("adb", "-P", self.server1_port, "attach")
+       time.sleep(4)
+       self.wait_for_device(self.server1_port)
+
+       devices1= invoke("adb", "-P", self.server1_port, "devices")
+       self.assertFalse("detached" in devices1)
+       self.assertTrue(self.serial in devices1)
+
+       # Make sure server 1 can comm with device
+       who = invoke("adb", "-P", self.server1_port, "shell", "whoami")
+       self.assertTrue(who == "shell" or who == "root")
+
+       # Now detach and make sure device cannot comm
+       invoke("adb", "-P", self.server1_port, "detach")
+       who = invoke("adb", "-P", self.server1_port, "shell", "whoami")
+       self.assertFalse(who == "shell" or who == "root")
+       devices1= invoke("adb", "-P", self.server1_port, "devices")
+       self.assertTrue("detached" in devices1)
+       self.assertTrue(self.serial in devices1)
+
+       # Give device to server2
+       invoke("adb", "-P", self.server2_port, "attach")
+       time.sleep(2)
+       self.wait_for_device(self.server2_port)
+       devices2= invoke("adb", "-P", self.server2_port, "devices")
+       self.assertFalse("detached" in devices2)
+       self.assertTrue(self.serial in devices2)
+
+       # Test that sever2 can comm with device
+       who = invoke("adb", "-P", self.server2_port, "shell", "whoami")
+       self.assertTrue(who == "shell" or who == "root")
+
+       # Detach device from server2. Verify.
+       invoke("adb", "-P", self.server2_port, "detach")
+       devices2= invoke("adb", "-P", self.server2_port, "devices")
+       self.assertTrue("detached" in devices2)
+       self.assertTrue(self.serial in devices2)
+
+       # Verify server2 cannot comm with device
+       who = invoke("adb", "-P", self.server2_port, "shell", "whoami")
+       self.assertFalse(who == "shell" or who == "root")
+
+    def setUp(self):
+       os.environ[self.env_var_detached] = "1"
+       invoke("adb", "kill-server")
+
+    def tearDown(self):
+       invoke("adb", "-P", self.server1_port, "kill-server")
+       invoke("adb", "-P", self.server2_port, "kill-server")
+       del os.environ[self.env_var_detached]
+
+class OneDevice(unittest.TestCase):
+
+    serial = invoke("adb", "get-serialno")
+    owner_server_port = "14424"
+
+    def test_one_device(self):
+        invoke("adb", "kill-server")
+        invoke("adb", "--one-device", self.serial, "-P", self.owner_server_port, "start-server")
+        devices = invoke("adb", "devices")
+        owned_devices = invoke("adb",  "-P", "14424", "devices")
+        self.assertTrue(self.serial in owned_devices)
+        self.assertFalse(self.serial in devices)
+
+    def tearDown(self):
+        invoke("adb",  "-P", self.owner_server_port, "kill-server")
+        invoke("adb",  "kill-server")
+
+class Debugger(unittest.TestCase):
+
+    PKG_NAME = "adb.test.app1"
+    PROCESS_NAME = "adb.test.process.name"
+    APP_PORT = "8000"
+    HANDSHAKE = "JDWP-Handshake"
+
+    def test_denied_debugger_on_frozen_app(self):
+        # TODO: Enable once we have a test runner that allows to debug tests.
+        # -> JAVA
+
+        # Install app
+        apk = self.PKG_NAME.replace(".", "_") + ".apk"
+        invoke('adb', 'install', '-r', '-t', apk)
+
+        # Start app
+        target = self.PKG_NAME + '/.MainActivity'
+        invoke('adb', 'shell', 'am', 'start', '-W', target)
+
+        # Assert that debugger is allowed
+        pid = invoke("adb", "shell", "pidof", self.PROCESS_NAME)
+        self.assertTrue(pid.isdigit(), pid)
+        invoke("adb", "forward", "tcp:" + self.APP_PORT, "jdwp:" + pid)
+        # Connect to debugger
+        sock = socket.socket()
+        sock.connect(("localhost", int(self.APP_PORT)))
+        sock.send(self.HANDSHAKE.encode('utf-8'))
+        resp = sock.recv(len(self.HANDSHAKE))
+        self.assertTrue(resp.decode("utf-8") == self.HANDSHAKE)
+        sock.close()
+
+        # Freeze app (adb shell am freeze <APK_NAME>)
+        invoke("adb", "shell", "am", "freeze", self.PROCESS_NAME)
+
+        # Asset that debugger is denied
+        connection_refused = False
+        try:
+            sock = socket.socket()
+            sock.connect(("localhost", int(self.APP_PORT)))
+        except socket.error as e:
+            connection_refused = True
+        self.assertTrue(connection_refused, connection_refused)
+
+        # Unfreeze app (adb shell am unfreeze <APK_NAME>)
+        invoke("adb", "shell", "am", "unfreeze", self.PROCESS_NAME)
+
+        # Assert that debugger is allowed
+        sock = socket.socket()
+        sock.connect(("localhost", int(self.APP_PORT)))
+        sock.send(self.HANDSHAKE.encode("utf-8"))
+        resp = sock.recv(len(self.HANDSHAKE)).decode("utf-8")
+        self.assertTrue(resp == self.HANDSHAKE, resp)
+        sock.close()
+
+    def tearDown(self):
+        invoke("adb", "forward", "--remove-all")
 
 if __name__ == '__main__':
     random.seed(0)

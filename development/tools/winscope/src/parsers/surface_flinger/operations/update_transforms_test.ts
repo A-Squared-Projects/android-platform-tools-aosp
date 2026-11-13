@@ -14,17 +14,21 @@
  * limitations under the License.
  */
 
-import {assertDefined} from 'common/assert_utils';
+import {assertDefined} from 'common/assert';
+import {TransformTypeFlags} from 'common/geometry/transform';
 import {PropertyTreeBuilder} from 'test/unit/property_tree_builder';
-import {TreeNodeUtils} from 'test/unit/tree_node_utils';
-import {PropertyTreeNode} from 'trace/tree_node/property_tree_node';
+import {
+  makeCalculatedPropertyNode,
+  makePropertyNode,
+} from 'test/unit/tree_node_test_helpers';
+import {PropertyTreeNode} from 'tree_node/property_tree_node';
 import {UpdateTransforms} from './update_transforms';
 
 describe('UpdateTransforms', () => {
   let propertyRoot: PropertyTreeNode;
   let operation: UpdateTransforms;
-  let protoTransform: any;
-  let protoPosition: any;
+  let deprecatedProtoTransform: object;
+  let protoPosition: object;
 
   beforeEach(() => {
     operation = new UpdateTransforms();
@@ -33,32 +37,25 @@ describe('UpdateTransforms', () => {
       .setName('node')
       .setIsRoot(true)
       .build();
-    protoTransform = {
-      dsdx: 0,
-      dtdx: 0,
-      dsdy: 0,
-      dtdy: 0,
-      type: 0,
+    deprecatedProtoTransform = {
+      dsdx: 1,
+      dtdx: 2,
+      dtdy: 3,
+      dsdy: 4,
+      type: TransformTypeFlags.ROT_INVALID_VAL,
     };
     protoPosition = {
       x: 0,
       y: 0,
     };
   });
+
   it('adds matrix to transform', () => {
     propertyRoot.addOrReplaceChild(
-      TreeNodeUtils.makePropertyNode(
-        propertyRoot.id,
-        'transform',
-        protoTransform,
-      ),
+      makePropertyNode(propertyRoot.id, 'transform', deprecatedProtoTransform),
     );
     propertyRoot.addOrReplaceChild(
-      TreeNodeUtils.makePropertyNode(
-        propertyRoot.id,
-        'position',
-        protoPosition,
-      ),
+      makePropertyNode(propertyRoot.id, 'position', protoPosition),
     );
 
     const expectedRoot = makeExpectedMatrixNode(propertyRoot.id, 'transform');
@@ -72,18 +69,14 @@ describe('UpdateTransforms', () => {
 
   it('adds matrix to requested transform', () => {
     propertyRoot.addOrReplaceChild(
-      TreeNodeUtils.makePropertyNode(
+      makePropertyNode(
         propertyRoot.id,
         'requestedTransform',
-        protoTransform,
+        deprecatedProtoTransform,
       ),
     );
     propertyRoot.addOrReplaceChild(
-      TreeNodeUtils.makePropertyNode(
-        propertyRoot.id,
-        'requestedPosition',
-        protoPosition,
-      ),
+      makePropertyNode(propertyRoot.id, 'requestedPosition', protoPosition),
     );
 
     const expectedRoot = makeExpectedMatrixNode(
@@ -100,10 +93,10 @@ describe('UpdateTransforms', () => {
 
   it('adds matrix to buffer transform', () => {
     propertyRoot.addOrReplaceChild(
-      TreeNodeUtils.makePropertyNode(
+      makePropertyNode(
         propertyRoot.id,
         'bufferTransform',
-        protoTransform,
+        deprecatedProtoTransform,
       ),
     );
 
@@ -120,11 +113,11 @@ describe('UpdateTransforms', () => {
   });
 
   it('adds matrix to input window info transform', () => {
-    const inputWindowInfo = TreeNodeUtils.makePropertyNode(
+    const inputWindowInfo = makePropertyNode(
       propertyRoot.id,
       'inputWindowInfo',
       {
-        transform: protoTransform,
+        transform: deprecatedProtoTransform,
       },
     );
 
@@ -149,17 +142,13 @@ describe('UpdateTransforms', () => {
     rootId: string,
     transformName: string,
   ): PropertyTreeNode {
-    return TreeNodeUtils.makeCalculatedPropertyNode(
-      `${rootId}.${transformName}`,
-      'matrix',
-      {
-        dsdx: 1,
-        dtdx: 0,
-        tx: 0,
-        dsdy: 0,
-        dtdy: 1,
-        ty: 0,
-      },
-    );
+    return makeCalculatedPropertyNode(`${rootId}.${transformName}`, 'matrix', {
+      dsdx: 1,
+      dtdx: 4,
+      tx: 0,
+      dtdy: 2,
+      dsdy: 3,
+      ty: 0,
+    });
   }
 });

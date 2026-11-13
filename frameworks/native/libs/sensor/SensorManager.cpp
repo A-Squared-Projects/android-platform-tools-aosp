@@ -38,6 +38,7 @@
 #include <sensor/SensorEventQueue.h>
 
 #include <com_android_hardware_libsensor_flags.h>
+namespace libsensor_flags = com::android::hardware::libsensor::flags;
 
 // ----------------------------------------------------------------------------
 namespace android {
@@ -72,10 +73,23 @@ int getDeviceIdForUid(uid_t uid) {
                 return deviceId;
             }
         }
-    } else {
-        ALOGW("Cannot get virtualdevice_native service");
     }
     return DEVICE_ID_DEFAULT;
+}
+
+bool findSensorNameInList(int32_t handle, const Vector<Sensor>& sensorList,
+                          std::string* outString) {
+    for (auto& sensor : sensorList) {
+        if (sensor.getHandle() == handle) {
+            std::ostringstream oss;
+            oss << sensor.getStringType() << ":" << sensor.getName();
+            if (outString) {
+                *outString = oss.str();
+            }
+            return true;
+        }
+    }
+    return false;
 }
 
 }  // namespace
@@ -194,21 +208,7 @@ void SensorManager::sensorManagerDied() {
 }
 
 status_t SensorManager::assertStateLocked() {
-#if COM_ANDROID_HARDWARE_LIBSENSOR_FLAGS(SENSORMANAGER_PING_BINDER)
     if (mSensorServer == nullptr) {
-#else
-    bool initSensorManager = false;
-    if (mSensorServer == nullptr) {
-        initSensorManager = true;
-    } else {
-        // Ping binder to check if sensorservice is alive.
-        status_t err = IInterface::asBinder(mSensorServer)->pingBinder();
-        if (err != NO_ERROR) {
-            initSensorManager = true;
-        }
-    }
-    if (initSensorManager) {
-#endif
         waitForSensorService(&mSensorServer);
         LOG_ALWAYS_FATAL_IF(mSensorServer == nullptr, "getService(SensorService) NULL");
 
@@ -355,6 +355,25 @@ Sensor const* SensorManager::getDefaultSensor(int type)
     return nullptr;
 }
 
+std::optional<std::string_view> SensorManager::getSensorNameByHandle(int32_t handle) {
+    std::lock_guard<std::mutex> lock(mSensorHandleToNameMutex);
+    auto iterator = mSensorHandleToName.find(handle);
+    if (iterator != mSensorHandleToName.end()) {
+        return iterator->second;
+    }
+
+    std::string sensorName;
+    if (!findSensorNameInList(handle, mSensors, &sensorName) &&
+        !findSensorNameInList(handle, mDynamicSensors, &sensorName)) {
+        ALOGW("Cannot find sensor with handle %d", handle);
+        return std::nullopt;
+    }
+
+    mSensorHandleToName[handle] = std::move(sensorName);
+
+    return mSensorHandleToName[handle];
+}
+
 sp<SensorEventQueue> SensorManager::createEventQueue(
     String8 packageName, int mode, String16 attributionTag) {
     sp<SensorEventQueue> queue;
@@ -368,7 +387,7 @@ sp<SensorEventQueue> SensorManager::createEventQueue(
             ALOGE("createEventQueue: connection is NULL.");
             return nullptr;
         }
-        queue = new SensorEventQueue(connection);
+        queue = new SensorEventQueue(connection, *this, packageName);
         break;
     }
     return queue;

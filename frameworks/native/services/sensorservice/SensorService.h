@@ -308,8 +308,24 @@ private:
             void addOverrideUid(uid_t uid, bool active);
             void removeOverrideUid(uid_t uid);
         private:
+            class UidStateChangeHandler : public MessageHandler {
+            public:
+                UidStateChangeHandler(wp<SensorService> service, uid_t uid, UidState uidState)
+                      : mService(service), mUid(uid), mUidState(uidState) {}
+                void handleMessage(const Message& /*message*/) override {
+                    sp<SensorService> service = mService.promote();
+                    if (service != nullptr) {
+                        service->onUidStateChanged(mUid, mUidState);
+                    }
+                }
+            private:
+                wp<SensorService> mService;
+                uid_t mUid;
+                UidState mUidState;
+            };
             bool isUidActiveLocked(uid_t uid);
             void updateOverrideUid(uid_t uid, bool active, bool insert);
+            void postUidStateChanged(uid_t uid, UidState state);
 
             Mutex mUidLock;
             wp<SensorService> mService;
@@ -340,8 +356,8 @@ private:
             binder::Status onSensorPrivacyChanged(int toggleType, int sensor,
                                                   bool enabled);
 
-            // This callback is used for additional automotive-specific states for sensor privacy
-            // such as AUTO_DRIVER_ASSISTANCE_APPS. The newly defined states will only be valid
+            // This callback is used for additional automotive-specific state for sensor privacy
+            // such as ENABLED_EXCEPT_ALLOWLISTED_APPS. The newly defined states will only be valid
             // for camera privacy on automotive devices. onSensorPrivacyChanged() will still be
             // invoked whenever the enabled status of a toggle changes.
             binder::Status onSensorPrivacyStateChanged(int, int, int) {return binder::Status::ok();}

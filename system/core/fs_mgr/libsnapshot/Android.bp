@@ -15,6 +15,7 @@
 //
 
 package {
+    default_team: "trendy_team_android_kernel",
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
 
@@ -33,13 +34,12 @@ cc_defaults {
         "liblog",
     ],
     static_libs: [
-        "libbrotli",
         "libdm",
         "libfstab",
+        "libsnapshot_flags_cc_lib",
         "update_metadata-protos",
     ],
     whole_static_libs: [
-        "libbrotli",
         "libcutils",
         "libext2_uuid",
         "libext4_utils",
@@ -80,8 +80,14 @@ cc_defaults {
 }
 
 filegroup {
+    name: "libsnapshot_capabilities_sources",
+    srcs: ["capabilities.cpp"],
+}
+
+filegroup {
     name: "libsnapshot_sources",
     srcs: [
+        ":libsnapshot_capabilities_sources",
         "android/snapshot/snapshot.proto",
         "device_info.cpp",
         "snapshot.cpp",
@@ -91,6 +97,7 @@ filegroup {
         "partition_cow_creator.cpp",
         "return.cpp",
         "utility.cpp",
+        "scratch_super.cpp",
     ],
 }
 
@@ -98,6 +105,7 @@ cc_library_headers {
     name: "libsnapshot_headers",
     recovery_available: true,
     defaults: ["libsnapshot_defaults"],
+    export_include_dirs: ["include"],
 }
 
 cc_library_static {
@@ -109,6 +117,9 @@ cc_library_static {
     srcs: [":libsnapshot_sources"],
     static_libs: [
         "libfs_mgr_binder",
+    ],
+    whole_static_libs: [
+        "libselinux",
     ],
 }
 
@@ -128,6 +139,9 @@ cc_library {
     static_libs: [
         "libsnapshot_cow",
     ],
+    whole_static_libs: [
+        "libselinux",
+    ],
 }
 
 cc_library_static {
@@ -142,6 +156,7 @@ cc_library_static {
     ],
     static_libs: [
         "libfs_mgr",
+        "libselinux",
     ],
 }
 
@@ -158,6 +173,9 @@ cc_library_static {
     ],
     static_libs: [
         "libfs_mgr",
+    ],
+    whole_static_libs: [
+        "libselinux",
     ],
 }
 
@@ -176,7 +194,6 @@ cc_defaults {
         "liblog",
     ],
     static_libs: [
-        "libbrotli",
         "libz",
         "liblz4",
         "libzstd",
@@ -241,6 +258,7 @@ cc_library_static {
         "libfs_mgr",
         "libgmock",
         "libgtest",
+        "libselinux",
     ],
 }
 
@@ -267,7 +285,6 @@ cc_defaults {
         "android.hardware.boot@1.0",
         "android.hardware.boot@1.1",
         "android.hardware.boot-V1-ndk",
-        "libbrotli",
         "libfs_mgr_binder",
         "libgflags",
         "libgsi",
@@ -283,7 +300,6 @@ cc_defaults {
     ],
     auto_gen_config: true,
     require_root: true,
-    compile_multilib: "first",
 }
 
 cc_test {
@@ -294,10 +310,17 @@ cc_test {
     ],
     test_suites: [
         "vts",
-        "device-tests",
+        "general-tests",
     ],
+    compile_multilib: "first",
     test_options: {
         min_shipping_api_level: 30,
+        test_runner_options: [
+            {
+                name: "force-no-test-error",
+                value: "false",
+            },
+        ],
     },
 }
 
@@ -311,8 +334,9 @@ cc_test {
         "-DLIBSNAPSHOT_TEST_VAB_LEGACY",
     ],
     test_suites: [
-        "device-tests",
+        "general-tests",
     ],
+    compile_multilib: "64",
     test_options: {
         // Legacy VAB launched in Android R.
         min_shipping_api_level: 30,
@@ -351,11 +375,15 @@ cc_binary {
     ],
     srcs: [
         "snapshotctl.cpp",
+        "scratch_super.cpp",
+        "android/snapshot/snapshot.proto",
     ],
     static_libs: [
-        "libbrotli",
         "libfstab",
         "libz",
+        "libavb",
+        "libfs_avb",
+        "libcrypto_static",
         "update_metadata-protos",
     ],
     shared_libs: [
@@ -368,7 +396,6 @@ cc_binary {
         "liblp",
         "libprotobuf-cpp-lite",
         "libsnapshot",
-        "libstatslog",
         "libutils",
     ],
     header_libs: [
@@ -412,7 +439,6 @@ cc_test {
         "libz",
     ],
     static_libs: [
-        "libbrotli",
         "libgtest",
         "libsnapshot_cow",
     ],
@@ -420,7 +446,7 @@ cc_test {
         "libstorage_literals_headers",
     ],
     test_suites: [
-        "device-tests",
+        "general-tests",
     ],
     test_options: {
         min_shipping_api_level: 30,
@@ -446,7 +472,6 @@ cc_binary {
     ],
     static_libs: [
         "libbase",
-        "libbrotli",
         "libcrypto_static",
         "liblog",
         "libgflags",
@@ -465,7 +490,10 @@ cc_binary {
     host_supported: true,
     device_supported: false,
 
-    srcs: ["libsnapshot_cow/create_cow.cpp"],
+    srcs: [
+        "libsnapshot_cow/create_cow.cpp",
+        "android/snapshot/snapshot.proto",
+    ],
 
     cflags: [
         "-Wall",
@@ -475,14 +503,20 @@ cc_binary {
     static_libs: [
         "liblog",
         "libbase",
+        "libfstab",
         "libext4_utils",
         "libsnapshot_cow",
         "libcrypto",
-        "libbrotli",
         "libz",
+        "libdm",
         "liblz4",
         "libzstd",
         "libgflags",
+        "libavb",
+        "libext2_uuid",
+        "libfs_avb",
+        "libcrypto",
+        "libprotobuf-cpp-lite",
     ],
     shared_libs: [
     ],

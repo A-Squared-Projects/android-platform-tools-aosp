@@ -33,6 +33,11 @@
 #include "service_list.h"
 #include "util.h"
 
+static constexpr const char* kCompressedApexSysprop = "apexd.config.compressed_apex";
+static constexpr const char* kMetadataApexDir = "/metadata/apex";
+static constexpr const char* kMetadataApexConfigMountBeforeData =
+        "/metadata/apex/config/mount_before_data";
+
 namespace android {
 namespace init {
 
@@ -101,14 +106,21 @@ std::set<std::string> GetApexListFrom(const std::string& apex_dir) {
     return apex_list;
 }
 
+static int GetCurrentSdk() {
+    bool is_preview = base::GetProperty("ro.build.version.codename", "") != "REL";
+    if (is_preview) {
+        return __ANDROID_API_FUTURE__;
+    }
+    return android::base::GetIntProperty("ro.build.version.sdk", __ANDROID_API_FUTURE__);
+}
+
 static Result<void> ParseRcScripts(const std::vector<std::string>& files) {
     if (files.empty()) {
         return {};
     }
     // APEXes can have versioned RC files. These should be filtered based on
     // SDK version.
-    int sdk = android::base::GetIntProperty("ro.build.version.sdk", INT_MAX);
-    if (sdk < 35) sdk = 35;  // aosp/main merges only into sdk=35+ (ie. __ANDROID_API_V__+)
+    static int sdk = GetCurrentSdk();
     auto filtered = FilterVersionedConfigs(files, sdk);
     if (filtered.empty()) {
         return {};
@@ -135,9 +147,9 @@ Result<void> ParseRcScriptsFromApex(const std::string& apex_name) {
     return ParseRcScripts(configs);
 }
 
-Result<void> ParseRcScriptsFromAllApexes(bool bootstrap) {
+Result<void> ParseRcScriptsFromAllApexes(bool is_default_mnt_ns) {
     std::set<std::string> skip_apexes;
-    if (!bootstrap) {
+    if (is_default_mnt_ns) {
         // In case we already loaded config files from bootstrap APEXes, we need to avoid loading
         // them again. We can get the list of bootstrap APEXes by scanning /bootstrap-apex and
         // skip them in CollectRcScriptsFromApex.
@@ -145,6 +157,25 @@ Result<void> ParseRcScriptsFromAllApexes(bool bootstrap) {
     }
     auto configs = OR_RETURN(CollectRcScriptsFromApex(/*apex_name=*/"", skip_apexes));
     return ParseRcScripts(configs);
+}
+
+bool CanMountApexBeforeData() {
+    // For the first boot after factory reset: since there's no data apexes, init can decide by
+    //     looking up "apexd.config.compressed_apex". If there's no compressed apexes, apexd should
+    //     be able to mount apexes before data.
+    //
+    // Otherwise, apexd had a chance to decide whether it can mount apexes before data partition.
+    //     Hence, init just looks up /metadata/apex/config/mount_before_data which is created by
+    //     apexd.
+
+    // Check /metadata/apex to see if this is the first boot. If it doesn't exist, this is the first
+    // boot.
+    bool first_boot = access(kMetadataApexDir, F_OK) != 0;
+    if (first_boot) {
+        return !base::GetBoolProperty(kCompressedApexSysprop, true);
+    } else {
+        return access(kMetadataApexConfigMountBeforeData, F_OK) == 0;
+    }
 }
 
 }  // namespace init

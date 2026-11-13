@@ -14,366 +14,858 @@
  * limitations under the License.
  */
 
-import {assertDefined} from 'common/assert_utils';
-import {NO_TIMEZONE_OFFSET_FACTORY} from 'common/timestamp_factory';
-import {TracePositionUpdate} from 'messaging/winscope_event';
-import {MockStorage} from 'test/unit/mock_storage';
+import {assertDefined} from 'common/assert';
+import {InMemoryStorage} from 'common/store/in_memory_storage';
+import {Store} from 'common/store/store';
+import {
+  TabbedViewSwitchRequest,
+  TracePositionUpdate,
+  PlaybackStateChangeRequest,
+  PlaybackSpeedChange,
+} from 'messaging/winscope_event';
+import {LegacyParserProvider} from 'test/unit/fixture_utils';
+import {HierarchyTreeBuilder} from 'test/unit/hierarchy_tree_builder';
 import {TraceBuilder} from 'test/unit/trace_builder';
-import {TreeNodeUtils} from 'test/unit/tree_node_utils';
-import {UnitTestUtils} from 'test/unit/utils';
-import {CustomQueryType} from 'trace/custom_query';
-import {Trace} from 'trace/trace';
-import {Traces} from 'trace/traces';
-import {TraceType} from 'trace/trace_type';
-import {HierarchyTreeNode} from 'trace/tree_node/hierarchy_tree_node';
-import {DiffType} from 'viewers/common/diff_type';
+import {makeEmptyTrace} from 'test/unit/trace_utils';
+import {makeHierarchyNode} from 'test/unit/tree_node_test_helpers';
+import {UserNotifierChecker} from 'test/unit/user_notifier_checker';
+import {EMPTY_OBJ_STRING} from 'trace/formatters';
+import {CustomQueryType} from 'trace_api/custom_query';
+import {Trace} from 'trace_api/trace';
+import {TRACE_INFO} from 'trace_api/trace_info';
+import {TraceType} from 'trace_api/trace_type';
+import {Traces} from 'trace_api/traces';
+import {HierarchyTreeNode} from 'tree_node/hierarchy_tree_node';
+import {PropertySource} from 'tree_node/property_tree_node';
+import {NotifyHierarchyViewCallbackType} from 'viewers/common/abstract_hierarchy_viewer_presenter';
+import {AbstractHierarchyViewerPresenterTest} from 'viewers/common/abstract_hierarchy_viewer_presenter_test';
+import {VISIBLE_CHIP} from 'viewers/common/chip';
+import {TextFilter} from 'viewers/common/text_filter';
+import {UiDataHierarchy} from 'viewers/common/ui_data_hierarchy';
 import {UiHierarchyTreeNode} from 'viewers/common/ui_hierarchy_tree_node';
-import {UiTreeUtils} from 'viewers/common/ui_tree_utils';
-import {UserOptions} from 'viewers/common/user_options';
+import {makeIdMatchFilter, makeNodeFilter} from 'viewers/common/ui_tree_utils';
+import {ViewerEvents} from 'viewers/common/viewer_events';
+import {TraceRectType} from 'viewers/components/rects/rect_spec';
 import {Presenter} from './presenter';
 import {UiData} from './ui_data';
+import {PlaybackPresenter} from 'viewers/common/playback/playback_presenter';
+import {PlaybackState} from 'viewers/common/playback/playback_state';
 
-describe('PresenterSurfaceFlinger', () => {
-  let trace: Trace<HierarchyTreeNode>;
-  let positionUpdate: TracePositionUpdate;
-  let positionUpdateMultiDisplayEntry: TracePositionUpdate;
-  let presenter: Presenter;
-  let uiData: UiData;
-  let selectedTree: UiHierarchyTreeNode;
+class PresenterSurfaceFlingerTest extends AbstractHierarchyViewerPresenterTest<UiData> {
+  private traceSf: Trace<HierarchyTreeNode> | undefined;
+  private positionUpdate: TracePositionUpdate | undefined;
+  private secondPositionUpdate: TracePositionUpdate | undefined;
+  private selectedTree: UiHierarchyTreeNode | undefined;
+  private selectedTreeAfterPositionUpdate: UiHierarchyTreeNode | undefined;
 
-  beforeAll(async () => {
-    trace = new TraceBuilder<HierarchyTreeNode>()
+  override readonly shouldExecuteRectTests = true;
+  override readonly shouldExecuteSimplifyNamesTest = true;
+  override readonly keepCalculatedPropertiesInChild = false;
+  override readonly keepCalculatedPropertiesInRoot = true;
+  override readonly expectedHierarchyOpts = {
+    showDiff: {
+      name: 'Show diff',
+      enabled: false,
+      isUnavailable: true,
+    },
+    showOnlyVisible: {
+      name: 'Show only',
+      chip: VISIBLE_CHIP,
+      enabled: false,
+    },
+    simplifyNames: {
+      name: 'Simplify names',
+      enabled: true,
+    },
+    flat: {
+      name: 'Flat',
+      enabled: false,
+    },
+  };
+  override readonly expectedPropertiesOpts = {
+    showDiff: {
+      name: 'Show diff',
+      enabled: false,
+      isUnavailable: true,
+    },
+    showDefaults: {
+      name: 'Show defaults',
+      enabled: false,
+      tooltip: `If checked, shows the value of all properties.
+Otherwise, hides all properties whose value is
+the default for its data type.`,
+    },
+  };
+  override readonly expectedRectsOpts = {
+    ignoreRectShowState: {
+      name: 'Ignore',
+      icon: 'visibility',
+      enabled: false,
+    },
+    showOnlyVisible: {
+      name: 'Show only',
+      chip: VISIBLE_CHIP,
+      enabled: false,
+    },
+  };
+
+  override readonly rectIndex = 15;
+  override readonly expectedInitialRectSpec = {
+    type: TraceRectType.LAYERS,
+    icon: TRACE_INFO[TraceType.SURFACE_FLINGER].icon,
+    legend: [
+      {
+        fill: '#c8e8b7',
+        desc: 'Visible',
+        border: 'var(--default-text-color)',
+        showInWireFrameMode: false,
+      },
+      {
+        fill: '#dcdcdc',
+        desc: 'Not visible',
+        border: 'var(--default-text-color)',
+        showInWireFrameMode: false,
+      },
+      {
+        fill: 'var(--selected-element-color)',
+        desc: 'Selected',
+        border: 'var(--default-text-color)',
+        showInWireFrameMode: true,
+      },
+      {
+        fill: '#ad42f5',
+        desc: 'Has view content',
+        border: 'var(--default-text-color)',
+        showInWireFrameMode: false,
+      },
+      {border: '#ffc24b', desc: 'Pinned', showInWireFrameMode: true},
+      {border: '#b34a24', desc: 'Pinned', showInWireFrameMode: true},
+    ],
+  };
+  readonly expectedInputWindowsSpec = {
+    type: TraceRectType.INPUT_WINDOWS,
+    icon: TRACE_INFO[TraceType.INPUT_EVENT_MERGED].icon,
+    legend: [
+      {
+        fill: '#c8e8b7',
+        desc: 'Visible and touchable',
+        border: 'var(--default-text-color)',
+        showInWireFrameMode: false,
+      },
+      {
+        fill: '#dcdcdc',
+        desc: 'Not visible',
+        border: 'var(--default-text-color)',
+        showInWireFrameMode: false,
+      },
+      {
+        fill: '',
+        border: 'var(--default-text-color)',
+        desc: 'Visible but not touchable',
+        showInWireFrameMode: false,
+      },
+      {
+        fill: 'var(--selected-element-color)',
+        desc: 'Selected',
+        border: 'var(--default-text-color)',
+        showInWireFrameMode: true,
+      },
+      {border: '#ffc24b', desc: 'Pinned', showInWireFrameMode: true},
+      {border: '#b34a24', desc: 'Pinned', showInWireFrameMode: true},
+    ],
+  };
+  override readonly treeNodeLongName =
+    'com.google.android.apps.maps/com.google.android.maps.LimitedMapsActivity#630';
+  override readonly treeNodeShortName =
+    'com.google.(...).LimitedMapsActivity#630';
+
+  override async setUpTestEnvironment(): Promise<void> {
+    const parser = await new LegacyParserProvider()
+      .addFile(
+        'traces/elapsed_and_real_timestamp/SurfaceFlinger_multidisplay.pb',
+      )
+      .setConvertToPerfetto(true)
+      .getParser<HierarchyTreeNode>();
+
+    this.traceSf = new TraceBuilder<HierarchyTreeNode>()
+      .setType(TraceType.SURFACE_FLINGER)
       .setEntries([
-        await UnitTestUtils.getLayerTraceEntry(),
-        await UnitTestUtils.getMultiDisplayLayerTraceEntry(),
+        await parser.getEntry(0),
+        await parser.getEntry(1),
+        await parser.getEntry(2),
       ])
       .build();
 
-    const firstEntry = trace.getEntry(0);
-    positionUpdate = TracePositionUpdate.fromTraceEntry(firstEntry);
-    positionUpdateMultiDisplayEntry = TracePositionUpdate.fromTraceEntry(
-      trace.getEntry(1),
+    const firstEntry = this.traceSf.getEntry(0);
+    this.positionUpdate = TracePositionUpdate.fromTraceEntry(firstEntry);
+    this.secondPositionUpdate = TracePositionUpdate.fromTraceEntry(
+      this.traceSf.getEntry(1),
     );
 
     const firstEntryDataTree = await firstEntry.getValue();
+
     const layer = assertDefined(
       firstEntryDataTree.findDfs(
-        UiTreeUtils.makeIdMatchFilter('53 Dim layer#53'),
+        makeIdMatchFilter(
+          '576 com.android.car.carlauncher/com.android.car.carlauncher.CarLauncher#576',
+        ),
       ),
     );
     const selectedTreeParent = UiHierarchyTreeNode.from(
       assertDefined(layer.getZParent()),
     );
-    selectedTree = assertDefined(
-      selectedTreeParent.getChildByName('Dim layer#53'),
+    this.selectedTree = assertDefined(
+      selectedTreeParent.getChildByName(
+        'com.android.car.carlauncher/com.android.car.carlauncher.CarLauncher#576',
+      ),
     );
-  });
 
-  beforeEach(() => {
-    presenter = createPresenter(trace);
-  });
-
-  it('is robust to empty trace', async () => {
-    const emptyTrace = new TraceBuilder<HierarchyTreeNode>()
-      .setEntries([])
-      .build();
-    const presenter = createPresenter(emptyTrace);
-
-    const positionUpdateWithoutTraceEntry = TracePositionUpdate.fromTimestamp(
-      NO_TIMEZONE_OFFSET_FACTORY.makeRealTimestamp(0n),
+    const treeAfterPositionUpdateParent = UiHierarchyTreeNode.from(
+      assertDefined(
+        firstEntryDataTree
+          .findDfs(
+            makeIdMatchFilter(
+              '630 com.google.android.apps.maps/com.google.android.maps.LimitedMapsActivity#630',
+            ),
+          )
+          ?.getZParent(),
+      ),
     );
-    await presenter.onAppEvent(positionUpdateWithoutTraceEntry);
-    expect(uiData.hierarchyUserOptions).toBeTruthy();
-    expect(uiData.tree).toBeFalsy();
-  });
+    this.selectedTreeAfterPositionUpdate = assertDefined(
+      treeAfterPositionUpdateParent.getChildByName(
+        'com.google.android.apps.maps/com.google.android.maps.LimitedMapsActivity#630',
+      ),
+    );
+    const rect = assertDefined(
+      this.selectedTreeAfterPositionUpdate.getRects()?.at(0),
+    );
+    Object.assign(rect, {isVisible: false});
+  }
 
-  it('processes trace position updates', async () => {
-    await presenter.onAppEvent(positionUpdate);
+  override createPresenterWithEmptyTrace(
+    callback: NotifyHierarchyViewCallbackType<UiData>,
+  ): Presenter {
+    const trace = makeEmptyTrace(TraceType.SURFACE_FLINGER);
+    const traces = new Traces();
+    traces.addTrace(trace);
+    return new Presenter(trace, traces, new InMemoryStorage(), callback);
+  }
 
-    expect(uiData.rects.length).toBeGreaterThan(0);
-    expect(uiData.highlightedItem?.length).toEqual(0);
+  override createPresenter(
+    callback: NotifyHierarchyViewCallbackType<UiData>,
+    storage: Store,
+  ): Presenter {
+    const traces = new Traces();
+    const traceSf = assertDefined(this.traceSf);
+    traces.addTrace(traceSf);
+    return new Presenter(traceSf, traces, storage, callback);
+  }
+
+  override getPositionUpdate(): TracePositionUpdate {
+    return assertDefined(this.positionUpdate);
+  }
+
+  override getSecondPositionUpdate(): TracePositionUpdate {
+    return assertDefined(this.secondPositionUpdate);
+  }
+
+  override getSelectedTree(): UiHierarchyTreeNode {
+    return assertDefined(this.selectedTree);
+  }
+
+  override getSelectedTreeAfterPositionUpdate(): UiHierarchyTreeNode {
+    return assertDefined(this.selectedTree);
+  }
+
+  override executePropertiesChecksAfterPositionUpdate(uiData: UiDataHierarchy) {
     expect(
-      Array.from(uiData.displays.map((display) => display.groupId)),
-    ).toContain(0);
-    const hierarchyOpts = uiData.hierarchyUserOptions
-      ? Object.keys(uiData.hierarchyUserOptions)
-      : null;
-    expect(hierarchyOpts).toBeTruthy();
-    const propertyOpts = uiData.propertiesUserOptions
-      ? Object.keys(uiData.propertiesUserOptions)
-      : null;
-    expect(propertyOpts).toBeTruthy();
-    expect(assertDefined(uiData.tree).getAllChildren().length > 0).toBeTrue();
-  });
-
-  it('disables show diff and generates non-diff tree if no prev entry available', async () => {
-    await presenter.onAppEvent(positionUpdate);
-
-    const hierarchyOpts = uiData.hierarchyUserOptions ?? null;
-    expect(hierarchyOpts).toBeTruthy();
-    expect(hierarchyOpts!['showDiff'].isUnavailable).toBeTrue();
-
-    const propertyOpts = uiData.propertiesUserOptions ?? null;
-    expect(propertyOpts).toBeTruthy();
-    expect(propertyOpts!['showDiff'].isUnavailable).toBeTrue();
-
-    expect(Object.keys(uiData.tree!).length > 0).toBeTrue();
-  });
-
-  it('creates input data for rects view', async () => {
-    await presenter.onAppEvent(positionUpdate);
-    expect(uiData.rects.length).toBeGreaterThan(0);
-    expect(uiData.rects[0].x).toEqual(0);
-    expect(uiData.rects[0].y).toEqual(0);
-    expect(uiData.rects[0].w).toEqual(1080);
-    expect(uiData.rects[0].h).toEqual(2400);
-  });
-
-  it('updates pinned items', () => {
-    expect(uiData.pinnedItems).toEqual([]);
-
-    const pinnedItem = TreeNodeUtils.makeUiHierarchyNode({
-      id: 'TestItem 4',
-      name: 'FirstPinnedItem',
+      uiData.propertiesTree?.getChildByName('screenBounds')?.formattedValue(),
+    ).toBe('(0, 0) - (1080, 600)');
+    expect(
+      assertDefined(
+        uiData.propertiesTree?.getChildByName('damageRegion'),
+      ).formattedValue(),
+    ).toBe('SkRegion((0, 0, 1080, 600))');
+    expect(uiData.displays?.at(0)).toEqual({
+      displayId: '4619827259835644672',
+      groupId: 0,
+      name: 'EMU_display_0',
+      isActive: true,
     });
-
-    presenter.onPinnedItemChange(pinnedItem);
-    expect(uiData.pinnedItems).toContain(pinnedItem);
-  });
-
-  it('updates highlighted item', () => {
-    expect(uiData.highlightedItem).toEqual('');
-
-    const id = '4';
-    presenter.onHighlightedItemChange(id);
-    expect(uiData.highlightedItem).toBe(id);
-  });
-
-  it('updates highlighted property', () => {
-    expect(uiData.highlightedProperty).toEqual('');
-
-    const id = '4';
-    presenter.onHighlightedPropertyChange(id);
-    expect(uiData.highlightedProperty).toBe(id);
-  });
-
-  it('flattens hierarchy tree', async () => {
-    //change flat view to true
-    const userOptions: UserOptions = {
-      showDiff: {
-        name: 'Show diff',
-        enabled: false,
-      },
-      simplifyNames: {
-        name: 'Simplify names',
-        enabled: false,
-      },
-      onlyVisible: {
-        name: 'Only visible',
-        enabled: false,
-      },
-      flat: {
-        name: 'Flat',
-        enabled: true,
-      },
-    };
-
-    await presenter.onAppEvent(positionUpdate);
-    const oldDataTree = assertDefined(uiData.tree);
-    expect(oldDataTree.getAllChildren().length).toEqual(3);
-
-    await presenter.onHierarchyUserOptionsChange(userOptions);
-    expect(uiData.hierarchyUserOptions).toEqual(userOptions);
-    const newDataTree = assertDefined(uiData.tree);
-    expect(newDataTree.getAllChildren().length).toEqual(94);
-    newDataTree.getAllChildren().forEach((child) => {
-      expect(child.getAllChildren().length).toEqual(0);
-    });
-  });
-
-  it('simplifies names in hierarchy tree', async () => {
-    //change flat view to true
-    const userOptions: UserOptions = {
-      showDiff: {
-        name: 'Show diff',
-        enabled: false,
-      },
-      simplifyNames: {
-        name: 'Simplify names',
-        enabled: false,
-      },
-      onlyVisible: {
-        name: 'Only visible',
-        enabled: false,
-      },
-      flat: {
-        name: 'Flat',
-        enabled: false,
-      },
-    };
-
-    await presenter.onAppEvent(positionUpdate);
-    const longName =
-      'ActivityRecord{64953af u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity#96';
-    const id = `96 ${longName}`;
-    const nodeWithLongName = assertDefined(
-      assertDefined(uiData.tree).findDfs(UiTreeUtils.makeIdMatchFilter(id)),
+    expect(assertDefined((uiData as UiData).curatedProperties).flags).toEqual(
+      'ENABLE_BACKPRESSURE (0x100)',
     );
-    expect(nodeWithLongName.getDisplayName()).toEqual(
-      'ActivityRecord{64953af u0 com.google.(...).NexusLauncherActivity#96',
-    );
-
-    await presenter.onHierarchyUserOptionsChange(userOptions);
-    expect(uiData.hierarchyUserOptions).toEqual(userOptions);
-    const nodeWithShortName = assertDefined(
-      assertDefined(uiData.tree).findDfs(UiTreeUtils.makeIdMatchFilter(id)),
-    );
-    expect(nodeWithShortName.getDisplayName()).toEqual(longName);
-  });
-
-  it('filters hierarchy tree', async () => {
-    const userOptions: UserOptions = {
-      showDiff: {
-        name: 'Show diff',
-        enabled: false,
-      },
-      simplifyNames: {
-        name: 'Simplify names',
-        enabled: true,
-      },
-      onlyVisible: {
-        name: 'Only visible',
-        enabled: false,
-      },
-      flat: {
-        name: 'Flat',
-        enabled: true,
-      },
-    };
-    await presenter.onAppEvent(positionUpdate);
-    await presenter.onHierarchyUserOptionsChange(userOptions);
-    expect(assertDefined(uiData.tree).getAllChildren().length).toEqual(94);
-
-    await presenter.onHierarchyFilterChange('Wallpaper');
-    // All but four layers should be filtered out
-    expect(assertDefined(uiData.tree).getAllChildren().length).toEqual(4);
-  });
-
-  it('sets properties tree and associated ui data', async () => {
-    await presenter.onAppEvent(positionUpdate);
-    await presenter.onSelectedHierarchyTreeChange(selectedTree);
-    // does not check specific tree values as tree transformation method may change
-    expect(uiData.propertiesTree).toBeTruthy();
-  });
-
-  it('updates properties tree to show diffs', async () => {
-    //change flat view to true
-    const userOptions: UserOptions = {
-      showDiff: {
-        name: 'Show diff',
-        enabled: true,
-      },
-    };
-
-    await presenter.onAppEvent(positionUpdate);
-    await presenter.onSelectedHierarchyTreeChange(selectedTree);
-    expect(
-      assertDefined(uiData.propertiesTree?.getChildByName('bounds')).getDiff(),
-    ).toEqual(DiffType.NONE);
-
-    await presenter.onPropertiesUserOptionsChange(userOptions);
-    expect(uiData.propertiesUserOptions).toEqual(userOptions);
-    expect(
-      assertDefined(uiData.propertiesTree?.getChildByName('bounds')).getDiff(),
-    ).toEqual(DiffType.ADDED);
-  });
-
-  it('shows/hides defaults', async () => {
-    const userOptions: UserOptions = {
-      showDiff: {
-        name: 'Show diff',
-        enabled: true,
-      },
-      showDefaults: {
-        name: 'Show defaults',
-        enabled: true,
-      },
-    };
-
-    await presenter.onAppEvent(positionUpdate);
-    await presenter.onSelectedHierarchyTreeChange(selectedTree);
-    expect(
-      assertDefined(uiData.propertiesTree).getAllChildren().length,
-    ).toEqual(22);
-
-    await presenter.onPropertiesUserOptionsChange(userOptions);
-    expect(uiData.propertiesUserOptions).toEqual(userOptions);
-    expect(
-      assertDefined(uiData.propertiesTree).getAllChildren().length,
-    ).toEqual(56);
-  });
-
-  it('filters properties tree', async () => {
-    await presenter.onAppEvent(positionUpdate);
-    await presenter.onSelectedHierarchyTreeChange(selectedTree);
-    expect(
-      assertDefined(uiData.propertiesTree).getAllChildren().length,
-    ).toEqual(22);
-
-    await presenter.onPropertiesFilterChange('bound');
-    expect(
-      assertDefined(uiData.propertiesTree).getAllChildren().length,
-    ).toEqual(3);
-  });
-
-  it('handles displays with no visible layers', async () => {
-    await presenter.onAppEvent(positionUpdateMultiDisplayEntry);
-    expect(uiData.displays.length).toEqual(5);
-    // we want the displays to be sorted by name
-    expect(uiData.displays).toEqual([
-      {
-        displayId: '11529215046312967684',
-        groupId: 5,
-        name: 'ClusterOsDouble-VD',
-      },
-      {displayId: '4619827259835644672', groupId: 0, name: 'EMU_display_0'},
-      {displayId: '4619827551948147201', groupId: 2, name: 'EMU_display_1'},
-      {displayId: '4619827124781842690', groupId: 3, name: 'EMU_display_2'},
-      {displayId: '4619827540095559171', groupId: 4, name: 'EMU_display_3'},
+    expect((uiData as UiData).rectSpec).toEqual(this.expectedInitialRectSpec);
+    expect((uiData as UiData).allRectSpecs).toEqual([
+      this.expectedInitialRectSpec,
+      this.expectedInputWindowsSpec,
     ]);
-  });
+  }
 
-  it('updates view capture package names', async () => {
-    const vcTrace = new TraceBuilder<HierarchyTreeNode>()
-      .setEntries([await UnitTestUtils.getViewCaptureEntry()])
-      .setParserCustomQueryResult(
-        CustomQueryType.VIEW_CAPTURE_PACKAGE_NAME,
-        'com.google.android.apps.nexuslauncher',
-      )
-      .build();
-    const traces = new Traces();
-    traces.setTrace(TraceType.SURFACE_FLINGER, trace);
-    traces.setTrace(TraceType.VIEW_CAPTURE_LAUNCHER_ACTIVITY, vcTrace);
-    const presenter = new Presenter(
-      traces,
-      new MockStorage(),
-      (newData: UiData) => {
-        uiData = newData;
-      },
+  override executePropertiesChecksAfterSecondPositionUpdate(
+    uiData: UiDataHierarchy,
+  ) {
+    expect(
+      uiData.propertiesTree?.getChildByName('damageRegion'),
+    ).toBeUndefined();
+  }
+
+  override executeSpecializedChecksForPropertiesFromRect(
+    uiData: UiDataHierarchy,
+  ) {
+    const curatedProperties = assertDefined(
+      (uiData as UiData).curatedProperties,
     );
+    expect(curatedProperties.flags).toEqual(
+      'OPAQUE | ENABLE_BACKPRESSURE (0x102)',
+    );
+    expect(curatedProperties.summary).toEqual([
+      {
+        key: 'Covered by',
+        desc: 'Partially or fully covered by these likely translucent layers',
+        layerValues: [
+          {
+            layerId: '174',
+            nodeId: '174 BottomCarSystemBar#174',
+            name: 'BottomCarSystemBar#174',
+          },
+          {
+            layerId: '164',
+            nodeId: '164 TopCarSystemBar#164',
+            name: 'TopCarSystemBar#164',
+          },
+          {
+            layerId: '576',
+            nodeId:
+              '576 com.android.car.carlauncher/com.android.car.carlauncher.CarLauncher#576',
+            name: 'com.android.car.carlauncher/com.android.car.carlauncher.CarLauncher#576',
+          },
+        ],
+      },
+    ]);
+  }
 
-    const firstEntry = trace.getEntry(0);
-    const positionUpdate = TracePositionUpdate.fromTraceEntry(firstEntry);
+  override executeSpecializedTests() {
+    describe('Specialized tests', () => {
+      let presenter: Presenter;
+      let uiData: UiData;
+      let userNotifierChecker: UserNotifierChecker;
 
-    await presenter.onAppEvent(positionUpdate);
-    expect(uiData.rects.filter((rect) => rect.hasContent).length).toEqual(1);
-  });
+      beforeAll(async () => {
+        userNotifierChecker = new UserNotifierChecker();
+        await this.setUpTestEnvironment();
+      });
 
-  function createPresenter(trace: Trace<HierarchyTreeNode>): Presenter {
-    const traces = new Traces();
-    traces.setTrace(TraceType.SURFACE_FLINGER, trace);
-    return new Presenter(traces, new MockStorage(), (newData: UiData) => {
-      uiData = newData;
+      beforeEach(() => {
+        const notifyViewCallback = (newData: UiData) => {
+          uiData = newData;
+        };
+        presenter = this.createPresenter(
+          notifyViewCallback as NotifyHierarchyViewCallbackType<UiData>,
+          new InMemoryStorage(),
+        );
+      });
+
+      afterEach(() => {
+        userNotifierChecker.expectNone();
+        userNotifierChecker.reset();
+      });
+
+      it('adds event listeners', async () => {
+        const el = document.createElement('div');
+        presenter.addEventListeners(el);
+
+        let spy: jasmine.Spy = spyOn(presenter, 'onRectDoubleClick');
+        const testId = 'test';
+        el.dispatchEvent(
+          new CustomEvent(ViewerEvents.RectsDblClick, {
+            detail: {clickedRectId: testId},
+          }),
+        );
+        expect(spy).toHaveBeenCalledWith(testId);
+
+        spy = spyOn(presenter, 'onRectTypeButtonClicked');
+        el.dispatchEvent(
+          new CustomEvent(ViewerEvents.RectTypeButtonClick, {
+            detail: {type: TraceRectType.LAYERS},
+          }),
+        );
+        expect(spy).toHaveBeenCalledOnceWith(TraceRectType.LAYERS);
+      });
+
+      it('initializes playback when a PlaybackStart event is received', async () => {
+        const playbackPresenterSpy = spyOn(PlaybackPresenter.prototype, 'play');
+        const event = new PlaybackStateChangeRequest(
+          TraceType.SURFACE_FLINGER,
+          PlaybackState.FORWARDS,
+          0,
+        );
+        await presenter.onAppEvent(event);
+        expect(playbackPresenterSpy).toHaveBeenCalled();
+      });
+
+      it('pauses playback when a PlaybackPause event is received', async () => {
+        const playbackPresenterSpy = spyOn(
+          PlaybackPresenter.prototype,
+          'pause',
+        );
+        const event = new PlaybackStateChangeRequest(
+          TraceType.SURFACE_FLINGER,
+          PlaybackState.PAUSED,
+        );
+        await presenter.onAppEvent(event);
+        expect(playbackPresenterSpy).toHaveBeenCalled();
+      });
+
+      it('changes playback speed when a PlaybackSpeedChange event is received', async () => {
+        const playbackPresenterSpy = spyOn(
+          PlaybackPresenter.prototype,
+          'changeSpeed',
+        );
+        const event = new PlaybackSpeedChange(TraceType.SURFACE_FLINGER, 2);
+        await presenter.onAppEvent(event);
+        expect(playbackPresenterSpy).toHaveBeenCalled();
+      });
+
+      it('handles displays with no visible layers', async () => {
+        await presenter?.onAppEvent(assertDefined(this.positionUpdate));
+        expect(uiData?.displays?.length).toBe(5);
+        // we want the displays to be sorted by name
+        expect(uiData?.displays).toEqual([
+          {
+            displayId: '4619827259835644672',
+            groupId: 0,
+            name: 'EMU_display_0',
+            isActive: true,
+          },
+          {
+            displayId: '4619827551948147201',
+            groupId: 2,
+            name: 'EMU_display_1',
+            isActive: true,
+          },
+          {
+            displayId: '4619827540095559171',
+            groupId: 4,
+            name: 'EMU_display_3',
+            isActive: true,
+          },
+          {
+            displayId: '4619827124781842690',
+            groupId: 3,
+            name: 'EMU_display_2',
+            isActive: true,
+          },
+          {
+            displayId: '-6917529027396583932',
+            groupId: 5,
+            name: 'ClusterOsDouble-VD',
+            isActive: false,
+          },
+        ]);
+      });
+
+      it('uses WM focused display id to determine active display', async () => {
+        const traces = new Traces();
+        const traceSf = assertDefined(this.traceSf);
+        const traceWm = new TraceBuilder<HierarchyTreeNode>()
+          .setType(TraceType.WINDOW_MANAGER)
+          .setEntries([
+            new HierarchyTreeBuilder()
+              .setId('WindowManagerState entry')
+              .setName('root')
+              .setProperties({focusedDisplayId: 3})
+              .build(),
+          ])
+          .build();
+        traces.addTrace(traceSf);
+        traces.addTrace(traceWm);
+        const notifyViewCallback = (newData: UiData) => {
+          uiData = newData;
+        };
+        const presenter = new Presenter(
+          traceSf,
+          traces,
+          new InMemoryStorage(),
+          notifyViewCallback,
+        );
+        const positionUpdate = TracePositionUpdate.fromTraceEntry(
+          traceSf.getEntry(0),
+        );
+        await presenter.onAppEvent(positionUpdate);
+        expect(uiData?.displays[0]).toEqual({
+          displayId: '4619827259835644672',
+          groupId: 0,
+          name: 'EMU_display_0',
+          isActive: false,
+        });
+      });
+
+      it('updates view capture package names', async () => {
+        await createPresenterWithViewCapture(assertDefined(this.traceSf));
+        expect(
+          uiData.rectsToDraw.filter((rect) => rect.hasContent).length,
+        ).toBe(1);
+      });
+
+      it('handles rect double click if view capture trace present', async () => {
+        const [presenter, traceVc] = await createPresenterWithViewCapture(
+          assertDefined(this.traceSf),
+        );
+        const spy = jasmine.createSpy();
+        presenter.setEmitEvent(spy);
+
+        await presenter.onRectDoubleClick('not in package');
+        expect(spy).not.toHaveBeenCalled();
+        await presenter.onRectDoubleClick('com.android.car.carlauncher');
+        expect(spy).toHaveBeenCalledOnceWith(
+          new TabbedViewSwitchRequest(traceVc),
+        );
+      });
+
+      it('robust to rect double click if view capture trace not present', async () => {
+        const spy = jasmine.createSpy();
+        presenter.setEmitEvent(spy);
+        await presenter.onRectDoubleClick('not in package');
+        expect(spy).not.toHaveBeenCalled();
+      });
+
+      it('keeps alpha and transform type regardless of show/hide defaults', async () => {
+        const treeForAlphaCheck = this.getSelectedTree();
+        const treeForTransformCheck = this.getSelectedTreeAfterPositionUpdate();
+        await presenter.onAppEvent(this.getPositionUpdate());
+        await checkColorAndTransform(treeForAlphaCheck, treeForTransformCheck);
+        await presenter.onPropertiesUserOptionsChange({
+          showDefaults: {name: '', enabled: true},
+        });
+        await checkColorAndTransform(treeForAlphaCheck, treeForTransformCheck);
+      });
+
+      it('clears curated properties on position update if no properties tree found', async () => {
+        const trace = assertDefined(this.traceSf);
+        await presenter.onAppEvent(
+          TracePositionUpdate.fromTraceEntry(trace.getEntry(2)),
+        );
+
+        await presenter.onHighlightedIdChange(
+          '744 1d30e3b VolumeDialogImpl#744',
+        );
+        expect(uiData.propertiesTree).toBeDefined();
+        expect(uiData.curatedProperties).toBeDefined();
+
+        await presenter.onAppEvent(assertDefined(this.positionUpdate));
+        expect(uiData.propertiesTree).toBeUndefined();
+        expect(uiData.curatedProperties).toBeUndefined();
+      });
+
+      it('updates zOrderRelativeOf formatter and rel-z curated properties correctly', async () => {
+        await presenter.onAppEvent(this.getPositionUpdate());
+
+        const nodeWithRelZChild = this.getSelectedTree();
+        const nodeWithRelZParent = assertDefined(
+          assertDefined(uiData.hierarchyTrees)[0].findDfs(
+            makeNodeFilter(
+              new TextFilter(
+                '626 SurfaceView[com.android.car.carlauncher/com.android.car.carlauncher.CarLauncher]#626',
+              ).getFilterPredicate(),
+            ),
+          ),
+        );
+
+        await presenter.onHighlightedNodeChange(nodeWithRelZChild);
+        const secondRelZChildName =
+          'Background for SurfaceView[com.android.car.carlauncher/com.android.car.carlauncher.CarLauncher]#628';
+        expect(uiData.curatedProperties?.relativeParent).toBe('none');
+        expect(uiData.curatedProperties?.relativeChildren).toEqual([
+          {
+            layerId: '626',
+            nodeId: nodeWithRelZParent.id,
+            name: nodeWithRelZParent.name,
+          },
+          {
+            layerId: '628',
+            nodeId: '628 ' + secondRelZChildName,
+            name: secondRelZChildName,
+          },
+        ]);
+
+        await presenter.onHighlightedNodeChange(nodeWithRelZParent);
+        expect(uiData.curatedProperties?.relativeParent).toEqual({
+          layerId: '576',
+          nodeId: nodeWithRelZChild.id,
+          name: nodeWithRelZChild.name,
+        });
+        expect(uiData.curatedProperties?.relativeChildren).toEqual([]);
+      });
+
+      it('sets properties tree but no curated properties for root node', async () => {
+        await presenter.onAppEvent(this.getPositionUpdate());
+        await presenter.onHighlightedIdChange(
+          assertDefined(uiData.hierarchyTrees)[0].id,
+        );
+        expect(uiData.propertiesTree?.getDisplayName()).toEqual(
+          '1970-01-01, 00:00:00.000',
+        );
+        expect(uiData.curatedProperties).toBeUndefined();
+      });
+
+      it('sets showDiff button as unavailable during playback', async () => {
+        await presenter.onAppEvent(this.getPositionUpdate());
+        const selectedId = this.getSelectedTreeAfterPositionUpdate().id;
+        await presenter.onHighlightedIdChange(selectedId);
+
+        const playbackPresenter = PlaybackPresenter.prototype;
+        expect(playbackPresenter).toBeDefined();
+
+        const isPlayingSpy = spyOn(playbackPresenter, 'isPlaying');
+        isPlayingSpy.and.returnValue(true);
+
+        expect(
+          uiData.propertiesUserOptions?.['showDiff']?.isUnavailable,
+        ).toBeTrue();
+      });
+
+      it("doesn't update properties tree on position update if playback is playing", async () => {
+        await presenter.onAppEvent(this.getPositionUpdate());
+        const selectedId = this.getSelectedTreeAfterPositionUpdate().id;
+        await presenter.onHighlightedIdChange(selectedId);
+        expect(uiData.propertiesTree).toBeDefined();
+        const propsTreeBeforePlayback = uiData.propertiesTree;
+
+        const playbackPresenter = PlaybackPresenter.prototype;
+        expect(playbackPresenter).toBeDefined();
+
+        const isPlayingSpy = spyOn(playbackPresenter, 'isPlaying');
+
+        isPlayingSpy.and.returnValue(true);
+
+        await presenter.onAppEvent(this.getSecondPositionUpdate());
+        expect(uiData.propertiesTree).toEqual(propsTreeBeforePlayback);
+      });
+
+      it('sets properties tree but no curated properties for recursive root node', async () => {
+        await presenter.onAppEvent(this.getPositionUpdate());
+        const hierarchyTree = assertDefined(uiData.hierarchyTrees?.[0]);
+        Object.assign(hierarchyTree.getAllChildren()[0], {
+          name: 'WinscopeRecursiveLayerRoot',
+        });
+        await presenter.onHighlightedNodeChange(
+          hierarchyTree.getAllChildren()[0],
+        );
+        expect(uiData.propertiesTree).toBeDefined();
+        expect(uiData.curatedProperties).toBeUndefined();
+      });
+
+      it('formats summary, color, pixel and crop correctly in curated properties', async () => {
+        const layer1Props = getPropertiesForCuratedPanel(1n);
+        Object.assign(layer1Props, {
+          occludedBy: [0n],
+          partiallyOccludedBy: [2n],
+          coveredBy: [3n],
+          destinationFrame: {left: 0, right: 1, top: 0, bottom: 1},
+          color: {r: 0, g: 0, b: 0, a: 1},
+          shadowRadius: 1,
+          cornerRadii: {tl: 1, tr: 2, br: 4},
+          crop: {left: 0, top: 0, right: 1, bottom: 2},
+          requestedCornerRadius: 5,
+        });
+
+        const layer2Props = getPropertiesForCuratedPanel(2n);
+        Object.assign(layer2Props, {
+          cornerRadius: 6,
+          cornerRadii: {tl: 0, tr: 0, bl: 0, br: 0},
+          requestedCornerRadii: {bl: 3},
+        });
+
+        const tree = new HierarchyTreeBuilder()
+          .setId('LayerTraceEntry')
+          .setName('root')
+          .setChildren([
+            {
+              id: '1',
+              name: 'layer1',
+              properties: layer1Props,
+            },
+            {
+              id: '0',
+              name: 'layer0',
+              properties: getPropertiesForCuratedPanel(0n),
+            },
+            {
+              id: '2',
+              name: 'layer2',
+              properties: layer2Props,
+            },
+            {
+              id: '3',
+              name: 'layer3',
+              properties: {layerId: 3n},
+            },
+          ])
+          .build();
+        const traces = new Traces();
+        const traceSf = new TraceBuilder<HierarchyTreeNode>()
+          .setType(TraceType.SURFACE_FLINGER)
+          .setEntries([tree])
+          .build();
+        const cornerRadii = (await traceSf.getEntry(0).getValue())
+          .getChildByName('layer2')
+          ?.getEagerPropertyByName('cornerRadii');
+        cornerRadii?.getAllChildren().forEach((child) => {
+          Object.assign(child, {source: PropertySource.DEFAULT});
+        });
+        traces.addTrace(traceSf);
+        const notifyViewCallback = (newData: UiData) => {
+          uiData = newData;
+        };
+        const presenter = new Presenter(
+          traceSf,
+          traces,
+          new InMemoryStorage(),
+          notifyViewCallback,
+        );
+        const positionUpdate = TracePositionUpdate.fromTraceEntry(
+          traceSf.getEntry(0),
+        );
+        await presenter.onAppEvent(positionUpdate);
+        await presenter.onHighlightedIdChange(
+          assertDefined(tree.getChildByName('layer1')).id,
+        );
+        let properties = assertDefined(uiData.curatedProperties);
+        expect(properties.summary).toEqual([
+          {
+            key: 'Occluded by',
+            desc: 'Fully occluded by these opaque layers',
+            layerValues: [{layerId: '0', nodeId: '0 layer0', name: 'layer0'}],
+          },
+          {
+            key: 'Partially occluded by',
+            desc: 'Partially occluded by these opaque layers',
+            layerValues: [{layerId: '2', nodeId: '2 layer2', name: 'layer2'}],
+          },
+          {
+            key: 'Covered by',
+            desc: 'Partially or fully covered by these likely translucent layers',
+            layerValues: [{layerId: '3', nodeId: '3 layer3', name: 'layer3'}],
+          },
+        ]);
+        expect(properties.calcColor).toBe('(0, 0, 0), alpha: 1');
+        expect(properties.reqColor).toBe('no color found');
+        expect(properties.calcShadowRadius).toBe('1 px');
+        expect(properties.calcCornerRadii).toBe('(1, 2, 0, 4)');
+        expect(properties.destinationFrame).toBe('(0, 0) - (1, 1)');
+        expect(properties.calcCrop).toEqual(EMPTY_OBJ_STRING);
+        expect(properties.reqCrop).toBe('(0, 0) - (1, 2)');
+        expect(properties.reqCornerRadii).toBe('(5, 5, 5, 5)');
+
+        await presenter.onHighlightedIdChange(
+          assertDefined(tree.getChildByName('layer0')).id,
+        );
+        properties = assertDefined(uiData.curatedProperties);
+        expect(properties.calcCornerRadii).toBe('(0, 0, 0, 0)');
+        expect(properties.reqCornerRadii).toBe('(0, 0, 0, 0)');
+
+        await presenter.onHighlightedIdChange(
+          assertDefined(tree.getChildByName('layer2')).id,
+        );
+        properties = assertDefined(uiData.curatedProperties);
+        expect(properties.calcCornerRadii).toBe('(6, 6, 6, 6)');
+        expect(properties.reqCornerRadii).toBe('(0, 0, 3, 0)');
+      });
+
+      it('draws input windows', async () => {
+        await presenter.onAppEvent(this.getPositionUpdate());
+        expect(uiData.rectsToDraw.length).toBe(27);
+        expect(uiData.rectsToDraw[6].label).toEqual(
+          'Bounds for - com.android.car.carlauncher/com.android.car.carlauncher.CarLauncher#577',
+        );
+        presenter.onRectTypeButtonClicked(TraceRectType.INPUT_WINDOWS);
+        expect(uiData.rectsToDraw.length).toBe(15);
+        expect(uiData.rectsToDraw[6].label).toEqual(
+          'com.google.android.apps.maps/com.google.android.maps.LimitedMapsActivity#630',
+        );
+        expect(uiData.rectSpec).toEqual(this.expectedInputWindowsSpec);
+        expect(uiData.allRectSpecs).toEqual([
+          this.expectedInitialRectSpec,
+          this.expectedInputWindowsSpec,
+        ]);
+      });
+      async function checkColorAndTransform(
+        treeForAlphaCheck: UiHierarchyTreeNode,
+        treeForTransformCheck: UiHierarchyTreeNode,
+      ) {
+        await presenter.onHighlightedNodeChange(treeForAlphaCheck);
+        expect(
+          uiData.propertiesTree?.getChildByName('color')?.formattedValue(),
+        ).toEqual(`${EMPTY_OBJ_STRING}, alpha: 1`);
+
+        await presenter.onHighlightedNodeChange(treeForTransformCheck);
+        expect(
+          uiData.propertiesTree
+            ?.getChildByName('requestedTransform')
+            ?.formattedValue(),
+        ).toBe('IDENTITY');
+      }
+
+      async function createPresenterWithViewCapture(
+        traceSf: Trace<HierarchyTreeNode>,
+      ): Promise<[Presenter, Trace<HierarchyTreeNode>]> {
+        const traceVc = new TraceBuilder<HierarchyTreeNode>()
+          .setType(TraceType.VIEW_CAPTURE)
+          .setEntries([makeHierarchyNode({id: 'vc id', name: 'vc node'})])
+          .setParserCustomQueryResult(CustomQueryType.VIEW_CAPTURE_METADATA, {
+            packageName: 'com.android.car.carlauncher',
+            windowName: 'not_used',
+          })
+          .build();
+        const traces = new Traces();
+
+        traces.addTrace(traceSf);
+        traces.addTrace(traceVc);
+        const notifyViewCallback = (newData: UiData) => {
+          uiData = newData;
+        };
+        const presenter = new Presenter(
+          traceSf,
+          traces,
+          new InMemoryStorage(),
+          notifyViewCallback as NotifyHierarchyViewCallbackType<UiData>,
+        );
+
+        const firstEntry = traceSf.getEntry(0);
+        const positionUpdate = TracePositionUpdate.fromTraceEntry(firstEntry);
+
+        await presenter.onAppEvent(positionUpdate);
+        return [presenter, traceVc];
+      }
+
+      function getPropertiesForCuratedPanel(layerId: bigint) {
+        return {
+          layerId,
+          flags: null,
+          zOrderRelativeOf: null,
+          bounds: null,
+          screenBounds: null,
+          activeBuffer: null,
+          currFrame: null,
+          destinationFrame: null,
+          z: null,
+          color: null,
+          shadowRadius: null,
+          cornerRadii: null,
+          cornerRadius: null,
+          cornerRadiusCrop: null,
+          backgroundBlurRadius: null,
+          crop: null,
+          requestedColor: null,
+          requestedCornerRadii: null,
+          requestedCornerRadius: null,
+        };
+      }
     });
   }
+}
+
+describe('PresenterSurfaceFlinger', () => {
+  new PresenterSurfaceFlingerTest().execute();
 });

@@ -15,39 +15,40 @@
  */
 
 import {browser, by, element} from 'protractor';
-import {E2eTestUtils} from './utils';
+import {
+  changeRealTimestampInWinscope,
+  checkFinalRealTimestamp,
+  checkInitialRealTimestamp,
+  checkTimelineTraceSelector,
+  checkWinscopeRealTimestamp,
+  filterHierarchy,
+  loadTraceAndCheckViewer,
+  selectItemInHierarchy,
+  setTimeouts,
+  WINSCOPE_URL,
+} from './utils';
 
 describe('Viewer Surface Flinger', () => {
   const viewerSelector = 'viewer-surface-flinger';
 
   beforeEach(async () => {
-    browser.manage().timeouts().implicitlyWait(1000);
-    await E2eTestUtils.checkServerIsUp('Winscope', E2eTestUtils.WINSCOPE_URL);
-    await browser.get(E2eTestUtils.WINSCOPE_URL);
+    await setTimeouts(1000);
+    await browser.get(WINSCOPE_URL);
   });
 
   it('processes trace from zip and navigates correctly', async () => {
     await loadTraces();
-    await E2eTestUtils.checkTimelineTraceSelector({
+    await checkTimelineTraceSelector({
       icon: 'layers',
       color: 'rgba(78, 205, 230, 1)',
     });
-    await E2eTestUtils.checkInitialRealTimestamp(
-      '2022-11-21T18:05:09.780689244',
-    );
-    await E2eTestUtils.checkFinalRealTimestamp('2022-11-21T18:05:18.607915280');
+    await checkInitialRealTimestamp('2022-11-21, 18:05:09.780');
+    await checkFinalRealTimestamp('2022-11-21, 18:05:18.607');
 
-    await E2eTestUtils.changeRealTimestampInWinscope(
-      '2022-11-21T18:05:11.314875855',
-    );
-    await E2eTestUtils.checkWinscopeRealTimestamp(
-      '2022-11-21T18:05:11.314875855',
-    );
-    await E2eTestUtils.filterHierarchy(
-      viewerSelector,
-      'ConversationListActivity#632',
-    );
-    await E2eTestUtils.selectItemInHierarchy(
+    await changeRealTimestampInWinscope('2022-11-21, 18:05:11.314');
+    await checkWinscopeRealTimestamp('18:05:11.314');
+    await filterHierarchy(viewerSelector, 'ConversationListActivity#632');
+    await selectItemInHierarchy(
       viewerSelector,
       'com.google.android.apps.messaging/com.google.android.apps.messaging.ui.ConversationListActivity#632',
     );
@@ -55,8 +56,8 @@ describe('Viewer Surface Flinger', () => {
   });
 
   async function loadTraces() {
-    await E2eTestUtils.loadTraceAndCheckViewer(
-      'traces/deployment_full_trace_phone.zip',
+    await loadTraceAndCheckViewer(
+      'archives/deployment_full_trace_phone.zip',
       'Surface Flinger',
       viewerSelector,
     );
@@ -85,7 +86,7 @@ describe('Viewer Surface Flinger', () => {
 
     const flags = curatedProperties.element(by.css('.flags'));
     const flagsText = await flags.getText();
-    expect(flagsText).toEqual('Flags: OPAQUE|ENABLE_BACKPRESSURE (0x102)');
+    expect(flagsText).toBe('Flags: OPAQUE | ENABLE_BACKPRESSURE (0x102)');
 
     const destinationFrame = curatedProperties.element(by.css('.dest-frame'));
     const destinationFrameText = await destinationFrame.getText();

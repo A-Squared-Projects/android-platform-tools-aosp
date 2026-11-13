@@ -23,17 +23,18 @@
 #include <cutils/properties.h>
 #include <log/log.h>
 #include <stats_event.h>
-#include <statslog.h>
+#include <statslog_gpustats.h>
 #include <utils/Trace.h>
 
+#include <algorithm>
 #include <unordered_set>
 
 namespace android {
 
 GpuStats::~GpuStats() {
     if (mStatsdRegistered) {
-        AStatsManager_clearPullAtomCallback(android::util::GPU_STATS_GLOBAL_INFO);
-        AStatsManager_clearPullAtomCallback(android::util::GPU_STATS_APP_INFO);
+        AStatsManager_clearPullAtomCallback(android::gpustats::GPU_STATS_GLOBAL_INFO);
+        AStatsManager_clearPullAtomCallback(android::gpustats::GPU_STATS_APP_INFO);
     }
 }
 
@@ -181,6 +182,33 @@ void GpuStats::insertTargetStats(const std::string& appPackageName,
     return insertTargetStatsArray(appPackageName, driverVersionCode, stats, &value, 1);
 }
 
+void GpuStats::addVulkanEngineName(const std::string& appPackageName,
+                                   const uint64_t driverVersionCode,
+                                   const char* engineNameCStr) {
+    ATRACE_CALL();
+
+    const std::string appStatsKey = appPackageName + std::to_string(driverVersionCode);
+    const size_t engineNameLen = std::min(strlen(engineNameCStr),
+                                          GpuStatsAppInfo::MAX_VULKAN_ENGINE_NAME_LENGTH);
+    const std::string engineName{engineNameCStr, engineNameLen};
+
+    std::lock_guard<std::mutex> lock(mLock);
+    registerStatsdCallbacksIfNeeded();
+
+    const auto foundApp = mAppStats.find(appStatsKey);
+    if (foundApp == mAppStats.end()) {
+        return;
+    }
+
+    // Storing in std::set<> is not efficient for serialization tasks. Use
+    // vector instead and filter out dups
+    std::vector<std::string>& engineNames = foundApp->second.vulkanEngineNames;
+    if (engineNames.size() < GpuStatsAppInfo::MAX_VULKAN_ENGINE_NAMES
+        && std::find(engineNames.cbegin(), engineNames.cend(), engineName) == engineNames.cend()) {
+        engineNames.push_back(engineName);
+    }
+}
+
 void GpuStats::insertTargetStatsArray(const std::string& appPackageName,
                                  const uint64_t driverVersionCode, const GpuStatsInfo::Stats stats,
                                  const uint64_t* values, const uint32_t valueCount) {
@@ -269,9 +297,9 @@ void GpuStats::interceptSystemDriverStatsLocked() {
 
 void GpuStats::registerStatsdCallbacksIfNeeded() {
     if (!mStatsdRegistered) {
-        AStatsManager_setPullAtomCallback(android::util::GPU_STATS_GLOBAL_INFO, nullptr,
+        AStatsManager_setPullAtomCallback(android::gpustats::GPU_STATS_GLOBAL_INFO, nullptr,
                                          GpuStats::pullAtomCallback, this);
-        AStatsManager_setPullAtomCallback(android::util::GPU_STATS_APP_INFO, nullptr,
+        AStatsManager_setPullAtomCallback(android::gpustats::GPU_STATS_APP_INFO, nullptr,
                                          GpuStats::pullAtomCallback, this);
         mStatsdRegistered = true;
     }
@@ -389,16 +417,21 @@ AStatsManager_PullAtomCallbackReturn GpuStats::pullAppInfoAtom(AStatsEventList* 
             std::string angleDriverBytes = int64VectorToProtoByteString(
                 ele.second.angleDriverLoadingTime);
 
-            android::util::addAStatsEvent(
+            std::vector<const char*> engineNames;
+            for (const std::string &engineName : ele.second.vulkanEngineNames) {
+                engineNames.push_back(engineName.c_str());
+            }
+
+            android::gpustats::addAStatsEvent(
                     data,
-                    android::util::GPU_STATS_APP_INFO,
+                    android::gpustats::GPU_STATS_APP_INFO,
                     ele.second.appPackageName.c_str(),
                     ele.second.driverVersionCode,
-                    android::util::BytesField(glDriverBytes.c_str(),
+                    android::gpustats::BytesField(glDriverBytes.c_str(),
                                               glDriverBytes.length()),
-                    android::util::BytesField(vkDriverBytes.c_str(),
+                    android::gpustats::BytesField(vkDriverBytes.c_str(),
                                               vkDriverBytes.length()),
-                    android::util::BytesField(angleDriverBytes.c_str(),
+                    android::gpustats::BytesField(angleDriverBytes.c_str(),
                                               angleDriverBytes.length()),
                     ele.second.cpuVulkanInUse,
                     ele.second.falsePrerotation,
@@ -410,7 +443,8 @@ AStatsManager_PullAtomCallbackReturn GpuStats::pullAppInfoAtom(AStatsEventList* 
                     ele.second.vulkanApiVersion,
                     ele.second.vulkanDeviceFeaturesEnabled,
                     ele.second.vulkanInstanceExtensions,
-                    ele.second.vulkanDeviceExtensions);
+                    ele.second.vulkanDeviceExtensions,
+                    engineNames);
         }
     }
 
@@ -428,9 +462,9 @@ AStatsManager_PullAtomCallbackReturn GpuStats::pullGlobalInfoAtom(AStatsEventLis
 
     if (data) {
         for (const auto& ele : mGlobalStats) {
-          android::util::addAStatsEvent(
+          android::gpustats::addAStatsEvent(
                   data,
-                  android::util::GPU_STATS_GLOBAL_INFO,
+                  android::gpustats::GPU_STATS_GLOBAL_INFO,
                   ele.second.driverPackageName.c_str(),
                   ele.second.driverVersionName.c_str(),
                   ele.second.driverVersionCode,
@@ -458,9 +492,9 @@ AStatsManager_PullAtomCallbackReturn GpuStats::pullAtomCallback(int32_t atomTag,
     ATRACE_CALL();
 
     GpuStats* pGpuStats = reinterpret_cast<GpuStats*>(cookie);
-    if (atomTag == android::util::GPU_STATS_GLOBAL_INFO) {
+    if (atomTag == android::gpustats::GPU_STATS_GLOBAL_INFO) {
         return pGpuStats->pullGlobalInfoAtom(data);
-    } else if (atomTag == android::util::GPU_STATS_APP_INFO) {
+    } else if (atomTag == android::gpustats::GPU_STATS_APP_INFO) {
         return pGpuStats->pullAppInfoAtom(data);
     }
 

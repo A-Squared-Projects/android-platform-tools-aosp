@@ -111,10 +111,12 @@ enum class InputDeviceSensorType : int32_t {
 };
 
 enum class InputDeviceSensorAccuracy : int32_t {
-    ACCURACY_NONE = 0,
-    ACCURACY_LOW = 1,
-    ACCURACY_MEDIUM = 2,
-    ACCURACY_HIGH = 3,
+    NONE = 0,
+    LOW = 1,
+    MEDIUM = 2,
+    HIGH = 3,
+
+    ftl_last = HIGH,
 };
 
 enum class InputDeviceSensorReportingMode : int32_t {
@@ -128,8 +130,10 @@ enum class InputDeviceLightType : int32_t {
     INPUT = 0,
     PLAYER_ID = 1,
     KEYBOARD_BACKLIGHT = 2,
+    KEYBOARD_MIC_MUTE = 3,
+    KEYBOARD_VOLUME_MUTE = 4,
 
-    ftl_last = KEYBOARD_BACKLIGHT
+    ftl_last = KEYBOARD_VOLUME_MUTE
 };
 
 enum class InputDeviceLightCapability : uint32_t {
@@ -145,7 +149,7 @@ struct InputDeviceSensorInfo {
                                    float maxRange, float resolution, float power, int32_t minDelay,
                                    int32_t fifoReservedEventCount, int32_t fifoMaxEventCount,
                                    std::string stringType, int32_t maxDelay, int32_t flags,
-                                   int32_t id)
+                                   DeviceId id)
           : name(name),
             vendor(vendor),
             version(version),
@@ -192,7 +196,7 @@ struct InputDeviceSensorInfo {
     // Sensor flags
     int32_t flags;
     // Sensor id, same as the input device ID it belongs to.
-    int32_t id;
+    DeviceId id;
 };
 
 struct BrightnessLevel : ftl::DefaultConstructible<BrightnessLevel, std::uint8_t>,
@@ -263,6 +267,7 @@ class InputDeviceInfo {
 public:
     InputDeviceInfo();
     InputDeviceInfo(const InputDeviceInfo& other);
+    InputDeviceInfo& operator=(const InputDeviceInfo& other);
     ~InputDeviceInfo();
 
     struct MotionRange {
@@ -275,12 +280,13 @@ public:
         float resolution;
     };
 
-    void initialize(int32_t id, int32_t generation, int32_t controllerNumber,
+    void initialize(DeviceId id, int32_t generation, int32_t controllerNumber,
                     const InputDeviceIdentifier& identifier, const std::string& alias,
-                    bool isExternal, bool hasMic, int32_t associatedDisplayId,
-                    InputDeviceViewBehavior viewBehavior = {{}});
+                    bool isExternal, bool isVirtualDevice, bool hasMic,
+                    ui::LogicalDisplayId associatedDisplayId,
+                    InputDeviceViewBehavior viewBehavior = {{}}, bool enabled = true);
 
-    inline int32_t getId() const { return mId; }
+    inline DeviceId getId() const { return mId; }
     inline int32_t getControllerNumber() const { return mControllerNumber; }
     inline int32_t getGeneration() const { return mGeneration; }
     inline const InputDeviceIdentifier& getIdentifier() const { return mIdentifier; }
@@ -289,6 +295,7 @@ public:
         return mAlias.empty() ? mIdentifier.name : mAlias;
     }
     inline bool isExternal() const { return mIsExternal; }
+    inline bool isVirtualDevice() const { return mIsVirtualDevice; }
     inline bool hasMic() const { return mHasMic; }
     inline uint32_t getSources() const { return mSources; }
 
@@ -312,22 +319,17 @@ public:
 
     inline const InputDeviceViewBehavior& getViewBehavior() const { return mViewBehavior; }
 
-    inline void setKeyCharacterMap(const std::shared_ptr<KeyCharacterMap> value) {
-        mKeyCharacterMap = value;
+    inline void setKeyCharacterMap(std::unique_ptr<KeyCharacterMap> value) {
+        mKeyCharacterMap = std::move(value);
     }
 
-    inline const std::shared_ptr<KeyCharacterMap> getKeyCharacterMap() const {
-        return mKeyCharacterMap;
-    }
+    inline const KeyCharacterMap* getKeyCharacterMap() const { return mKeyCharacterMap.get(); }
 
     inline void setVibrator(bool hasVibrator) { mHasVibrator = hasVibrator; }
     inline bool hasVibrator() const { return mHasVibrator; }
 
     inline void setHasBattery(bool hasBattery) { mHasBattery = hasBattery; }
     inline bool hasBattery() const { return mHasBattery; }
-
-    inline void setButtonUnderPad(bool hasButton) { mHasButtonUnderPad = hasButton; }
-    inline bool hasButtonUnderPad() const { return mHasButtonUnderPad; }
 
     inline void setHasSensor(bool hasSensor) { mHasSensor = hasSensor; }
     inline bool hasSensor() const { return mHasSensor; }
@@ -345,26 +347,30 @@ public:
     }
     inline std::optional<InputDeviceUsiVersion> getUsiVersion() const { return mUsiVersion; }
 
-    inline int32_t getAssociatedDisplayId() const { return mAssociatedDisplayId; }
+    inline ui::LogicalDisplayId getAssociatedDisplayId() const { return mAssociatedDisplayId; }
+
+    inline void setEnabled(bool enabled) { mEnabled = enabled; }
+    inline bool isEnabled() const { return mEnabled; }
 
 private:
-    int32_t mId;
+    DeviceId mId;
     int32_t mGeneration;
     int32_t mControllerNumber;
     InputDeviceIdentifier mIdentifier;
     std::string mAlias;
     bool mIsExternal;
+    bool mIsVirtualDevice;
     bool mHasMic;
     std::optional<KeyboardLayoutInfo> mKeyboardLayoutInfo;
     uint32_t mSources;
     int32_t mKeyboardType;
-    std::shared_ptr<KeyCharacterMap> mKeyCharacterMap;
+    std::unique_ptr<KeyCharacterMap> mKeyCharacterMap;
     std::optional<InputDeviceUsiVersion> mUsiVersion;
-    int32_t mAssociatedDisplayId;
+    ui::LogicalDisplayId mAssociatedDisplayId{ui::LogicalDisplayId::INVALID};
+    bool mEnabled;
 
     bool mHasVibrator;
     bool mHasBattery;
-    bool mHasButtonUnderPad;
     bool mHasSensor;
 
     std::vector<MotionRange> mMotionRanges;
@@ -382,6 +388,7 @@ enum class InputDeviceConfigurationFileType : int32_t {
     CONFIGURATION = 0,     /* .idc file */
     KEY_LAYOUT = 1,        /* .kl file */
     KEY_CHARACTER_MAP = 2, /* .kcm file */
+    ftl_last = KEY_CHARACTER_MAP,
 };
 
 /*
@@ -411,7 +418,7 @@ extern std::string getInputDeviceConfigurationFilePathByDeviceIdentifier(
 extern std::string getInputDeviceConfigurationFilePathByName(
         const std::string& name, InputDeviceConfigurationFileType type);
 
-enum ReservedInputDeviceId : int32_t {
+enum ReservedInputDeviceId : RawDeviceId {
     // Device id representing an invalid device
     INVALID_INPUT_DEVICE_ID = android::os::IInputConstants::INVALID_INPUT_DEVICE_ID,
     // Device id of a special "virtual" keyboard that is always present.

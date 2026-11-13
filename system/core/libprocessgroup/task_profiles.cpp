@@ -17,30 +17,31 @@
 //#define LOG_NDEBUG 0
 #define LOG_TAG "libprocessgroup"
 
+#include <task_profiles.h>
+
+#include <map>
+#include <string>
+
 #include <dirent.h>
 #include <fcntl.h>
+#include <sched.h>
+#include <sys/resource.h>
 #include <unistd.h>
-#include <task_profiles.h>
-#include <string>
 
 #include <android-base/file.h>
 #include <android-base/logging.h>
+#include <android-base/parseint.h>
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
 #include <android-base/threads.h>
 
+#include <build_flags.h>
+
 #include <cutils/android_filesystem_config.h>
 
 #include <json/reader.h>
 #include <json/value.h>
-
-#include <build_flags.h>
-
-// To avoid issues in sdk_mac build
-#if defined(__ANDROID__)
-#include <sys/prctl.h>
-#endif
 
 using android::base::GetThreadId;
 using android::base::GetUintProperty;
@@ -54,6 +55,7 @@ static constexpr const char* TASK_PROFILE_DB_VENDOR_FILE = "/vendor/etc/task_pro
 
 static constexpr const char* TEMPLATE_TASK_PROFILE_API_FILE =
         "/etc/task_profiles/task_profiles_%u.json";
+namespace {
 
 class FdCacheHelper {
   public:
@@ -64,8 +66,11 @@ class FdCacheHelper {
     };
 
     static void Cache(const std::string& path, android::base::unique_fd& fd);
+
     static void Drop(android::base::unique_fd& fd);
+
     static void Init(const std::string& path, android::base::unique_fd& fd);
+
     static bool IsCached(const android::base::unique_fd& fd) { return fd > FDS_INACCESSIBLE; }
 
   private:
@@ -116,6 +121,8 @@ bool FdCacheHelper::IsAppDependentPath(const std::string& path) {
     return path.find("<uid>", 0) != std::string::npos || path.find("<pid>", 0) != std::string::npos;
 }
 
+}  // namespace
+
 IProfileAttribute::~IProfileAttribute() = default;
 
 const std::string& ProfileAttribute::file_name() const {
@@ -123,8 +130,8 @@ const std::string& ProfileAttribute::file_name() const {
     return file_name_;
 }
 
-void ProfileAttribute::Reset(const CgroupController& controller, const std::string& file_name,
-                             const std::string& file_v2_name) {
+void ProfileAttribute::Reset(const CgroupControllerWrapper& controller,
+                             const std::string& file_name, const std::string& file_v2_name) {
     controller_ = controller;
     file_name_ = file_name;
     file_v2_name_ = file_v2_name;
@@ -134,8 +141,8 @@ static bool isSystemApp(uid_t uid) {
     return uid < AID_APP_START;
 }
 
-std::string ConvertUidToPath(const char* root_cgroup_path, uid_t uid) {
-    if (android::libprocessgroup_flags::cgroup_v2_sys_app_isolation()) {
+std::string ConvertUidToPath(const char* root_cgroup_path, uid_t uid, bool v2_path) {
+    if (android::libprocessgroup_flags::cgroup_v2_sys_app_isolation() && v2_path) {
         if (isSystemApp(uid))
             return StringPrintf("%s/system/uid_%u", root_cgroup_path, uid);
         else
@@ -144,14 +151,14 @@ std::string ConvertUidToPath(const char* root_cgroup_path, uid_t uid) {
     return StringPrintf("%s/uid_%u", root_cgroup_path, uid);
 }
 
-std::string ConvertUidPidToPath(const char* root_cgroup_path, uid_t uid, pid_t pid) {
-    const std::string uid_path = ConvertUidToPath(root_cgroup_path, uid);
+std::string ConvertUidPidToPath(const char* root_cgroup_path, uid_t uid, pid_t pid, bool v2_path) {
+    const std::string uid_path = ConvertUidToPath(root_cgroup_path, uid, v2_path);
     return StringPrintf("%s/pid_%d", uid_path.c_str(), pid);
 }
 
 bool ProfileAttribute::GetPathForProcess(uid_t uid, pid_t pid, std::string* path) const {
     if (controller()->version() == 2) {
-        const std::string cgroup_path = ConvertUidPidToPath(controller()->path(), uid, pid);
+        const std::string cgroup_path = ConvertUidPidToPath(controller()->path(), uid, pid, true);
         *path = cgroup_path + "/" + file_name();
         return true;
     }
@@ -183,65 +190,24 @@ bool ProfileAttribute::GetPathForUID(uid_t uid, std::string* path) const {
         return true;
     }
 
-    const std::string cgroup_path = ConvertUidToPath(controller()->path(), uid);
+    const std::string cgroup_path = ConvertUidToPath(controller()->path(), uid, true);
     *path = cgroup_path + "/" + file_name();
     return true;
 }
 
-bool SetClampsAction::ExecuteForProcess(uid_t, pid_t) const {
-    // TODO: add support when kernel supports util_clamp
-    LOG(WARNING) << "SetClampsAction::ExecuteForProcess is not supported";
-    return false;
-}
-
-bool SetClampsAction::ExecuteForTask(int) const {
-    // TODO: add support when kernel supports util_clamp
-    LOG(WARNING) << "SetClampsAction::ExecuteForTask is not supported";
-    return false;
-}
-
-// To avoid issues in sdk_mac build
-#if defined(__ANDROID__)
-
-bool SetTimerSlackAction::IsTimerSlackSupported(pid_t tid) {
-    auto file = StringPrintf("/proc/%d/timerslack_ns", tid);
-
-    return (access(file.c_str(), W_OK) == 0);
-}
-
 bool SetTimerSlackAction::ExecuteForTask(pid_t tid) const {
-    static bool sys_supports_timerslack = IsTimerSlackSupported(tid);
-
-    // v4.6+ kernels support the /proc/<tid>/timerslack_ns interface.
-    // TODO: once we've backported this, log if the open(2) fails.
-    if (sys_supports_timerslack) {
-        auto file = StringPrintf("/proc/%d/timerslack_ns", tid);
-        if (!WriteStringToFile(std::to_string(slack_), file)) {
-            if (errno == ENOENT) {
-                // This happens when process is already dead
-                return true;
-            }
-            PLOG(ERROR) << "set_timerslack_ns write failed";
+    const auto file = StringPrintf("/proc/%d/timerslack_ns", tid);
+    if (!WriteStringToFile(std::to_string(slack_), file)) {
+        if (errno == ENOENT) {
+            // This happens when process is already dead
+            return true;
         }
-    }
-
-    // TODO: Remove when /proc/<tid>/timerslack_ns interface is backported.
-    if (tid == 0 || tid == GetThreadId()) {
-        if (prctl(PR_SET_TIMERSLACK, slack_) == -1) {
-            PLOG(ERROR) << "set_timerslack_ns prctl failed";
-        }
+        PLOG(ERROR) << "set_timerslack_ns write failed";
+        return false;
     }
 
     return true;
 }
-
-#else
-
-bool SetTimerSlackAction::ExecuteForTask(int) const {
-    return true;
-};
-
-#endif
 
 bool SetAttributeAction::WriteValueToFile(const std::string& path) const {
     if (!WriteStringToFile(value_, path)) {
@@ -333,7 +299,7 @@ bool SetAttributeAction::IsValidForTask(pid_t tid) const {
     return optional_;
 }
 
-SetCgroupAction::SetCgroupAction(const CgroupController& c, const std::string& p)
+SetCgroupAction::SetCgroupAction(const CgroupControllerWrapper& c, const std::string& p)
     : controller_(c), path_(p) {
     FdCacheHelper::Init(controller_.GetTasksFilePath(path_), fd_[ProfileAction::RCT_TASK]);
     // uid and pid don't matter because IsAppDependentPath ensures the path doesn't use them
@@ -585,32 +551,21 @@ bool WriteFileAction::ExecuteForProcess(uid_t uid, pid_t pid) const {
         return WriteValueToFile(value_, ProfileAction::RCT_PROCESS, uid, pid, logfailures_);
     }
 
-    DIR* d;
-    struct dirent* de;
-    char proc_path[255];
-    pid_t t_pid;
-
-    sprintf(proc_path, "/proc/%d/task", pid);
-    if (!(d = opendir(proc_path))) {
-        return false;
+    std::string proc_path = android::base::StringPrintf("/proc/%d/task", pid);
+    std::unique_ptr<DIR, decltype(&closedir)> d(opendir(proc_path.c_str()), closedir);
+    if (!d) {
+      return false;
     }
 
-    while ((de = readdir(d))) {
-        if (de->d_name[0] == '.') {
-            continue;
-        }
-
-        t_pid = atoi(de->d_name);
-
+    dirent* de;
+    while ((de = readdir(d.get()))) {
+        pid_t t_pid = atoi(de->d_name);
         if (!t_pid) {
             continue;
         }
 
         WriteValueToFile(value_, ProfileAction::RCT_TASK, uid, t_pid, logfailures_);
     }
-
-    closedir(d);
-
     return true;
 }
 
@@ -670,6 +625,137 @@ bool WriteFileAction::IsValidForTask(int) const {
     }
 
     return access(task_path_.c_str(), W_OK) == 0;
+}
+
+bool SetSchedulerPolicyAction::isNormalPolicy(int policy) {
+    return policy == SCHED_OTHER || policy == SCHED_BATCH || policy == SCHED_IDLE;
+}
+
+bool SetSchedulerPolicyAction::toPriority(int policy, int virtual_priority, int& priority_out) {
+    constexpr int VIRTUAL_PRIORITY_MIN = 1;
+    constexpr int VIRTUAL_PRIORITY_MAX = 99;
+
+    if (virtual_priority < VIRTUAL_PRIORITY_MIN || virtual_priority > VIRTUAL_PRIORITY_MAX) {
+        LOG(WARNING) << "SetSchedulerPolicy: invalid priority (" << virtual_priority
+                     << ") for policy (" << policy << ")";
+        return false;
+    }
+
+    const int min = sched_get_priority_min(policy);
+    if (min == -1) {
+        PLOG(ERROR) << "SetSchedulerPolicy: Cannot get min sched priority for policy " << policy;
+        return false;
+    }
+
+    const int max = sched_get_priority_max(policy);
+    if (max == -1) {
+        PLOG(ERROR) << "SetSchedulerPolicy: Cannot get max sched priority for policy " << policy;
+        return false;
+    }
+
+    priority_out = min + (virtual_priority - VIRTUAL_PRIORITY_MIN) * (max - min) /
+        (VIRTUAL_PRIORITY_MAX - VIRTUAL_PRIORITY_MIN);
+
+    return true;
+}
+
+bool SetSchedulerPolicyAction::ExecuteForTask(pid_t tid) const {
+    struct sched_param param = {};
+    param.sched_priority = isNormalPolicy(policy_) ? 0 : *priority_or_nice_;
+    if (sched_setscheduler(tid, policy_, &param) == -1) {
+        PLOG(WARNING) << "SetSchedulerPolicy: Failed to apply scheduler policy (" << policy_
+                      << ") with priority (" << *priority_or_nice_ << ") to tid " << tid;
+        return false;
+    }
+
+    if (isNormalPolicy(policy_) && priority_or_nice_ &&
+        setpriority(PRIO_PROCESS, tid, *priority_or_nice_) == -1) {
+        PLOG(WARNING) << "SetSchedulerPolicy: Failed to apply nice (" << *priority_or_nice_
+                      << ") to tid " << tid;
+        return false;
+    }
+
+    return true;
+}
+
+// Read the memory.current value for the memcg, and prepare to pass it into memory.reclaim with an
+// optional swappiness argument.
+bool CompactMemcgAction::GenerateReclaimString(const std::string& memory_current_path,
+                                               std::string& out) const {
+    std::string memory_current_str;
+    if (!android::base::ReadFileToString(memory_current_path, &memory_current_str)) {
+        PLOG(ERROR) << "Failed to read " << memory_current_path;
+        return false;
+    }
+
+    memory_current_str = android::base::Trim(memory_current_str);
+    if (type_ == CompactMemcgAction::Type::FILE)
+        memory_current_str += " swappiness=0";
+    else if (type_ == CompactMemcgAction::Type::ANON)
+        memory_current_str += " swappiness=200";
+
+    out = std::move(memory_current_str);
+    return true;
+}
+
+bool CompactMemcgAction::Execute(const std::string& memory_current_path,
+                                 const std::string& memory_reclaim_path) const {
+    std::string reclaim_str;
+    if (!GenerateReclaimString(memory_current_path, reclaim_str)) return false;
+
+    if (!WriteStringToFile(reclaim_str, memory_reclaim_path) && errno != EAGAIN) {
+        // Reclaim of the entire memcg is likely to fail with EAGAIN. Ignore this case here.
+        PLOG(ERROR) << "Could not write " << reclaim_str << " to " << memory_reclaim_path;
+        return false;
+    }
+
+    return true;
+}
+
+bool CompactMemcgAction::ExecuteForUID(uid_t uid) const {
+    const std::string memory_current_path =
+            ConvertUidToPath(cgroup_v2_root_path_.c_str(), uid, true) + MEMORY_CURRENT_FILE;
+    const std::string memory_reclaim_path =
+            ConvertUidToPath(cgroup_v2_root_path_.c_str(), uid, true) + MEMORY_RECLAIM_FILE;
+
+    return Execute(memory_current_path, memory_reclaim_path);
+}
+
+bool CompactMemcgAction::ExecuteForProcess(uid_t uid, pid_t pid) const {
+    const std::string memory_current_path =
+            ConvertUidPidToPath(cgroup_v2_root_path_.c_str(), uid, pid, true) + MEMORY_CURRENT_FILE;
+    const std::string memory_reclaim_path =
+            ConvertUidPidToPath(cgroup_v2_root_path_.c_str(), uid, pid, true) + MEMORY_RECLAIM_FILE;
+
+    return Execute(memory_current_path, memory_reclaim_path);
+}
+
+bool CompactMemcgAction::IsValid(const std::string& memory_reclaim_path) const {
+    if (access(memory_reclaim_path.c_str(), F_OK) != 0) return false;
+
+    // Anon-only and file-only reclaim depend on memory.reclaim swappiness support:
+    // https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=68cd9050d871e4db5433420b5ceb32f5512d18bc
+    if (type_ != CompactMemcgAction::Type::FULL) {
+        return WriteStringToFile("0 swappiness=0", memory_reclaim_path);
+    }
+
+    return true;
+}
+
+// Ensure memcgs are activated all the way down to UID cgroups
+bool CompactMemcgAction::IsValidForUID(uid_t uid) const {
+    const std::string memory_reclaim_path =
+            ConvertUidToPath(cgroup_v2_root_path_.c_str(), uid, true) + MEMORY_RECLAIM_FILE;
+
+    return IsValid(memory_reclaim_path);
+}
+
+// Ensure memcgs are activated all the way down to PID cgroups
+bool CompactMemcgAction::IsValidForProcess(uid_t uid, pid_t pid) const {
+    const std::string memory_reclaim_path =
+            ConvertUidPidToPath(cgroup_v2_root_path_.c_str(), uid, pid, true) + MEMORY_RECLAIM_FILE;
+
+    return IsValid(memory_reclaim_path);
 }
 
 bool ApplyProfileAction::ExecuteForProcess(uid_t uid, pid_t pid) const {
@@ -903,15 +989,11 @@ bool TaskProfiles::Load(const CgroupMap& cg_map, const std::string& file_name) {
                     LOG(WARNING) << "JoinCgroup: controller " << controller_name << " is not found";
                 }
             } else if (action_name == "SetTimerSlack") {
-                std::string slack_value = params_val["Slack"].asString();
-                char* end;
-                unsigned long slack;
-
-                slack = strtoul(slack_value.c_str(), &end, 10);
-                if (end > slack_value.c_str()) {
+                const std::string slack_string = params_val["Slack"].asString();
+                if (long slack; android::base::ParseInt(slack_string, &slack) && slack >= 0) {
                     profile->Add(std::make_unique<SetTimerSlackAction>(slack));
                 } else {
-                    LOG(WARNING) << "SetTimerSlack: invalid parameter: " << slack_value;
+                    LOG(WARNING) << "SetTimerSlack: invalid parameter: " << slack_string;
                 }
             } else if (action_name == "SetAttribute") {
                 std::string attr_name = params_val["Name"].asString();
@@ -924,23 +1006,6 @@ bool TaskProfiles::Load(const CgroupMap& cg_map, const std::string& file_name) {
                                                                       attr_value, optional));
                 } else {
                     LOG(WARNING) << "SetAttribute: unknown attribute: " << attr_name;
-                }
-            } else if (action_name == "SetClamps") {
-                std::string boost_value = params_val["Boost"].asString();
-                std::string clamp_value = params_val["Clamp"].asString();
-                char* end;
-                unsigned long boost;
-
-                boost = strtoul(boost_value.c_str(), &end, 10);
-                if (end > boost_value.c_str()) {
-                    unsigned long clamp = strtoul(clamp_value.c_str(), &end, 10);
-                    if (end > clamp_value.c_str()) {
-                        profile->Add(std::make_unique<SetClampsAction>(boost, clamp));
-                    } else {
-                        LOG(WARNING) << "SetClamps: invalid parameter " << clamp_value;
-                    }
-                } else {
-                    LOG(WARNING) << "SetClamps: invalid parameter: " << boost_value;
                 }
             } else if (action_name == "WriteFile") {
                 std::string attr_filepath = params_val["FilePath"].asString();
@@ -959,6 +1024,100 @@ bool TaskProfiles::Load(const CgroupMap& cg_map, const std::string& file_name) {
                     LOG(WARNING) << "WriteFile: invalid parameter: "
                                  << "empty value";
                 }
+            } else if (action_name == "SetSchedulerPolicy") {
+                const std::map<std::string, int> POLICY_MAP = {
+                    {"SCHED_OTHER", SCHED_OTHER},
+                    {"SCHED_BATCH", SCHED_BATCH},
+                    {"SCHED_IDLE", SCHED_IDLE},
+                    {"SCHED_FIFO", SCHED_FIFO},
+                    {"SCHED_RR", SCHED_RR},
+                };
+                const std::string policy_str = params_val["Policy"].asString();
+
+                const auto it = POLICY_MAP.find(policy_str);
+                if (it == POLICY_MAP.end()) {
+                    LOG(WARNING) << "SetSchedulerPolicy: invalid policy " << policy_str;
+                    continue;
+                }
+
+                const int policy = it->second;
+
+                if (SetSchedulerPolicyAction::isNormalPolicy(policy)) {
+                    if (params_val.isMember("Priority")) {
+                        LOG(WARNING) << "SetSchedulerPolicy: Normal policies (" << policy_str
+                                     << ") use Nice values, not Priority values";
+                    }
+
+                    if (params_val.isMember("Nice")) {
+                        // If present, this optional value will be passed in an additional syscall
+                        // to setpriority(), since the sched_priority value must be 0 for calls to
+                        // sched_setscheduler() with "normal" policies.
+                        const std::string nice_string = params_val["Nice"].asString();
+                        int nice;
+                        if (!android::base::ParseInt(nice_string, &nice)) {
+                            LOG(FATAL) << "Invalid nice value specified: " << nice_string;
+                        }
+                        const int LINUX_MIN_NICE = -20;
+                        const int LINUX_MAX_NICE = 19;
+                        if (nice < LINUX_MIN_NICE || nice > LINUX_MAX_NICE) {
+                            LOG(WARNING) << "SetSchedulerPolicy: Provided nice (" << nice
+                                         << ") appears out of range.";
+                        }
+                        profile->Add(std::make_unique<SetSchedulerPolicyAction>(policy, nice));
+                    } else {
+                        profile->Add(std::make_unique<SetSchedulerPolicyAction>(policy));
+                    }
+                } else {
+                    if (params_val.isMember("Nice")) {
+                        LOG(WARNING) << "SetSchedulerPolicy: Real-time policies (" << policy_str
+                                     << ") use Priority values, not Nice values";
+                    }
+
+                    // This is a "virtual priority" as described by `man 2 sched_get_priority_min`
+                    // that will be mapped onto the following range for the provided policy:
+                    // [sched_get_priority_min(), sched_get_priority_max()]
+
+                    const std::string priority_string = params_val["Priority"].asString();
+                    if (long virtual_priority;
+                        android::base::ParseInt(priority_string, &virtual_priority) &&
+                        virtual_priority > 0) {
+                        int priority;
+                        if (SetSchedulerPolicyAction::toPriority(policy, virtual_priority,
+                                                                 priority)) {
+                            profile->Add(
+                                    std::make_unique<SetSchedulerPolicyAction>(policy, priority));
+                        }
+                    } else {
+                        LOG(WARNING) << "Invalid priority value: " << priority_string;
+                    }
+                }
+            } else if (action_name == "Compact") {
+                const std::map<std::string, CompactMemcgAction::Type> TYPE_MAP = {
+                        {"full", CompactMemcgAction::Type::FULL},
+                        {"anon", CompactMemcgAction::Type::ANON},
+                        {"file", CompactMemcgAction::Type::FILE},
+                };
+                const std::string type_str = params_val["Type"].asString();
+
+                const auto it = TYPE_MAP.find(type_str);
+                if (it == TYPE_MAP.end()) {
+                    LOG(WARNING) << "Compact: invalid compaction type " << type_str;
+                    continue;
+                }
+
+                auto controller = cg_map.FindController("memory");
+                if (controller.HasValue()) {
+                    if (controller.version() != 2) {
+                        LOG(WARNING) << "Compaction is currently supported only with memcg v2";
+                        continue;
+                    }
+                } else {
+                    LOG(WARNING) << "Compact: memory controller not found";
+                    continue;
+                }
+
+                const CompactMemcgAction::Type type = it->second;
+                profile->Add(std::make_unique<CompactMemcgAction>(type, controller.path()));
             } else {
                 LOG(WARNING) << "Unknown profile action: " << action_name;
             }

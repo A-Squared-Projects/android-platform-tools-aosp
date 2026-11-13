@@ -14,10 +14,11 @@
  * limitations under the License.
  */
 
-#include <libsnapshot/cow_format.h>
 #include <pthread.h>
+#include <sys/prctl.h>
 
 #include <android-base/properties.h>
+#include <libsnapshot/cow_format.h>
 
 #include "merge_worker.h"
 #include "snapuserd_core.h"
@@ -55,7 +56,7 @@ int MergeWorker::PrepareMerge(uint64_t* source_offset, int* pending_ops,
                 break;
             }
 
-            *source_offset = cow_op->new_block * BLOCK_SZ;
+            *source_offset = static_cast<uint64_t>(cow_op->new_block) * BLOCK_SZ;
             if (!checkOrderedOp) {
                 replace_zero_vec->push_back(cow_op);
                 if (cow_op->type() == kCowReplaceOp) {
@@ -74,7 +75,7 @@ int MergeWorker::PrepareMerge(uint64_t* source_offset, int* pending_ops,
                     break;
                 }
 
-                uint64_t next_offset = op->new_block * BLOCK_SZ;
+                uint64_t next_offset = static_cast<uint64_t>(op->new_block) * BLOCK_SZ;
                 if (next_offset != (*source_offset + nr_consecutive * BLOCK_SZ)) {
                     break;
                 }
@@ -181,6 +182,8 @@ bool MergeWorker::MergeReplaceZeroOps() {
                 return false;
             }
 
+            posix_fadvise(base_path_merge_fd_.get(), 0, 0, POSIX_FADV_DONTNEED);
+
             num_ops_merged = 0;
         }
 
@@ -191,6 +194,9 @@ bool MergeWorker::MergeReplaceZeroOps() {
                                "down merge";
             return false;
         }
+
+        // Safe to check if there is a pause request.
+        snapuserd_->PauseMergeIfRequired();
     }
 
     // Any left over ops not flushed yet.
@@ -271,11 +277,13 @@ bool MergeWorker::MergeOrderedOpsAsync() {
                 // These flags are important - We need to make sure that the
                 // blocks are linked and are written in the same order as
                 // populated. This is because of overlapping block writes.
+                // Furthermore, avoid setting IOSQE_ASYNC flag as it spins
+                // up worker threads.
                 //
                 // If there are no dependency, we can optimize this further by
                 // allowing parallel writes; but for now, just link all the SQ
                 // entries.
-                sqe->flags |= (IOSQE_IO_LINK | IOSQE_ASYNC);
+                sqe->flags |= IOSQE_IO_LINK;
             }
 
             // Ring is full or no more COW ops to be merged in this batch
@@ -303,7 +311,7 @@ bool MergeWorker::MergeOrderedOpsAsync() {
                             pending_sqe -= 1;
                             flush_required = false;
                             pending_ios_to_submit += 1;
-                            sqe->flags |= (IOSQE_IO_LINK | IOSQE_ASYNC);
+                            sqe->flags |= IOSQE_IO_LINK;
                         }
                     } else {
                         flush_required = true;
@@ -377,6 +385,9 @@ bool MergeWorker::MergeOrderedOpsAsync() {
             SNAP_LOG(ERROR) << " Failed to commit the merged block in the header";
             return false;
         }
+
+        // Invalidate page-cache pages
+        posix_fadvise(base_path_merge_fd_.get(), 0, 0, POSIX_FADV_DONTNEED);
 
         SNAP_LOG(DEBUG) << "Block commit of size: " << snapuserd_->GetTotalBlocksToMerge();
 
@@ -463,6 +474,9 @@ bool MergeWorker::MergeOrderedOps() {
             snapuserd_->SetMergeFailed(ra_block_index_);
             return false;
         }
+
+        // Invalidate page-cache pages
+        posix_fadvise(base_path_merge_fd_.get(), 0, 0, POSIX_FADV_DONTNEED);
 
         SNAP_LOG(DEBUG) << "Block commit of size: " << snapuserd_->GetTotalBlocksToMerge();
         // Mark the block as merge complete
@@ -558,9 +572,7 @@ bool MergeWorker::InitializeIouring() {
 
     ring_ = std::make_unique<struct io_uring>();
 
-    int ret = io_uring_queue_init(queue_depth_, ring_.get(), 0);
-    if (ret) {
-        LOG(ERROR) << "Merge: io_uring_queue_init failed with ret: " << ret;
+    if (!InitializeUringForMerge(ring_.get(), queue_depth_)) {
         return false;
     }
 
@@ -579,10 +591,10 @@ void MergeWorker::FinalizeIouring() {
 bool MergeWorker::Run() {
     SNAP_LOG(DEBUG) << "Waiting for merge begin...";
 
-    pthread_setname_np(pthread_self(), "MergeWorker");
+    std::string thread_name = "MergeWorker_" + misc_name_;
+    prctl(PR_SET_NAME, thread_name.c_str());
 
     if (!snapuserd_->WaitForMergeBegin()) {
-        SNAP_LOG(ERROR) << "Merge terminated early...";
         return true;
     }
     auto merge_thread_priority = android::base::GetUintProperty<uint32_t>(
@@ -593,10 +605,10 @@ bool MergeWorker::Run() {
     }
 
     if (!SetProfiles({"CPUSET_SP_BACKGROUND"})) {
-        SNAP_PLOG(ERROR) << "Failed to assign task profile to Mergeworker thread";
+        SNAP_LOG(ERROR) << "Failed to assign task profile to Mergeworker thread";
     }
 
-    SNAP_LOG(INFO) << "Merge starting..";
+    SNAP_LOG(INFO) << "Merge starting: " << thread_name;
 
     bufsink_.Initialize(PAYLOAD_BUFFER_SZ);
 

@@ -27,8 +27,6 @@ on early-init
     # Set the security context of /postinstall if present.
     restorecon /postinstall
 
-    mkdir /acct/uid
-
     # memory.pressure_level used by lmkd
     chown root system /dev/memcg/memory.pressure_level
     chmod 0040 /dev/memcg/memory.pressure_level
@@ -54,6 +52,10 @@ on early-init
     mkdir /linkerconfig/bootstrap 0755
     mkdir /linkerconfig/default 0755
 
+    # Greatly extend dm-verity's Merkle tree cache timeout.  The default timeout
+    # is much too short and is unnecessary, given that there is also a shrinker.
+    write /sys/module/dm_bufio/parameters/max_age_seconds 86400
+
     # Disable dm-verity hash prefetching, since it doesn't help performance
     # Read more in b/136247322
     write /sys/module/dm_verity/parameters/prefetch_cluster 0
@@ -70,18 +72,21 @@ on early-init
 
     start ueventd
 
+    # Mount tracefs (with GID=AID_READTRACEFS)
+    mount tracefs tracefs /sys/kernel/tracing gid=3012
+
+    # Run the init_dev_config service to configure the device.
+    exec_start init_dev_config
+
     # Run apexd-bootstrap so that APEXes that provide critical libraries
     # become available. Note that this is executed as exec_start to ensure that
     # the libraries are available to the processes started after this statement.
     exec_start apexd-bootstrap
-    perform_apex_config --bootstrap
+    perform_apex_config
 
     # These must already exist by the time boringssl_self_test32 / boringssl_self_test64 run.
     mkdir /dev/boringssl 0755 root root
     mkdir /dev/boringssl/selftest 0755 root root
-
-    # Mount tracefs (with GID=AID_READTRACEFS)
-    mount tracefs tracefs /sys/kernel/tracing gid=3012
 
     # create sys dirctory
     mkdir /dev/sys 0755 system system
@@ -103,7 +108,7 @@ on init
 
     # Mix device-specific information into the entropy pool
     copy /proc/cmdline /dev/urandom
-    copy /system/etc/prop.default /dev/urandom
+    copy /proc/bootconfig /dev/urandom
 
     symlink /proc/self/fd/0 /dev/stdin
     symlink /proc/self/fd/1 /dev/stdout
@@ -111,37 +116,6 @@ on init
 
     # Create socket dir for ot-daemon
     mkdir /dev/socket/ot-daemon 0770 thread_network thread_network
-
-    # Create energy-aware scheduler tuning nodes
-    mkdir /dev/stune/foreground
-    mkdir /dev/stune/background
-    mkdir /dev/stune/top-app
-    mkdir /dev/stune/rt
-    chown system system /dev/stune
-    chown system system /dev/stune/foreground
-    chown system system /dev/stune/background
-    chown system system /dev/stune/top-app
-    chown system system /dev/stune/rt
-    chown system system /dev/stune/tasks
-    chown system system /dev/stune/foreground/tasks
-    chown system system /dev/stune/background/tasks
-    chown system system /dev/stune/top-app/tasks
-    chown system system /dev/stune/rt/tasks
-    chown system system /dev/stune/cgroup.procs
-    chown system system /dev/stune/foreground/cgroup.procs
-    chown system system /dev/stune/background/cgroup.procs
-    chown system system /dev/stune/top-app/cgroup.procs
-    chown system system /dev/stune/rt/cgroup.procs
-    chmod 0664 /dev/stune/tasks
-    chmod 0664 /dev/stune/foreground/tasks
-    chmod 0664 /dev/stune/background/tasks
-    chmod 0664 /dev/stune/top-app/tasks
-    chmod 0664 /dev/stune/rt/tasks
-    chmod 0664 /dev/stune/cgroup.procs
-    chmod 0664 /dev/stune/foreground/cgroup.procs
-    chmod 0664 /dev/stune/background/cgroup.procs
-    chmod 0664 /dev/stune/top-app/cgroup.procs
-    chmod 0664 /dev/stune/rt/cgroup.procs
 
     # cpuctl hierarchy for devices using utilclamp
     mkdir /dev/cpuctl/foreground
@@ -151,8 +125,11 @@ on init
     mkdir /dev/cpuctl/system
     mkdir /dev/cpuctl/system-background
     mkdir /dev/cpuctl/dex2oat
+    # move foreground_window to the bottom to preserve the original order
+    mkdir /dev/cpuctl/foreground_window
     chown system system /dev/cpuctl
     chown system system /dev/cpuctl/foreground
+    chown system system /dev/cpuctl/foreground_window
     chown system system /dev/cpuctl/background
     chown system system /dev/cpuctl/top-app
     chown system system /dev/cpuctl/rt
@@ -161,6 +138,7 @@ on init
     chown system system /dev/cpuctl/dex2oat
     chown system system /dev/cpuctl/tasks
     chown system system /dev/cpuctl/foreground/tasks
+    chown system system /dev/cpuctl/foreground_window/tasks
     chown system system /dev/cpuctl/background/tasks
     chown system system /dev/cpuctl/top-app/tasks
     chown system system /dev/cpuctl/rt/tasks
@@ -169,6 +147,7 @@ on init
     chown system system /dev/cpuctl/dex2oat/tasks
     chown system system /dev/cpuctl/cgroup.procs
     chown system system /dev/cpuctl/foreground/cgroup.procs
+    chown system system /dev/cpuctl/foreground_window/cgroup.procs
     chown system system /dev/cpuctl/background/cgroup.procs
     chown system system /dev/cpuctl/top-app/cgroup.procs
     chown system system /dev/cpuctl/rt/cgroup.procs
@@ -177,6 +156,7 @@ on init
     chown system system /dev/cpuctl/dex2oat/cgroup.procs
     chmod 0664 /dev/cpuctl/tasks
     chmod 0664 /dev/cpuctl/foreground/tasks
+    chmod 0664 /dev/cpuctl/foreground_window/tasks
     chmod 0664 /dev/cpuctl/background/tasks
     chmod 0664 /dev/cpuctl/top-app/tasks
     chmod 0664 /dev/cpuctl/rt/tasks
@@ -185,6 +165,7 @@ on init
     chmod 0664 /dev/cpuctl/dex2oat/tasks
     chmod 0664 /dev/cpuctl/cgroup.procs
     chmod 0664 /dev/cpuctl/foreground/cgroup.procs
+    chmod 0664 /dev/cpuctl/foreground_window/cgroup.procs
     chmod 0664 /dev/cpuctl/background/cgroup.procs
     chmod 0664 /dev/cpuctl/top-app/cgroup.procs
     chmod 0664 /dev/cpuctl/rt/cgroup.procs
@@ -209,24 +190,6 @@ on init
     chown system system /dev/cpuctl/camera-daemon/cgroup.procs
     chmod 0664 /dev/cpuctl/camera-daemon/tasks
     chmod 0664 /dev/cpuctl/camera-daemon/cgroup.procs
-
-    # Create an stune group for camera-specific processes
-    mkdir /dev/stune/camera-daemon
-    chown system system /dev/stune/camera-daemon
-    chown system system /dev/stune/camera-daemon/tasks
-    chown system system /dev/stune/camera-daemon/cgroup.procs
-    chmod 0664 /dev/stune/camera-daemon/tasks
-    chmod 0664 /dev/stune/camera-daemon/cgroup.procs
-
-    # Create an stune group for NNAPI HAL processes
-    mkdir /dev/stune/nnapi-hal
-    chown system system /dev/stune/nnapi-hal
-    chown system system /dev/stune/nnapi-hal/tasks
-    chown system system /dev/stune/nnapi-hal/cgroup.procs
-    chmod 0664 /dev/stune/nnapi-hal/tasks
-    chmod 0664 /dev/stune/nnapi-hal/cgroup.procs
-    write /dev/stune/nnapi-hal/schedtune.boost 1
-    write /dev/stune/nnapi-hal/schedtune.prefer_idle 1
 
     # Create blkio group and apply initial settings.
     # This feature needs kernel to support it, and the
@@ -324,6 +287,7 @@ on init
     write /proc/sys/kernel/sched_child_runs_first 0
 
     write /proc/sys/kernel/randomize_va_space 2
+    write /proc/sys/kernel/kptr_restrict 2
     write /proc/sys/vm/mmap_min_addr 32768
     write /proc/sys/net/ipv4/ping_group_range "0 2147483647"
     write /proc/sys/net/unix/max_dgram_qlen 2400
@@ -374,6 +338,11 @@ on init
     copy /dev/cpuset/cpus /dev/cpuset/top-app/cpus
     copy /dev/cpuset/mems /dev/cpuset/top-app/mems
 
+    # move foreground_window to the bottom to preserve the original order
+    mkdir /dev/cpuset/foreground_window
+    copy /dev/cpuset/cpus /dev/cpuset/foreground_window/cpus
+    copy /dev/cpuset/mems /dev/cpuset/foreground_window/mems
+
     # create a cpuset for camera daemon processes
     mkdir /dev/cpuset/camera-daemon
     copy /dev/cpuset/cpus /dev/cpuset/camera-daemon/cpus
@@ -382,6 +351,7 @@ on init
     # change permissions for all cpusets we'll touch at runtime
     chown system system /dev/cpuset
     chown system system /dev/cpuset/foreground
+    chown system system /dev/cpuset/foreground_window
     chown system system /dev/cpuset/background
     chown system system /dev/cpuset/system-background
     chown system system /dev/cpuset/top-app
@@ -389,6 +359,7 @@ on init
     chown system system /dev/cpuset/camera-daemon
     chown system system /dev/cpuset/tasks
     chown system system /dev/cpuset/foreground/tasks
+    chown system system /dev/cpuset/foreground_window/tasks
     chown system system /dev/cpuset/background/tasks
     chown system system /dev/cpuset/system-background/tasks
     chown system system /dev/cpuset/top-app/tasks
@@ -396,6 +367,7 @@ on init
     chown system system /dev/cpuset/camera-daemon/tasks
     chown system system /dev/cpuset/cgroup.procs
     chown system system /dev/cpuset/foreground/cgroup.procs
+    chown system system /dev/cpuset/foreground_window/cgroup.procs
     chown system system /dev/cpuset/background/cgroup.procs
     chown system system /dev/cpuset/system-background/cgroup.procs
     chown system system /dev/cpuset/top-app/cgroup.procs
@@ -406,6 +378,7 @@ on init
     chmod 0775 /dev/cpuset/system-background
 
     chmod 0664 /dev/cpuset/foreground/tasks
+    chmod 0664 /dev/cpuset/foreground_window/tasks
     chmod 0664 /dev/cpuset/background/tasks
     chmod 0664 /dev/cpuset/system-background/tasks
     chmod 0664 /dev/cpuset/top-app/tasks
@@ -413,6 +386,7 @@ on init
     chmod 0664 /dev/cpuset/tasks
     chmod 0664 /dev/cpuset/camera-daemon/tasks
     chmod 0664 /dev/cpuset/foreground/cgroup.procs
+    chmod 0664 /dev/cpuset/foreground_window/cgroup.procs
     chmod 0664 /dev/cpuset/background/cgroup.procs
     chmod 0664 /dev/cpuset/system-background/cgroup.procs
     chmod 0664 /dev/cpuset/top-app/cgroup.procs
@@ -422,7 +396,7 @@ on init
 
     # make the PSI monitor accessible to others
     chown system system /proc/pressure/memory
-    chmod 0664 /proc/pressure/memory
+    chmod 0666 /proc/pressure/memory
 
     mount bpf bpf /sys/fs/bpf nodev noexec nosuid
 
@@ -480,6 +454,14 @@ on init
     start servicemanager
     start hwservicemanager
     start vndservicemanager
+
+    # Mount /mnt/vm ASAP to allow early VMs to run.
+    mkdir /mnt/vm 0755 root root
+    mount tmpfs tmpfs /mnt/vm nosuid nodev noexec rw
+    restorecon /mnt/vm
+    chown system system /mnt/vm
+    chmod 0770 /mnt/vm
+    mkdir /mnt/vm/early 0770 system system
 
 # Run boringssl self test for each ABI.  Any failures trigger reboot to firmware.
 import /system/etc/init/hw/init.boringssl.${ro.zygote}.rc
@@ -545,7 +527,8 @@ on late-init
     trigger post-fs-data
 
     # Should be before netd, but after apex, properties and logging is available.
-    trigger load_bpf_programs
+    trigger load-bpf-programs
+    trigger bpf-progs-loaded
 
     # Now we can start zygote.
     trigger zygote-start
@@ -593,6 +576,9 @@ on post-fs
     chown root log /proc/vmallocinfo
     chmod 0440 /proc/vmallocinfo
 
+    chown root log /proc/allocinfo
+    chmod 0440 /proc/allocinfo
+
     chown root log /proc/slabinfo
     chmod 0440 /proc/slabinfo
 
@@ -620,11 +606,14 @@ on post-fs
     mkdir /metadata/bootstat 0750 system log
     mkdir /metadata/ota 0750 root system
     mkdir /metadata/ota/snapshots 0750 root system
-    mkdir /metadata/userspacereboot 0770 root system
     mkdir /metadata/watchdog 0770 root system
+    mkdir /metadata/tradeinmode 0770 root system
+    mkdir /metadata/prefetch 0770 root system
 
     mkdir /metadata/apex 0700 root system
     mkdir /metadata/apex/sessions 0700 root system
+    mkdir /metadata/apex/images 0700 root system
+    mkdir /metadata/apex/config 0700 root system
     # On some devices we see a weird behaviour in which /metadata/apex doesn't
     # have a correct label. To workaround this bug, explicitly call restorecon
     # on /metadata/apex. For most of the boot sequences /metadata/apex will
@@ -634,14 +623,6 @@ on post-fs
 
     mkdir /metadata/staged-install 0770 root system
 
-    mkdir /metadata/aconfig 0775 root system
-    mkdir /metadata/aconfig/flags 0770 root system
-    mkdir /metadata/aconfig/maps 0775 root system
-    mkdir /metadata/aconfig/boot 0775 root system
-
-    mkdir /metadata/aconfig_test_missions 0775 root system
-    exec_start aconfigd-platform-init
-
 on late-fs
     # Ensure that tracefs has the correct permissions.
     # This does not work correctly if it is called in post-fs.
@@ -650,9 +631,6 @@ on late-fs
 
     # HALs required before storage encryption can get unlocked (FBE)
     class_start early_hal
-
-    # Load trusted keys from dm-verity protected partitions
-    exec -- /system/bin/fsverity_init --load-verified-keys
 
 # Only enable the bootreceiver tracing instance for kernels 5.10 and above.
 on late-fs && property:ro.kernel.version=4.19
@@ -674,8 +652,6 @@ on property:ro.product.cpu.abilist64=* && property:bootreceiver.enable=1
     write /sys/kernel/tracing/instances/bootreceiver/events/error_report/error_report_end/enable 1
 
 on post-fs-data
-
-    mark_post_data
 
     # Start checkpoint before we touch data
     exec - system system -- /system/bin/vdc checkpoint prepareCheckpoint
@@ -736,7 +712,6 @@ on post-fs-data
     mkdir /data/property 0700 root root encryption=Require
     load_persist_props
 
-    start logd
     start logd-reinit
 
     # Some existing vendor rc files use 'on load_persist_props_action' to know
@@ -760,8 +735,7 @@ on post-fs-data
     mkdir /data/apex/active 0755 root system
     mkdir /data/apex/backup 0700 root system
     mkdir /data/apex/decompressed 0755 root system encryption=Require
-    mkdir /data/apex/hashtree 0700 root system
-    mkdir /data/apex/sessions 0700 root system
+    mkdir /data/apex/images 0755 root system
     mkdir /data/app-staging 0751 system system encryption=DeleteIfNecessary
     mkdir /data/apex/ota_reserved 0700 root system encryption=Require
     setprop apexd.status ""
@@ -806,6 +780,8 @@ on post-fs-data
     mkdir /data/misc/shared_relro 0771 shared_relro shared_relro
     mkdir /data/misc/systemkeys 0700 system system
     mkdir /data/misc/wifi 0770 wifi wifi
+    mkdir /data/misc/wifi/mainline_supplicant 0770 wifi wifi
+    mkdir /data/misc/wifi/mainline_supplicant/sockets 0770 wifi wifi
     mkdir /data/misc/wifi/sockets 0770 wifi wifi
     mkdir /data/misc/wifi/wpa_supplicant 0770 wifi wifi
     mkdir /data/misc/ethernet 0770 system system
@@ -820,7 +796,7 @@ on post-fs-data
     mkdir /data/misc/vold 0700 root root
     mkdir /data/misc/boottrace 0771 system shell
     mkdir /data/misc/update_engine 0700 root root
-    mkdir /data/misc/update_engine_log 02750 root log
+    mkdir /data/misc/update_engine_log 02750 root update_engine_log
     mkdir /data/misc/trace 0700 root root
     # create location to store surface and window trace files
     mkdir /data/misc/wmtrace 0700 system system
@@ -848,6 +824,10 @@ on post-fs-data
     mkdir /data/misc/odsign/metrics 0770 root system
     # directory used for connectivity blob store.
     mkdir /data/misc/connectivityblobdb 0770 system system
+
+    # Setup SurfaceFlinger shader caching
+    mkdir /data/misc/surfaceflinger 0700 system system
+    setprop service.sf.cache_dir_available 1
 
     # Directory for VirtualizationService temporary image files.
     # Delete any stale files owned by the old virtualizationservice uid (b/230056726).
@@ -894,7 +874,7 @@ on post-fs-data
     mkdir /data/ota 0771 root root encryption=Require
 
     # create the OTA package directory. It will be accessed by GmsCore (cache
-    # group), update_engine and update_verifier.
+    # group), update_engine
     mkdir /data/ota_package 0770 system cache encryption=Require
 
     # create resource-cache and double-check the perms
@@ -934,7 +914,7 @@ on post-fs-data
     mkdir /data/system/users 0775 system system
     # Mkdir and set SELinux security contexts for shutdown-checkpoints.
     # TODO(b/270286197): remove these after couple releases.
-    mkdir /data/system/shutdown-checkpoints 0700 system system
+    mkdir /data/system/shutdown-checkpoints 0755 system system
     restorecon_recursive /data/system/shutdown-checkpoints
 
     # Create the parent directories of the user CE and DE storage directories.
@@ -1021,17 +1001,23 @@ on post-fs-data
 
     # Create directories for statsd
     mkdir /data/misc/stats-active-metric/ 0770 statsd system
+    mkdir /data/misc/stats-atoms/ 0775 statsd system
     mkdir /data/misc/stats-data/ 0770 statsd system
     mkdir /data/misc/stats-data/restricted-data 0770 statsd system
     mkdir /data/misc/stats-metadata/ 0770 statsd system
     mkdir /data/misc/stats-service/ 0770 statsd system
     mkdir /data/misc/train-info/ 0770 statsd system
 
-    # Wait for apexd to finish activating APEXes before starting more processes.
+    # TODO(b/400439023): Remove once attest modules flagging is removed.
     wait_for_prop apexd.status activated
+    # Wait for KeyMints to receive APEX module info before starting code from updateable APEXes.
+    # This is to prevent APEX modules from interfering in module measurement.
+    wait_for_prop keystore.module_hash.sent true
     perform_apex_config
-    exec_start aconfigd-mainline-init
-    start aconfigd
+
+    start system_aconfigd_socket_service
+    exec_start mainline_aconfigd_init
+    start mainline_aconfigd_socket_service
 
     # Create directories for boot animation.
     mkdir /data/misc/bootanim 0755 system system
@@ -1072,11 +1058,6 @@ on post-fs-data
     # completed and apexd.status becomes "ready".
     exec_start apexd-snapshotde
 
-    # sys.memfd_use set to false by default, which keeps it disabled
-    # until it is confirmed that apps and vendor processes don't make
-    # IOCTLs on ashmem fds any more.
-    setprop sys.use_memfd false
-
     # Set fscklog permission
     chown root system /dev/fscklogs/log
     chmod 0770 /dev/fscklogs/log
@@ -1090,14 +1071,36 @@ on post-fs-data
 on property:vold.checkpoint_committed=1
     trigger post-fs-data-checkpointed
 
+# It is important that we start bpfloader after:
+#   - /sys/fs/bpf is already mounted,
+#   - apex (incl. rollback) is initialized (so that we can load bpf
+#     programs shipped as part of apex mainline modules)
+#   - logd is ready for us to log stuff
+#
+# At the same time we want to be as early as possible to reduce races and thus
+# failures (before memory is fragmented, and cpu is busy running tons of other
+# stuff) and we absolutely want to be before netd and the system boot slot is
+# considered to have booted successfully.
+on load-bpf-programs
+    # Temporarily relax access to kallsyms so that bpfloader can resolve kernel symbols
+    # at load time.
+    #
+    # NOTE: Still requires CAP_SYSLOG and sepolicy allow rules to read /proc/kallsyms
+    write /proc/sys/kernel/kptr_restrict 1
+
+    exec_start bpfloader
+
+    # Restore kallsyms protection after bpf programs have been loaded.
+    write /proc/sys/kernel/kptr_restrict 2
+
+on bpf-progs-loaded
+    start netd
+
 # It is recommended to put unnecessary data/ initialization from post-fs-data
 # to start-zygote in device's init.rc to unblock zygote start.
 on zygote-start
     wait_for_prop odsign.verification.done 1
-    # A/B update verifier that marks a successful boot.
-    exec_start update_verifier
     start statsd
-    start netd
     start zygote
     start zygote_secondary
 
@@ -1105,6 +1108,13 @@ on boot && property:ro.config.low_ram=true
     # Tweak background writeout
     write /proc/sys/vm/dirty_expire_centisecs 200
     write /proc/sys/vm/dirty_background_ratio  5
+
+on property:sys.boot_completed=1 && property:ro.config.batteryless=true
+    # Flush data and checkpoint more aggressively to prepare sudden power cuts
+    write /proc/sys/vm/dirty_expire_centisecs 200
+    write /proc/sys/vm/dirty_writeback_centisecs 200
+    write /proc/sys/vm/dirty_background_ratio  5
+    write /dev/sys/fs/by-name/userdata/cp_interval 2
 
 on boot && property:suspend.disable_sync_on_suspend=true
     write /sys/power/sync_on_suspend 0
@@ -1126,9 +1136,9 @@ on boot
 
     # System server manages zram writeback
     chown root system /sys/block/zram0/idle
-    chmod 0664 /sys/block/zram0/idle
+    chmod 0220 /sys/block/zram0/idle
     chown root system /sys/block/zram0/writeback
-    chmod 0664 /sys/block/zram0/writeback
+    chmod 0220 /sys/block/zram0/writeback
 
     # to access F2FS sysfs on dm-<num> directly
     mkdir /dev/sys/fs/by-name 0755 system system
@@ -1144,7 +1154,7 @@ on boot
     # to avoid power consumption when system becomes mostly idle. Be careful
     # to make it too large, since it may bring userdata loss, if they
     # are not aware of using fsync()/sync() to prepare sudden power-cut.
-    write /dev/sys/fs/by-name/userdata/cp_interval 200
+    write /dev/sys/fs/by-name/userdata/cp_interval 30
     write /dev/sys/fs/by-name/userdata/gc_urgent_sleep_time 50
     write /dev/sys/fs/by-name/userdata/iostat_period_ms 1000
     write /dev/sys/fs/by-name/userdata/iostat_enable 1
@@ -1208,6 +1218,9 @@ on boot
     chown system system /sys/kernel/ipv4/tcp_rmem_min
     chown system system /sys/kernel/ipv4/tcp_rmem_def
     chown system system /sys/kernel/ipv4/tcp_rmem_max
+    chown system system /sys/firmware/acpi/tables
+    chown system system /sys/firmware/acpi/tables/BERT
+    chown system system /sys/firmware/acpi/tables/data/BERT
     chown root radio /proc/cmdline
     chown root system /proc/bootconfig
 
@@ -1239,7 +1252,7 @@ on property:sys.boot_completed=1
 # and chown/chmod does not work for /proc/sys/ entries.
 # So proxy writes through init.
 on property:sys.sysctl.extra_free_kbytes=*
-    exec -- /system/bin/extra_free_kbytes.sh ${sys.sysctl.extra_free_kbytes}
+    exec_background -- /system/bin/extra_free_kbytes.sh ${sys.sysctl.extra_free_kbytes}
 
 # Allow users to drop caches
 on property:perf.drop_caches=3
@@ -1250,41 +1263,7 @@ on property:perf.drop_caches=3
 on property:net.tcp_def_init_rwnd=*
     write /proc/sys/net/ipv4/tcp_default_init_rwnd ${net.tcp_def_init_rwnd}
 
-# perf_event_open syscall security:
-# Newer kernels have the ability to control the use of the syscall via SELinux
-# hooks. init tests for this, and sets sys_init.perf_lsm_hooks to 1 if the
-# kernel has the hooks. In this case, the system-wide perf_event_paranoid
-# sysctl is set to -1 (unrestricted use), and the SELinux policy is used for
-# controlling access. On older kernels, the paranoid value is the only means of
-# controlling access. It is normally 3 (allow only root), but the shell user
-# can lower it to 1 (allowing thread-scoped pofiling) via security.perf_harden.
-on load_bpf_programs && property:sys.init.perf_lsm_hooks=1
-    write /proc/sys/kernel/perf_event_paranoid -1
-on property:security.perf_harden=0 && property:sys.init.perf_lsm_hooks=""
-    write /proc/sys/kernel/perf_event_paranoid 1
-on property:security.perf_harden=1 && property:sys.init.perf_lsm_hooks=""
-    write /proc/sys/kernel/perf_event_paranoid 3
-
-# Additionally, simpleperf profiler uses debug.* and security.perf_harden
-# sysprops to be able to indirectly set these sysctls.
-on property:security.perf_harden=0
-    write /proc/sys/kernel/perf_event_max_sample_rate ${debug.perf_event_max_sample_rate:-100000}
-    write /proc/sys/kernel/perf_cpu_time_max_percent ${debug.perf_cpu_time_max_percent:-25}
-    write /proc/sys/kernel/perf_event_mlock_kb ${debug.perf_event_mlock_kb:-516}
-# Default values.
-on property:security.perf_harden=1
-    write /proc/sys/kernel/perf_event_max_sample_rate 100000
-    write /proc/sys/kernel/perf_cpu_time_max_percent 25
-    write /proc/sys/kernel/perf_event_mlock_kb 516
-
-# This property can be set only on userdebug/eng. See neverallow rule in
-# /system/sepolicy/private/property.te .
-on property:security.lower_kptr_restrict=1
-    write /proc/sys/kernel/kptr_restrict 0
-
-on property:security.lower_kptr_restrict=0
-    write /proc/sys/kernel/kptr_restrict 2
-
+import /system/etc/init/init-perfetto.rc
 
 # on shutdown
 # In device's init.rc, this trigger can be used to do device-specific actions
@@ -1298,6 +1277,18 @@ service ueventd /system/bin/ueventd
     seclabel u:r:ueventd:s0
     user root
     shutdown critical
+
+# This service takes care of early initialization of device configuration at
+# runtime, like per-SKU settings or sysprops. The service runs before apexd
+# bootstrap, which means it can also be used to perform conditional APEX
+# activation via selection sysprops (e.g. setting ro.boot.vendor.apex.*).
+# The 'ro.vendor.init_dev_config.path' sysprop should be configured at build
+# time via PRODUCT_VENDOR_PROPERTIES, and must point to a binary built with
+# bootstrap bionic and labeled as 'init_dev_config_exec'.
+service init_dev_config ${ro.vendor.init_dev_config.path}
+    oneshot
+    user system
+    seclabel u:r:init_dev_config:s0
 
 service console /system/bin/sh
     class core
@@ -1322,46 +1313,6 @@ on property:ro.debuggable=1
 
 on init && property:ro.debuggable=1
     start console
-
-on userspace-reboot-requested
-  # TODO(b/135984674): reset all necessary properties here.
-  setprop sys.boot_completed ""
-  setprop dev.bootcomplete ""
-  setprop sys.init.updatable_crashing ""
-  setprop sys.init.updatable_crashing_process_name ""
-  setprop sys.user.0.ce_available ""
-  setprop sys.shutdown.requested ""
-  setprop service.bootanim.exit ""
-  setprop service.bootanim.progress ""
-
-on userspace-reboot-fs-remount
-  # Make sure that vold is running.
-  # This is mostly a precaution measure in case vold for some reason wasn't running when
-  # userspace reboot was initiated.
-  start vold
-  exec - system system -- /system/bin/vdc checkpoint resetCheckpoint
-  exec - system system -- /system/bin/vdc checkpoint markBootAttempt
-  # Unmount /data_mirror mounts in the reverse order of corresponding mounts.
-  umount /data_mirror/data_ce/null/0
-  umount /data_mirror/data_ce/null
-  umount /data_mirror/data_de/null
-  umount /data_mirror/storage_area/0
-  umount /data_mirror/storage_area
-  umount /data_mirror/cur_profiles
-  umount /data_mirror/ref_profiles
-  umount /data_mirror
-  remount_userdata
-  start bootanim
-
-on userspace-reboot-resume
-  trigger userspace-reboot-fs-remount
-  trigger post-fs-data
-  trigger zygote-start
-  trigger early-boot
-  trigger boot
-
-on property:sys.boot_completed=1 && property:sys.init.userspace_reboot.in_progress=1
-  setprop sys.init.userspace_reboot.in_progress ""
 
 # Multi-Gen LRU Experiment
 on property:persist.device_config.mglru_native.lru_gen_config=none

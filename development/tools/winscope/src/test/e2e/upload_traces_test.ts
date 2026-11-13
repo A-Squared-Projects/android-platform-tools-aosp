@@ -15,44 +15,54 @@
  */
 
 import {browser, by, element} from 'protractor';
-import {E2eTestUtils} from './utils';
+import {
+  areMessagesEmitted,
+  clickClearAllButton,
+  clickCloseIcon,
+  clickViewTracesButton,
+  loadBugReport,
+  setTimeouts,
+  uploadFixture,
+  WINSCOPE_URL,
+} from './utils';
 
 describe('Upload traces', () => {
-  const DEFAULT_TIMEOUT_MS = 15000;
+  const DEFAULT_TIMEOUT_MS = 40000;
 
   beforeAll(async () => {
     jasmine.DEFAULT_TIMEOUT_INTERVAL = DEFAULT_TIMEOUT_MS;
-    await browser.manage().timeouts().implicitlyWait(DEFAULT_TIMEOUT_MS);
-    await E2eTestUtils.checkServerIsUp('Winscope', E2eTestUtils.WINSCOPE_URL);
   });
 
   beforeEach(async () => {
-    await browser.get(E2eTestUtils.WINSCOPE_URL);
+    await setTimeouts(DEFAULT_TIMEOUT_MS);
+    await browser.get(WINSCOPE_URL);
   });
 
   it('can clear all files', async () => {
-    await E2eTestUtils.loadBugReport(DEFAULT_TIMEOUT_MS);
-    await E2eTestUtils.clickClearAllButton();
+    await loadBugReport(DEFAULT_TIMEOUT_MS);
+    await clickClearAllButton();
     await checkNoFilesUploaded();
   });
 
   it('can remove a file using the close icon', async () => {
-    await E2eTestUtils.loadBugReport(DEFAULT_TIMEOUT_MS);
-    await E2eTestUtils.clickCloseIcon();
+    await loadBugReport(DEFAULT_TIMEOUT_MS);
+    await clickCloseIcon();
     await checkFileRemoved();
   });
 
   it('can replace an uploaded file with a new file', async () => {
-    await E2eTestUtils.loadBugReport(DEFAULT_TIMEOUT_MS);
-    await E2eTestUtils.uploadFixture(
-      'traces/perfetto/layers_trace.perfetto-trace',
-    );
-    await checkFileReplaced();
+    const dir = 'traces/perfetto/';
+    const firstFile = 'layers_trace.perfetto-trace';
+    const secondFile = 'layers_trace_with_duplicated_ids.perfetto-trace';
+    await uploadFixture(dir + firstFile);
+    await checkFileUploaded(firstFile);
+    await uploadFixture(dir + secondFile);
+    await checkFileReplaced(firstFile, secondFile);
   });
 
   it('can process bugreport', async () => {
-    await E2eTestUtils.loadBugReport(DEFAULT_TIMEOUT_MS);
-    await E2eTestUtils.clickViewTracesButton();
+    await loadBugReport(DEFAULT_TIMEOUT_MS);
+    await clickViewTracesButton();
     await checkRendersSurfaceFlingerView();
   });
 
@@ -64,12 +74,8 @@ describe('Upload traces', () => {
   }
 
   it("doesn't emit messages for valid trace file", async () => {
-    await E2eTestUtils.uploadFixture(
-      'traces/elapsed_and_real_timestamp/SurfaceFlinger.pb',
-    );
-    expect(
-      await E2eTestUtils.areMessagesEmitted(DEFAULT_TIMEOUT_MS),
-    ).toBeFalsy();
+    await uploadFixture('traces/elapsed_and_real_timestamp/SurfaceFlinger.pb');
+    expect(await areMessagesEmitted(DEFAULT_TIMEOUT_MS)).toBeFalsy();
   });
 
   async function checkNoFilesUploaded() {
@@ -88,11 +94,16 @@ describe('Upload traces', () => {
     expect(text).toContain('Transitions');
   }
 
-  async function checkFileReplaced() {
+  async function checkFileUploaded(file: string) {
     const text = await element(by.css('.uploaded-files')).getText();
     expect(text).toContain('Surface Flinger');
+    expect(text).toContain(file);
+  }
 
-    expect(text).not.toContain('layers_trace_from_transactions.winscope');
-    expect(text).toContain('layers_trace.perfetto-trace');
+  async function checkFileReplaced(firstFile: string, secondFile: string) {
+    const text = await element(by.css('.uploaded-files')).getText();
+    expect(text).toContain('Surface Flinger');
+    expect(text).not.toContain(firstFile);
+    expect(text).toContain(secondFile);
   }
 });

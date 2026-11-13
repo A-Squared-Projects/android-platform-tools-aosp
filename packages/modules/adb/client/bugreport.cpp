@@ -54,7 +54,7 @@ class BugreportStandardStreamsCallback : public StandardStreamsCallbackInterface
         SetLineMessage("generating");
     }
 
-    bool OnStdout(const char* buffer, size_t length) {
+    bool OnStdoutReceived(const char* buffer, size_t length) override {
         for (size_t i = 0; i < length; i++) {
             char c = buffer[i];
             if (c == '\n') {
@@ -67,8 +67,8 @@ class BugreportStandardStreamsCallback : public StandardStreamsCallbackInterface
         return true;
     }
 
-    bool OnStderr(const char* buffer, size_t length) {
-      return OnStream(nullptr, stderr, buffer, length, false);
+    bool OnStderrReceived(const char* buffer, size_t length) override {
+        return SendTo(nullptr, stderr, buffer, length, false);
     }
 
     int Done(int unused_) {

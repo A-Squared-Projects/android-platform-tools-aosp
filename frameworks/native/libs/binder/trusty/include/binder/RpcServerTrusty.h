@@ -29,6 +29,7 @@
 #include <vector>
 
 #include <lib/tipc/tipc_srv.h>
+#include <uapi/trusty_peer_id.h>
 
 namespace android {
 
@@ -42,7 +43,7 @@ public:
     // equivalent.
     struct PortAcl {
         uint32_t flags;
-        std::vector<const uuid> uuids;
+        std::vector<uuid> uuids;
         const void* extraData;
     };
 
@@ -56,6 +57,7 @@ public:
     static sp<RpcServerTrusty> make(
             tipc_hset* handleSet, std::string&& portName, std::shared_ptr<const PortAcl>&& portAcl,
             size_t msgMaxSize,
+            size_t msgQueueLen,
             std::unique_ptr<RpcTransportCtxFactory> rpcTransportCtxFactory = nullptr);
 
     [[nodiscard]] bool setProtocolVersion(uint32_t version) {
@@ -67,12 +69,21 @@ public:
     }
     void setRootObject(const sp<IBinder>& binder) { mRpcServer->setRootObject(binder); }
     void setRootObjectWeak(const wp<IBinder>& binder) { mRpcServer->setRootObjectWeak(binder); }
+    /*
+     * Assumes the peer (passed via the const void*, size_t pair) is specified
+     * by a UUID. Deprecated. Use the version below that takes a trusty_peer_id.
+     */
+    void setPerSessionRootObject(std::function<sp<IBinder>(wp<RpcSession> session, const void* peer,
+                                                           size_t peer_len)>&& create_session);
     void setPerSessionRootObject(
-            std::function<sp<IBinder>(wp<RpcSession> session, const void*, size_t)>&& object) {
-        mRpcServer->setPerSessionRootObject(std::move(object));
+            std::function<sp<IBinder>(wp<RpcSession> session, const trusty_peer_id& peer,
+                                      size_t peer_len)>&& create_session) {
+        setPerSessionRootObjectInternal(mRpcServer.get(), std::move(create_session));
     }
+
     sp<IBinder> getRootObject() { return mRpcServer->getRootObject(); }
 
+    status_t queueConnect(binder::unique_fd chan, const trusty_peer_id& peer, size_t peer_len);
     /**
      * For debugging!
      */
@@ -87,26 +98,40 @@ private:
 
     friend sp<RpcServerTrusty>;
     explicit RpcServerTrusty(std::unique_ptr<RpcTransportCtx> ctx, std::string&& portName,
-                             std::shared_ptr<const PortAcl>&& portAcl, size_t msgMaxSize);
+                             std::shared_ptr<const PortAcl>&& portAcl, size_t msgMaxSize,
+                             size_t msgQueueLen);
 
     // Internal helper that creates the RpcServer.
     // This is used both from here and Rust.
     static sp<RpcServer> makeRpcServer(std::unique_ptr<RpcTransportCtx> ctx) {
         auto rpcServer = sp<RpcServer>::make(std::move(ctx));
 
-        // TODO(b/266741352): follow-up to prevent needing this in the future
-        // Trusty needs to be set to the latest stable version that is in prebuilts there.
-        LOG_ALWAYS_FATAL_IF(!rpcServer->setProtocolVersion(0));
+        // By default we use the latest stable version.
+        LOG_ALWAYS_FATAL_IF(!rpcServer->setProtocolVersion(RPC_WIRE_PROTOCOL_VERSION));
+
+        // The default behavior in trusty is to allow handles to be passed with tipc IPC.
+        // We add mode NONE so that servers do not reject connections from clients who do
+        // not change their default transport mode.
+        [[clang::no_destroy]] static const std::vector<RpcSession::FileDescriptorTransportMode>
+                TRUSTY_SERVER_SUPPORTED_FD_MODES = {RpcSession::FileDescriptorTransportMode::TRUSTY,
+                                                    RpcSession::FileDescriptorTransportMode::NONE};
+
+        rpcServer->setSupportedFileDescriptorTransportModes(TRUSTY_SERVER_SUPPORTED_FD_MODES);
 
         return rpcServer;
     }
 
+    static void setPerSessionRootObjectInternal(
+            RpcServer* server,
+            std::function<sp<IBinder>(wp<RpcSession> session, const trusty_peer_id& peer,
+                                      size_t peer_len)>&& create_session);
+
     friend struct ::ARpcServerTrusty;
-    friend ::ARpcServerTrusty* ::ARpcServerTrusty_newPerSession(::AIBinder* (*)(const void*, size_t,
-                                                                                char*),
-                                                                char*, void (*)(char*));
+    friend ::ARpcServerTrusty* ::ARpcServerTrusty_newPerSession(
+            ::AIBinder* (*)(const trusty_peer_id*, size_t, void*), void*, void (*)(void*));
     friend void ::ARpcServerTrusty_delete(::ARpcServerTrusty*);
-    friend int ::ARpcServerTrusty_handleConnect(::ARpcServerTrusty*, handle_t, const uuid*, void**);
+    friend int ::ARpcServerTrusty_handleConnect(::ARpcServerTrusty*, handle_t,
+                                                const trusty_peer_id*, size_t, void**);
     friend int ::ARpcServerTrusty_handleMessage(void*);
     friend void ::ARpcServerTrusty_handleDisconnect(void*);
     friend void ::ARpcServerTrusty_handleChannelCleanup(void*);
@@ -117,18 +142,19 @@ private:
         sp<RpcSession::RpcConnection> connection;
     };
 
-    static int handleConnect(const tipc_port* port, handle_t chan, const uuid* peer, void** ctx_p);
+    static int handleConnect(const tipc_port* port, handle_t chan, const trusty_peer_id* peer,
+                             size_t peer_len, void** ctx_p);
     static int handleMessage(const tipc_port* port, handle_t chan, void* ctx);
     static void handleDisconnect(const tipc_port* port, handle_t chan, void* ctx);
     static void handleChannelCleanup(void* ctx);
 
-    static int handleConnectInternal(RpcServer* rpcServer, handle_t chan, const uuid* peer,
-                                     void** ctx_p);
+    static int handleConnectInternal(RpcServer* rpcServer, handle_t chan,
+                                     const trusty_peer_id& peer, size_t peer_len, void** ctx_p);
     static int handleMessageInternal(void* ctx);
     static void handleDisconnectInternal(void* ctx);
 
     static constexpr tipc_srv_ops kTipcOps = {
-            .on_connect = &handleConnect,
+            .on_connect_peer_id = &handleConnect,
             .on_message = &handleMessage,
             .on_disconnect = &handleDisconnect,
             .on_channel_cleanup = &handleChannelCleanup,
@@ -140,6 +166,7 @@ private:
     std::vector<const uuid*> mUuidPtrs;
     tipc_port_acl mTipcPortAcl;
     tipc_port mTipcPort;
+    tipc_port_ctx* mTipcPortCtx;
 };
 
 } // namespace android

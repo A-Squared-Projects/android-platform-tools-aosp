@@ -17,8 +17,13 @@
 #include "adb_unique_fd.h"
 #include "socket.h"
 
+#include <unistd.h>
+
 int init_jdwp();
 asocket* create_jdwp_service_socket();
 asocket* create_jdwp_tracker_service_socket();
 asocket* create_app_tracker_service_socket();
-unique_fd create_jdwp_connection_fd(int jdwp_pid);
+
+// Create a socket pair. Send one end to the debuggable process `jdwp_pid` and
+// return the other one.
+unique_fd create_jdwp_connection_fd(pid_t jdwp_pid);

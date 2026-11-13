@@ -433,14 +433,14 @@ class LogMessageData {
  public:
   LogMessageData(const char* file, unsigned int line, LogSeverity severity, const char* tag,
                  int error)
-      : file_(GetFileBasename(file)),
+      : file_(file),
         line_number_(line),
         severity_(severity),
         tag_(tag),
         error_(error) {}
 
   const char* GetFile() const {
-    return file_;
+    return GetFileBasename(file_);
   }
 
   unsigned int GetLineNumber() const {
@@ -486,7 +486,7 @@ LogMessage::LogMessage(const char* file, unsigned int line, LogSeverity severity
 
 LogMessage::~LogMessage() {
   // Check severity again. This is duplicate work wrt/ LOG macros, but not LOG_STREAM.
-  if (!WOULD_LOG(data_->GetSeverity())) {
+  if (!WOULD_LOG_WITH_TAG(data_->GetSeverity(), data_->GetTag())) {
     return;
   }
 

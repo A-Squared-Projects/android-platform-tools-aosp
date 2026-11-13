@@ -27,7 +27,7 @@
 static bool is_adb_device(libusb_device* device) {
     libusb_device_descriptor device_desc;
     libusb_get_device_descriptor(device, &device_desc);
-    if (device_desc.bDeviceClass != 0) {
+    if (device_desc.bDeviceClass != LIBUSB_CLASS_PER_INTERFACE) {
         return false;
     }
 

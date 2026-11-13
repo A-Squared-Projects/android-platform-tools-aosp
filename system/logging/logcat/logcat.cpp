@@ -60,6 +60,7 @@
 #include <processgroup/sched_policy.h>
 #include <system/thread_defs.h>
 #include "logcat.pb.h"
+#include "logcat_utils.h"
 #include "process_names.h"
 
 using com::android::logcat::proto::LogcatEntryProto;
@@ -831,7 +832,7 @@ int Logcat::Run(int argc, char** argv) {
                         id_mask = -1;
                     } else {
                         log_id_t log_id = android_name_to_log_id(buffer.c_str());
-                        if (log_id >= LOG_ID_MAX) {
+                        if (!__android_log_id_is_valid(log_id)) {
                             error(EXIT_FAILURE, 0, "Unknown -b buffer '%s'.", buffer.c_str());
                         }
                         if (log_id == LOG_ID_SECURITY) {
@@ -953,8 +954,7 @@ int Logcat::Run(int argc, char** argv) {
     }
 
     if (forceFilters.size()) {
-        int err = android_log_addFilterString(logformat_.get(), forceFilters.c_str());
-        if (err < 0) {
+        if (!addFilterString(logformat_.get(), forceFilters)) {
             error(EXIT_FAILURE, 0, "Invalid filter expression '%s' in logcat args.",
                   forceFilters.c_str());
         }
@@ -963,9 +963,7 @@ int Logcat::Run(int argc, char** argv) {
         const char* env_tags_orig = getenv("ANDROID_LOG_TAGS");
 
         if (!!env_tags_orig) {
-            int err = android_log_addFilterString(logformat_.get(), env_tags_orig);
-
-            if (err < 0) {
+            if (!addFilterString(logformat_.get(), env_tags_orig)) {
                 error(EXIT_FAILURE, 0, "Invalid filter expression '%s' in ANDROID_LOG_TAGS.",
                       env_tags_orig);
             }
@@ -973,8 +971,7 @@ int Logcat::Run(int argc, char** argv) {
     } else {
         // Add from commandline
         for (int i = optind ; i < argc ; i++) {
-            int err = android_log_addFilterString(logformat_.get(), argv[i]);
-            if (err < 0) {
+            if (!addFilterString(logformat_.get(), argv[i])) {
                 error(EXIT_FAILURE, 0, "Invalid filter expression '%s'.", argv[i]);
             }
         }
@@ -1194,9 +1191,8 @@ If you have enabled significant logging, look into using the -G option to increa
             error(EXIT_FAILURE, errno, "Logcat read failure");
         }
 
-        if (log_msg.id() > LOG_ID_MAX) {
-            error(EXIT_FAILURE, 0, "Unexpected log id (%d) over LOG_ID_MAX (%d).", log_msg.id(),
-                  LOG_ID_MAX);
+        if (!__android_log_id_is_valid(static_cast<log_id_t>(log_msg.id()))) {
+            error(EXIT_FAILURE, 0, "Unexpected log id (%d) out of bounds.", log_msg.id());
         }
 
         if (!uids.empty() && uids.count(log_msg.entry.uid) == 0) {

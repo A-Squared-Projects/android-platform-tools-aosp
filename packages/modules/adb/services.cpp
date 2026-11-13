@@ -35,11 +35,18 @@
 #include "adb_io.h"
 #include "adb_unique_fd.h"
 #include "adb_utils.h"
-#include "adb_wifi.h"
+#if ADB_HOST
+#include "client/adb_wifi.h"
+#endif
 #include "services.h"
 #include "socket_spec.h"
 #include "sysdeps.h"
 #include "transport.h"
+
+#if ADB_HOST
+#include "client/host_services.h"
+#include "client/mdns_tracker.h"
+#endif
 
 namespace {
 
@@ -113,7 +120,7 @@ void connect_emulator(const std::string& port_spec, std::string* response) {
     // Check if the emulator is already known.
     // Note: There's a small but harmless race condition here: An emulator not
     // present just yet could be registered by another invocation right
-    // after doing this check here. However, local_connect protects
+    // after doing this check here. However, connect_emulator protects
     // against double-registration too. From here, a better error message
     // can be produced. In the case of the race condition, the very specific
     // error message won't be shown, but the data doesn't get corrupted.
@@ -125,7 +132,7 @@ void connect_emulator(const std::string& port_spec, std::string* response) {
 
     // Preconditions met, try to connect to the emulator.
     std::string error;
-    if (!local_connect_arbitrary_ports(console_port, adb_port, &error)) {
+    if (!connect_emulator_arbitrary_ports(console_port, adb_port, &error)) {
         *response = android::base::StringPrintf("Connected to emulator on ports %d,%d",
                                                 console_port, adb_port);
     } else {
@@ -135,6 +142,8 @@ void connect_emulator(const std::string& port_spec, std::string* response) {
 }
 
 static void connect_service(unique_fd fd, std::string host) {
+    CHECK_NOT_LOOPER_THREAD();
+
     std::string response;
     if (!strncmp(host.c_str(), "emu:", 4)) {
         connect_emulator(host.c_str() + 4, &response);
@@ -149,6 +158,7 @@ static void connect_service(unique_fd fd, std::string host) {
 static void pair_service(unique_fd fd, std::string host, std::string password) {
     std::string response;
     adb_wifi_pair_device(host, password, response);
+    VLOG(MDNS) << "Pairing response: '" << response << "'";
     if (android::base::StartsWith(response, "Successful")) {
         SendProtocolString(fd.get(), response);
     } else {
@@ -278,6 +288,8 @@ asocket* host_service_to_socket(std::string_view name, std::string_view serial,
         unique_fd fd = create_service_thread(
                 "pair", std::bind(pair_service, std::placeholders::_1, host, password));
         return create_local_socket(std::move(fd));
+    } else if (android::base::ConsumePrefix(&name, HostServices::kTrackMdnsServices)) {
+        return create_mdns_tracker();
     }
     return nullptr;
 }

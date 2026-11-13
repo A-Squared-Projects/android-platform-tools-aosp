@@ -15,13 +15,14 @@
  */
 #pragma once
 
+#include <android/gui/TransactionBarrier.h>
 #include <gui/fake/BufferData.h>
 #include <layerproto/TransactionProto.h>
 #include <utils/RefBase.h>
 
 #include "FrontEnd/DisplayInfo.h"
 #include "FrontEnd/LayerCreationArgs.h"
-#include "TransactionState.h"
+#include "QueuedTransactionState.h"
 
 namespace android::surfaceflinger {
 
@@ -44,20 +45,23 @@ public:
     TransactionProtoParser(std::unique_ptr<FlingerDataMapper> provider)
           : mMapper(std::move(provider)) {}
 
-    perfetto::protos::TransactionState toProto(const TransactionState&);
+    perfetto::protos::TransactionState toProto(const QueuedTransactionState&);
     perfetto::protos::TransactionState toProto(
             const std::map<uint32_t /* layerId */, TracingLayerState>&);
     perfetto::protos::LayerCreationArgs toProto(const LayerCreationArgs& args);
     perfetto::protos::LayerState toProto(const ResolvedComposerState&);
     static perfetto::protos::DisplayInfo toProto(const frontend::DisplayInfo&, uint32_t layerStack);
 
-    TransactionState fromProto(const perfetto::protos::TransactionState&);
+    QueuedTransactionState fromProto(const perfetto::protos::TransactionState&);
     void mergeFromProto(const perfetto::protos::LayerState&, TracingLayerState& outState);
     void fromProto(const perfetto::protos::LayerCreationArgs&, LayerCreationArgs& outArgs);
     std::unique_ptr<FlingerDataMapper> mMapper;
     static frontend::DisplayInfo fromProto(const perfetto::protos::DisplayInfo&);
     static void fromProto(const google::protobuf::RepeatedPtrField<perfetto::protos::DisplayInfo>&,
                           frontend::DisplayInfos& outDisplayInfos);
+
+    static perfetto::protos::TransactionBarrier toProto(const gui::TransactionBarrier&);
+    static gui::TransactionBarrier fromProto(const perfetto::protos::TransactionBarrier&);
 
 private:
     perfetto::protos::DisplayState toProto(const DisplayState&);

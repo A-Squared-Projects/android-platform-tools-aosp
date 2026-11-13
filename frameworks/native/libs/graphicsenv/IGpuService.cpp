@@ -77,6 +77,19 @@ public:
                            IBinder::FLAG_ONEWAY);
     }
 
+    void addVulkanEngineName(const std::string& appPackageName, const uint64_t driverVersionCode,
+                             const char* engineName) override {
+        Parcel data, reply;
+        data.writeInterfaceToken(IGpuService::getInterfaceDescriptor());
+
+        data.writeUtf8AsUtf16(appPackageName);
+        data.writeUint64(driverVersionCode);
+        data.writeCString(engineName);
+
+        remote()->transact(BnGpuService::ADD_VULKAN_ENGINE_NAME, data, &reply,
+                           IBinder::FLAG_ONEWAY);
+    }
+
     void setUpdatableDriverPath(const std::string& driverPath) override {
         Parcel data, reply;
         data.writeInterfaceToken(IGpuService::getInterfaceDescriptor());
@@ -95,6 +108,18 @@ public:
                            IBinder::FLAG_ONEWAY);
     }
 
+    std::string getPersistGraphicsEgl() override {
+        Parcel data, reply;
+        data.writeInterfaceToken(IGpuService::getInterfaceDescriptor());
+
+        status_t error = remote()->transact(BnGpuService::GET_PERSIST_GRAPHICS_EGL, data, &reply);
+        std::string persistGraphicsEgl;
+        if (error == OK) {
+            error = reply.readUtf8FromUtf16(&persistGraphicsEgl);
+        }
+        return persistGraphicsEgl;
+    }
+
     std::string getUpdatableDriverPath() override {
         Parcel data, reply;
         data.writeInterfaceToken(IGpuService::getInterfaceDescriptor());
@@ -105,6 +130,23 @@ public:
             error = reply.readUtf8FromUtf16(&driverPath);
         }
         return driverPath;
+    }
+
+    void getFeatureOverrides(FeatureOverrides& featureOverrides) override {
+        Parcel data, reply;
+        data.writeInterfaceToken(IGpuService::getInterfaceDescriptor());
+
+        status_t error =
+                remote()->transact(BnGpuService::GET_FEATURE_CONFIG_OVERRIDES, data, &reply);
+        if (error != OK) {
+            return;
+        }
+
+        error = featureOverrides.readFromParcel(&reply);
+        if (error != OK) {
+            ALOGE("Failed to read FeatureOverrides from parcel: error = %d", error);
+            return;
+        }
     }
 };
 
@@ -197,6 +239,21 @@ status_t BnGpuService::onTransact(uint32_t code, const Parcel& data, Parcel* rep
 
             return OK;
         }
+        case ADD_VULKAN_ENGINE_NAME: {
+            CHECK_INTERFACE(IGpuService, data, reply);
+
+            std::string appPackageName;
+            if ((status = data.readUtf8FromUtf16(&appPackageName)) != OK) return status;
+
+            uint64_t driverVersionCode;
+            if ((status = data.readUint64(&driverVersionCode)) != OK) return status;
+
+            const char* engineName;
+            if ((engineName = data.readCString()) == nullptr) return BAD_VALUE;
+
+            addVulkanEngineName(appPackageName, driverVersionCode, engineName);
+            return OK;
+        }
         case SET_UPDATABLE_DRIVER_PATH: {
             CHECK_INTERFACE(IGpuService, data, reply);
 
@@ -241,6 +298,21 @@ status_t BnGpuService::onTransact(uint32_t code, const Parcel& data, Parcel* rep
             if ((status = data.readBool(&enableAngleAsSystemDriver)) != OK) return status;
 
             toggleAngleAsSystemDriver(enableAngleAsSystemDriver);
+            return OK;
+        }
+        case GET_PERSIST_GRAPHICS_EGL: {
+            CHECK_INTERFACE(IGpuService, data, reply);
+
+            std::string persistGraphicsEgl = getPersistGraphicsEgl();
+            return reply->writeUtf8AsUtf16(persistGraphicsEgl);
+        }
+        case GET_FEATURE_CONFIG_OVERRIDES: {
+            CHECK_INTERFACE(IGpuService, data, reply);
+
+            // Get the FeatureOverrides from gpuservice, which implements the IGpuService interface
+            // with GpuService::getFeatureOverrides().
+            const FeatureOverrides& featureOverrides = getCachedFeatureOverrides();
+            featureOverrides.writeToParcel(reply);
             return OK;
         }
         default:

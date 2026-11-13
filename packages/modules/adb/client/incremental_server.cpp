@@ -18,8 +18,6 @@
 
 #include "incremental_server.h"
 
-#include <android-base/endian.h>
-#include <android-base/strings.h>
 #include <inttypes.h>
 #include <lz4.h>
 #include <stdio.h>
@@ -33,6 +31,9 @@
 #include <thread>
 #include <type_traits>
 #include <unordered_set>
+
+#include <android-base/endian.h>
+#include <android-base/strings.h>
 
 #include "adb.h"
 #include "adb_client.h"
@@ -326,7 +327,13 @@ bool IncrementalServer::SkipToRequest(void* buffer, size_t* size, bool blocking)
             continue;
         }
 
-        D("Failed to read from fd %d: %d. Exit", adb_fd_.get(), errno);
+        // Nothing was read. Remove the padding added before the read.
+        buffer_.resize(bsize);
+        if (r == 0) {
+            D("Disconnected from fd %d. Exit", adb_fd_.get());
+        } else {
+            D("Failed to read from fd %d: %d. Exit", adb_fd_.get(), errno);
+        }
         break;
     }
     // socket is closed. print remaining messages
@@ -680,7 +687,14 @@ static std::pair<unique_fd, int64_t> open_signature(int64_t file_size, const cha
         return {};
     }
 
-    auto [tree_offset, tree_size] = skip_id_sig_headers(fd);
+    std::string error;
+    auto res = skip_id_sig_headers(fd, &error);
+    if (!res.has_value()) {
+        D("Invalid signature file '%s': %s", filepath, error.c_str());
+        return {};
+    }
+
+    auto [tree_offset, tree_size] = std::move(res.value());
     if (auto expected = verity_tree_size_for_file(file_size); tree_size != expected) {
         error_exit("Verity tree size mismatch in signature file: %s [was %lld, expected %lld].\n",
                    signature_file.c_str(), (long long)tree_size, (long long)expected);
@@ -697,9 +711,6 @@ static std::pair<unique_fd, int64_t> open_signature(int64_t file_size, const cha
 bool serve(int connection_fd, int output_fd, int argc, const char** argv) {
     auto connection_ufd = unique_fd(connection_fd);
     auto output_ufd = unique_fd(output_fd);
-    if (argc <= 0) {
-        error_exit("inc-server: must specify at least one file.");
-    }
 
     std::vector<File> files;
     files.reserve(argc);

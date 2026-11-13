@@ -28,6 +28,8 @@
 
 #include <gtest/gtest.h>
 
+using android::procinfo::MapInfo;
+
 TEST(process_map, ReadMapFile) {
   std::string map_file = android::base::GetExecutableDirectory() + "/testdata/maps";
   std::vector<android::procinfo::MapInfo> maps;
@@ -389,4 +391,74 @@ TEST_F(ProcessMapMappedFileSize, invalid_map_name) {
   map.name = "/tmp/non_existent_file";
   mapped_file_size = android::procinfo::MappedFileSize(map);
   ASSERT_EQ(mapped_file_size, 0UL);
+}
+
+static MapInfo CreateMapWithOnlyName(const char* name) {
+  return MapInfo(0, 0, 0, UINT64_MAX, 0, name, false);
+}
+
+TEST(process_map, TaggedMappingNames) {
+  MapInfo info = CreateMapWithOnlyName(
+      "[anon:mt:/data/local/tmp/debuggerd_test/arm64/debuggerd_test64+108000]");
+  ASSERT_EQ(info.name, "/data/local/tmp/debuggerd_test/arm64/debuggerd_test64");
+  ASSERT_EQ(info.pgoff, 0x108000ull);
+
+  info = CreateMapWithOnlyName("[anon:mt:/data/local/tmp/debuggerd_test/arm64/debuggerd_test64+0]");
+  ASSERT_EQ(info.name, "/data/local/tmp/debuggerd_test/arm64/debuggerd_test64");
+  ASSERT_EQ(info.pgoff, 0x0ull);
+
+  info =
+      CreateMapWithOnlyName("[anon:mt:/data/local/tmp/debuggerd_test/arm64/debuggerd_test64+0000]");
+  ASSERT_EQ(info.name, "/data/local/tmp/debuggerd_test/arm64/debuggerd_test64");
+  ASSERT_EQ(info.pgoff, 0x0ull);
+
+  info = CreateMapWithOnlyName(
+      "[anon:mt:...ivetest64/bionic-unit-tests/bionic-loader-test-libs/libdlext_test.so+e000]");
+  ASSERT_EQ(info.name, "...ivetest64/bionic-unit-tests/bionic-loader-test-libs/libdlext_test.so");
+  ASSERT_EQ(info.pgoff, 0xe000ull);
+
+  info = CreateMapWithOnlyName("[anon:mt:/bin/x+e000]");
+  ASSERT_EQ(info.name, "/bin/x");
+  ASSERT_EQ(info.pgoff, 0xe000ull);
+
+  info = CreateMapWithOnlyName("[anon:mt:/bin/x+0]");
+  ASSERT_EQ(info.name, "/bin/x");
+  ASSERT_EQ(info.pgoff, 0x0ull);
+
+  info = CreateMapWithOnlyName("[anon:mt:/bin/x+1]");
+  ASSERT_EQ(info.name, "/bin/x");
+  ASSERT_EQ(info.pgoff, 0x1ull);
+
+  info = CreateMapWithOnlyName("[anon:mt:/bin/x+f]");
+  ASSERT_EQ(info.name, "/bin/x");
+  ASSERT_EQ(info.pgoff, 0xfull);
+
+  info = CreateMapWithOnlyName("[anon:mt:/bin/with/plus+/x+f]");
+  ASSERT_EQ(info.name, "/bin/with/plus+/x");
+  ASSERT_EQ(info.pgoff, 0xfull);
+
+  info = CreateMapWithOnlyName("[anon:mt:/bin/+with/mu+ltiple/plus+/x+f]");
+  ASSERT_EQ(info.name, "/bin/+with/mu+ltiple/plus+/x");
+  ASSERT_EQ(info.pgoff, 0xfull);
+
+  info = CreateMapWithOnlyName("[anon:mt:/bin/trailing/plus++f]");
+  ASSERT_EQ(info.name, "/bin/trailing/plus+");
+  ASSERT_EQ(info.pgoff, 0xfull);
+
+  info = CreateMapWithOnlyName("[anon:mt:++f]");
+  ASSERT_EQ(info.name, "+");
+  ASSERT_EQ(info.pgoff, 0xfull);
+}
+
+TEST(process_map, AlmostTaggedMappingNames) {
+  for (const char* almost_tagged_name :
+       {"[anon:mt:/bin/x+]",
+        "[anon:mt:/bin/x]"
+        "[anon:mt:+]",
+        "[anon:mt", "[anon:mt:/bin/x+1", "[anon:mt:/bin/x+e000",
+        "anon:mt:/data/local/tmp/debuggerd_test/arm64/debuggerd_test64+e000]"}) {
+    MapInfo info = CreateMapWithOnlyName(almost_tagged_name);
+    ASSERT_EQ(info.name, almost_tagged_name);
+    ASSERT_EQ(info.pgoff, UINT64_MAX) << almost_tagged_name;
+  }
 }

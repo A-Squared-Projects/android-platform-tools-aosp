@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <ftl/future.h>
+#include <ftl/optional.h>
 #include <cstdint>
 #include <iterator>
 #include <optional>
@@ -25,19 +27,19 @@
 #include <utility>
 #include <vector>
 
+#include <common/LayerFilter.h>
 #include <compositionengine/LayerFE.h>
-#include <ftl/future.h>
 #include <renderengine/LayerSettings.h>
 #include <ui/Fence.h>
 #include <ui/FenceTime.h>
 #include <ui/GraphicTypes.h>
 #include <ui/LayerStack.h>
+#include <ui/PictureProfileHandle.h>
 #include <ui/Region.h>
 #include <ui/Transform.h>
 #include <utils/StrongPointer.h>
 #include <utils/Vector.h>
 
-#include <ui/DisplayIdentification.h>
 #include "DisplayHardware/HWComposer.h"
 
 namespace android {
@@ -131,6 +133,7 @@ public:
         sp<Fence> presentFence{Fence::NO_FENCE};
         sp<Fence> clientTargetAcquireFence{Fence::NO_FENCE};
         std::unordered_map<HWC2::Layer*, sp<Fence>> layerFences;
+        sp<Fence> readbackFence{Fence::NO_FENCE};
     };
 
     struct ColorProfile {
@@ -157,6 +160,7 @@ public:
         // only has a value if there's something needing it, like when a TrustedPresentationListener
         // is set
         std::optional<Region> aboveCoveredLayersExcludingOverlays;
+        int32_t aboveBlurRequests = 0;
     };
 
     virtual ~Output();
@@ -167,7 +171,8 @@ public:
     virtual bool isValid() const = 0;
 
     // Returns the DisplayId the output represents, if it has one
-    virtual std::optional<DisplayId> getDisplayId() const = 0;
+    virtual ftl::Optional<DisplayId> getDisplayId() const = 0;
+    virtual ftl::Optional<DisplayIdVariant> getDisplayIdVariant() const = 0;
 
     // Enables (or disables) composition on this output
     virtual void setCompositionEnabled(bool) = 0;
@@ -192,7 +197,7 @@ public:
     virtual ui::Transform::RotationFlags getTransformHint() const = 0;
 
     // Sets the filter for this output. See Output::includesLayer.
-    virtual void setLayerFilter(ui::LayerFilter) = 0;
+    virtual void setLayerFilter(LayerFilter) = 0;
 
     // Sets the output color mode
     virtual void setColorProfile(const ColorProfile&) = 0;
@@ -235,8 +240,9 @@ public:
 
     // Returns whether the output includes a layer, based on their respective filters.
     // See Output::setLayerFilter.
-    virtual bool includesLayer(ui::LayerFilter) const = 0;
+    virtual bool includesLayer(LayerFilter) const = 0;
     virtual bool includesLayer(const sp<LayerFE>&) const = 0;
+    virtual bool includesLayer(LayerFE*) const = 0;
 
     // Returns a pointer to the output layer corresponding to the given layer on
     // this output, or nullptr if the layer does not have one
@@ -280,6 +286,9 @@ public:
     // Enables overriding the 170M trasnfer function as sRGB
     virtual void setTreat170mAsSrgb(bool) = 0;
 
+    // For test use only. Returns whether the planner has the layer caching texture pool enabled.
+    virtual bool plannerTexturePoolEnabled() const = 0;
+
 protected:
     virtual void setDisplayColorProfile(std::unique_ptr<DisplayColorProfile>) = 0;
     virtual void setRenderSurface(std::unique_ptr<RenderSurface>) = 0;
@@ -306,7 +315,7 @@ protected:
     virtual void finishFrame(GpuCompositionResult&&) = 0;
     virtual std::optional<base::unique_fd> composeSurfaces(
             const Region&, std::shared_ptr<renderengine::ExternalTexture>, base::unique_fd&) = 0;
-    virtual void presentFrameAndReleaseLayers() = 0;
+    virtual void presentFrameAndReleaseLayers(bool flushEvenWhenDisabled) = 0;
     virtual void renderCachedSets(const CompositionRefreshArgs&) = 0;
     virtual bool chooseCompositionStrategy(
             std::optional<android::HWComposer::DeviceRequestedChanges>*) = 0;
@@ -314,6 +323,7 @@ protected:
             const std::optional<android::HWComposer::DeviceRequestedChanges>& changes) = 0;
     virtual bool getSkipColorTransform() const = 0;
     virtual FrameFences presentFrame() = 0;
+    virtual void executeCommands() = 0;
     virtual std::vector<LayerFE::LayerSettings> generateClientCompositionRequests(
             bool supportsProtectedContent, ui::Dataspace outputDataspace,
             std::vector<LayerFE*> &outLayerRef) = 0;
@@ -321,10 +331,18 @@ protected:
             const Region& flashRegion,
             std::vector<LayerFE::LayerSettings>& clientCompositionLayers) = 0;
     virtual void setExpensiveRenderingExpected(bool enabled) = 0;
+    virtual void setHintSessionGpuStart(TimePoint startTime) = 0;
     virtual void setHintSessionGpuFence(std::unique_ptr<FenceTime>&& gpuFence) = 0;
+    virtual void setHintSessionRequiresRenderEngine(bool requiresRenderEngine) = 0;
     virtual bool isPowerHintSessionEnabled() = 0;
+    virtual bool isPowerHintSessionGpuReportingEnabled() = 0;
     virtual void cacheClientCompositionRequests(uint32_t cacheSize) = 0;
     virtual bool canPredictCompositionStrategy(const CompositionRefreshArgs&) = 0;
+    virtual const aidl::android::hardware::graphics::composer3::OverlayProperties*
+    getOverlaySupport() = 0;
+    virtual bool hasPictureProcessing() const = 0;
+    virtual int32_t getMaxLayerPictureProfiles() const = 0;
+    virtual void applyPictureProfile() = 0;
 };
 
 } // namespace compositionengine

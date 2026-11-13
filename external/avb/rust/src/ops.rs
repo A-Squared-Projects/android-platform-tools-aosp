@@ -22,7 +22,6 @@ extern crate alloc;
 use crate::{error::result_to_io_enum, CertOps, IoError, IoResult, SHA256_DIGEST_SIZE};
 use avb_bindgen::{AvbCertOps, AvbCertPermanentAttributes, AvbIOResult, AvbOps};
 use core::{
-    cmp::min,
     ffi::{c_char, c_void, CStr},
     marker::PhantomPinned,
     pin::Pin,
@@ -52,8 +51,8 @@ pub trait Ops<'a> {
     /// # Arguments
     /// * `partition`: partition name to read from.
     /// * `offset`: offset in bytes within the partition to read from; a positive value indicates an
-    ///             offset from the partition start, a negative value indicates a backwards offset
-    ///             from the partition end.
+    ///   offset from the partition start, a negative value indicates a backwards offset
+    ///   from the partition end.
     /// * `buffer`: buffer to read data into.
     ///
     /// # Returns
@@ -75,13 +74,18 @@ pub trait Ops<'a> {
     ///
     /// # Arguments
     /// * `partition`: partition name to read from.
+    /// * `num_bytes`: Number of bytes expected to read.
     ///
     /// # Returns
     /// * A reference to the entire partition contents if the partition has been preloaded.
     /// * `Err<IoError::NotImplemented>` if the requested partition has not been preloaded;
     ///   verification will next attempt to load the partition via `read_from_partition()`.
     /// * Any other `Err<IoError>` if an error occurred; verification will exit immediately.
-    fn get_preloaded_partition(&mut self, _partition: &CStr) -> IoResult<&'a [u8]> {
+    fn get_preloaded_partition(
+        &mut self,
+        _partition: &CStr,
+        _num_bytes: usize,
+    ) -> IoResult<&'a [u8]> {
         Err(IoError::NotImplemented)
     }
 
@@ -92,7 +96,7 @@ pub trait Ops<'a> {
     /// # Arguments
     /// * `public_key`: the public key.
     /// * `public_key_metadata`: public key metadata set by the `--public_key_metadata` arg in
-    ///                          `avbtool`, or None if no metadata was provided.
+    ///   `avbtool`, or None if no metadata was provided.
     ///
     /// # Returns
     /// True if the given key is valid, false if it is not, `IoError` on error.
@@ -166,9 +170,9 @@ pub trait Ops<'a> {
     /// # Arguments
     /// * `name`: persistent value name.
     /// * `value`: buffer to read persistent value into; if too small to hold the persistent value,
-    ///            `IoError::InsufficientSpace` should be returned and this function will be called
-    ///            again with an appropriately-sized buffer. This may be an empty slice if the
-    ///            caller only wants to query the persistent value size.
+    ///   `IoError::InsufficientSpace` should be returned and this function will be called
+    ///   again with an appropriately-sized buffer. This may be an empty slice if the
+    ///   caller only wants to query the persistent value size.
     ///
     /// # Returns
     /// * The number of bytes written into `value` on success.
@@ -226,7 +230,7 @@ pub trait Ops<'a> {
     /// * `partition`: partition name.
     /// * `public_key`: the public key.
     /// * `public_key_metadata`: public key metadata set by the `--public_key_metadata` arg in
-    ///                          `avbtool`, or None if no metadata was provided.
+    ///   `avbtool`, or None if no metadata was provided.
     ///
     /// # Returns
     /// On success, returns a `PublicKeyForPartitionInfo` object indicating whether the given
@@ -347,7 +351,7 @@ impl<'o, 'p> OpsBridge<'o, 'p> {
     ///
     /// # Returns
     /// The C `AvbOps` struct to make libavb calls with.
-    pub(crate) fn init_and_get_c_ops<'a>(self: Pin<&'a mut Self>) -> &'a mut AvbOps {
+    pub(crate) fn init_and_get_c_ops(self: Pin<&mut Self>) -> &mut AvbOps {
         // SAFETY: we do not move out of `self_mut`, but only set pointers to pinned addresses.
         let self_mut = unsafe { self.get_unchecked_mut() };
 
@@ -573,7 +577,7 @@ unsafe fn try_get_preloaded_partition(
     // * the returned `&CStr` is not held past the scope of this callback.
     let partition = unsafe { CStr::from_ptr(partition) };
 
-    match ops.get_preloaded_partition(partition) {
+    match ops.get_preloaded_partition(partition, num_bytes) {
         // SAFETY:
         // * we've checked that the pointers are non-NULL.
         // * libavb gives us properly-aligned and sized `out` vars.
@@ -585,11 +589,7 @@ unsafe fn try_get_preloaded_partition(
                 // TODO: can we change the libavb API to take a const*?
                 contents.as_ptr() as *mut u8,
             );
-            ptr::write(
-                out_num_bytes_preloaded,
-                // Truncate here if necessary, we may have more preloaded data than libavb needs.
-                min(contents.len(), num_bytes),
-            );
+            ptr::write(out_num_bytes_preloaded, contents.len());
         },
         // No-op if this partition is not preloaded, we've already reset the out variables to
         // indicate preloaded data is not available.
@@ -685,11 +685,7 @@ unsafe extern "C" fn read_rollback_index(
 ) -> AvbIOResult {
     // SAFETY: see corresponding `try_*` function safety documentation.
     unsafe {
-        result_to_io_enum(try_read_rollback_index(
-            ops,
-            rollback_index_location,
-            out_rollback_index,
-        ))
+        result_to_io_enum(try_read_rollback_index(ops, rollback_index_location, out_rollback_index))
     }
 }
 
@@ -734,11 +730,7 @@ unsafe extern "C" fn write_rollback_index(
 ) -> AvbIOResult {
     // SAFETY: see corresponding `try_*` function safety documentation.
     unsafe {
-        result_to_io_enum(try_write_rollback_index(
-            ops,
-            rollback_index_location,
-            rollback_index,
-        ))
+        result_to_io_enum(try_write_rollback_index(ops, rollback_index_location, rollback_index))
     }
 }
 
@@ -906,13 +898,7 @@ unsafe extern "C" fn get_size_of_partition(
     out_size_num_bytes: *mut u64,
 ) -> AvbIOResult {
     // SAFETY: see corresponding `try_*` function safety documentation.
-    unsafe {
-        result_to_io_enum(try_get_size_of_partition(
-            ops,
-            partition,
-            out_size_num_bytes,
-        ))
-    }
+    unsafe { result_to_io_enum(try_get_size_of_partition(ops, partition, out_size_num_bytes)) }
 }
 
 /// Bounces the C callback into the user-provided Rust implementation.
@@ -1180,10 +1166,7 @@ unsafe fn try_validate_public_key_for_partition(
     // * libavb gives us a properly-allocated `out_*`.
     unsafe {
         ptr::write(out_is_trusted, key_info.trusted);
-        ptr::write(
-            out_rollback_index_location,
-            key_info.rollback_index_location,
-        );
+        ptr::write(out_rollback_index_location, key_info.rollback_index_location);
     }
     Ok(())
 }
@@ -1278,7 +1261,7 @@ unsafe extern "C" fn set_key_version(
     // Ignoring the error could be a security risk, as it would silently prevent the device from
     // updating key rollback versions, so instead we panic here.
     if let Err(e) = result {
-        panic!("Fatal error in set_key_version(): {:?}", e);
+        panic!("Fatal error in set_key_version(): {e:?}");
     }
 }
 

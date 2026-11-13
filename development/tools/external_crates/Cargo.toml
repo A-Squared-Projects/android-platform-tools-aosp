@@ -1,6 +1,16 @@
 [workspace]
 members = [
-    "crate_health",
-    "crate_health_proc_macros",
+    "bp_util",
+    "checksum",
+    "crate_config",
+    "crate_tool",
+    "crates_io_util",
+    "google_metadata",
+    "license_checker",
+    "name_and_version",
+    "repo_config",
+    "rooted_path",
+    "success_or_error",
+    "test_mapping",
 ]
 resolver = "2"

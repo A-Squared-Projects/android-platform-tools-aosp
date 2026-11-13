@@ -13,6 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import {ClipboardModule} from '@angular/cdk/clipboard';
+import {CommonModule} from '@angular/common';
 import {
   Component,
   ElementRef,
@@ -20,53 +22,104 @@ import {
   Inject,
   Input,
   Output,
+  SimpleChanges,
 } from '@angular/core';
-import {assertDefined} from 'common/assert_utils';
+import {MatButtonModule} from '@angular/material/button';
+import {MatIconModule} from '@angular/material/icon';
+import {assertDefined} from 'common/assert';
 import {DiffType} from 'viewers/common/diff_type';
 import {UiHierarchyTreeNode} from 'viewers/common/ui_hierarchy_tree_node';
 import {UiPropertyTreeNode} from 'viewers/common/ui_property_tree_node';
 import {nodeInnerItemStyles} from 'viewers/components/styles/node.styles';
+import {HierarchyTreeNodeDataViewComponent} from './hierarchy_tree_node_data_view_component';
+import {PropertyTreeNodeDataViewComponent} from './property_tree_node_data_view_component';
 
 @Component({
   selector: 'tree-node',
+  standalone: true,
+  imports: [
+    CommonModule,
+    MatButtonModule,
+    MatIconModule,
+    ClipboardModule,
+    HierarchyTreeNodeDataViewComponent,
+    PropertyTreeNodeDataViewComponent,
+  ],
   template: `
-    <div *ngIf="showChevron()" class="icon-wrapper">
-      <button class="icon-button toggle-tree-btn" (click)="toggleTree($event)">
-        <mat-icon>
-          {{ isExpanded ? 'arrow_drop_down' : 'chevron_right' }}
-        </mat-icon>
-      </button>
-    </div>
+    @if (showStateIcon) {
+      <div class="icon-wrapper-show-state" [style]="getShowStateIconStyle()">
+        <button
+          mat-icon-button
+          class="icon-button toggle-rect-show-state-btn"
+          (click)="toggleRectShowState($event)">
+          <mat-icon class="material-symbols-outlined">
+            {{ showStateIcon }}
+          </mat-icon>
+        </button>
+      </div>
+    }
+    @if (showChevron()) {
+      <div class="icon-wrapper">
+        <button
+          mat-icon-button
+          class="icon-button toggle-tree-btn"
+          (click)="toggleTree($event)">
+          <mat-icon>
+            {{ isExpanded ? 'arrow_drop_down' : 'chevron_right' }}
+          </mat-icon>
+        </button>
+      </div>
+    }
 
-    <div *ngIf="showLeafNodeIcon()" class="icon-wrapper leaf-node-icon-wrapper">
-      <mat-icon class="leaf-node-icon"></mat-icon>
-    </div>
+    @if (!showChevron() && !isInPinnedSection) {
+      <div class="icon-wrapper leaf-node-icon-wrapper">
+        <mat-icon class="leaf-node-icon"></mat-icon>
+      </div>
+    }
 
-    <div *ngIf="showPinNodeIcon()" class="icon-wrapper">
-      <button class="icon-button pin-node-btn" (click)="pinNode($event)">
-        <mat-icon>
-          {{ isPinned ? 'star' : 'star_border' }}
-        </mat-icon>
-      </button>
-    </div>
+    @if (showPinNodeIcon()) {
+      <div class="icon-wrapper">
+        <button
+          mat-icon-button
+          class="icon-button pin-node-btn"
+          (click)="pinNode($event)">
+          <mat-icon [class.material-symbols-outlined]="!isPinned">push_pin</mat-icon>
+        </button>
+      </div>
+    }
 
     <div class="description">
-      <hierarchy-tree-node-data-view
-        *ngIf="node && !isPropertyTreeNode()"
-        [node]="node"></hierarchy-tree-node-data-view>
-      <property-tree-node-data-view
-        *ngIf="isPropertyTreeNode()"
-        [node]="node"></property-tree-node-data-view>
+      @if (node && !isPropertyTreeNode()) {
+        <hierarchy-tree-node-data-view
+          [node]="node"></hierarchy-tree-node-data-view>
+      } @else {
+        <property-tree-node-data-view
+          [node]="node"></property-tree-node-data-view>
+      }
     </div>
 
-    <div *ngIf="!isLeaf && !isExpanded" class="icon-wrapper">
-      <button
-        class="icon-button expand-tree-btn"
-        [class]="collapseDiffClass"
-        (click)="expandTree($event)">
-        <mat-icon aria-hidden="true"> more_horiz </mat-icon>
-      </button>
-    </div>
+    @if (!isLeaf && !isExpanded && !isPinned) {
+      <div class="icon-wrapper">
+        <button
+          mat-icon-button
+          class="icon-button expand-tree-btn"
+          [class]="collapseDiffClass"
+          (click)="expandTree($event)">
+          <mat-icon aria-hidden="true"> more_horiz </mat-icon>
+        </button>
+      </div>
+    }
+    @if (showCopyButton()) {
+      <div class="icon-wrapper-copy">
+        <button
+          mat-icon-button
+          class="icon-button copy-btn"
+          [cdkCopyToClipboard]="getCopyText()"
+          (click)="$event.stopPropagation()">
+          <mat-icon class="material-symbols-outlined">content_copy</mat-icon>
+        </button>
+      </div>
+    }
   `,
   styles: [nodeInnerItemStyles],
 })
@@ -78,14 +131,17 @@ export class TreeNodeComponent {
   @Input() isPinned = false;
   @Input() isInPinnedSection = false;
   @Input() isSelected = false;
+  @Input() showStateIcon?: string;
 
   @Output() readonly toggleTreeChange = new EventEmitter<void>();
-  @Output() readonly expandTreeChange = new EventEmitter<boolean>();
+  @Output() readonly rectShowStateChange = new EventEmitter<void>();
+  @Output() readonly expandTreeChange = new EventEmitter<void>();
   @Output() readonly pinNodeChange = new EventEmitter<UiHierarchyTreeNode>();
 
   collapseDiffClass = '';
   private el: HTMLElement;
   private treeWrapper: HTMLElement | undefined;
+  private readonly gutterOffset = -13;
 
   constructor(@Inject(ElementRef) public elementRef: ElementRef) {
     this.el = elementRef.nativeElement;
@@ -95,20 +151,29 @@ export class TreeNodeComponent {
     this.treeWrapper = this.getTreeWrapper();
   }
 
-  ngOnChanges() {
+  ngOnChanges(changes: SimpleChanges) {
+    if (!this.isInPinnedSection && changes['isSelected']?.currentValue) {
+      this.expandTreeChange.emit();
+    }
+
     this.collapseDiffClass = this.updateCollapseDiffClass();
-    if (!this.isPinned && this.isSelected && !this.isNodeInView()) {
+    if (!this.isInPinnedSection && this.isSelected && !this.isNodeInView()) {
       this.el.scrollIntoView({block: 'center', inline: 'nearest'});
     }
   }
 
-  isNodeInView() {
+  isNodeInView(): boolean {
     if (!this.treeWrapper) {
       return false;
     }
     const rect = this.el.getBoundingClientRect();
     const parentRect = this.treeWrapper.getBoundingClientRect();
-    return rect.top >= parentRect.top && rect.bottom <= parentRect.bottom;
+    return (
+      rect.top >= parentRect.top &&
+      rect.bottom <= parentRect.bottom &&
+      rect.left >= parentRect.left &&
+      rect.right <= parentRect.right
+    );
   }
 
   getTreeWrapper(): HTMLElement | undefined {
@@ -125,14 +190,12 @@ export class TreeNodeComponent {
     return parent;
   }
 
-  isPropertyTreeNode() {
+  isPropertyTreeNode(): boolean {
     return this.node instanceof UiPropertyTreeNode;
   }
 
-  showPinNodeIcon() {
-    return (
-      (this.node instanceof UiHierarchyTreeNode && !this.node.isRoot()) ?? false
-    );
+  showPinNodeIcon(): boolean {
+    return this.node instanceof UiHierarchyTreeNode && !this.node.isRoot();
   }
 
   toggleTree(event: MouseEvent) {
@@ -140,12 +203,13 @@ export class TreeNodeComponent {
     this.toggleTreeChange.emit();
   }
 
-  showChevron() {
-    return !this.isLeaf && !this.flattened && !this.isInPinnedSection;
+  toggleRectShowState(event: MouseEvent) {
+    event.stopPropagation();
+    this.rectShowStateChange.emit();
   }
 
-  showLeafNodeIcon() {
-    return !this.showChevron() && !this.isInPinnedSection;
+  showChevron(): boolean {
+    return !this.isLeaf && !this.flattened && !this.isInPinnedSection;
   }
 
   expandTree(event: MouseEvent) {
@@ -158,7 +222,7 @@ export class TreeNodeComponent {
     this.pinNodeChange.emit(assertDefined(this.node) as UiHierarchyTreeNode);
   }
 
-  updateCollapseDiffClass() {
+  updateCollapseDiffClass(): string {
     if (this.isExpanded) {
       return '';
     }
@@ -168,23 +232,46 @@ export class TreeNodeComponent {
     );
 
     childrenDiffClasses.delete(DiffType.NONE);
-    childrenDiffClasses.delete(undefined);
 
     if (childrenDiffClasses.size === 0) {
       return '';
     }
     if (childrenDiffClasses.size === 1) {
-      const diffType = childrenDiffClasses.values().next().value;
+      const diffType = assertDefined(childrenDiffClasses.values().next().value);
       return diffType;
     }
     return DiffType.MODIFIED;
   }
 
+  getShowStateIconStyle() {
+    const nodeMargin = this.flattened
+      ? 0
+      : Number(this.el.style.marginLeft.split('px')[0]);
+    return {
+      marginLeft: nodeMargin + this.gutterOffset + 'px',
+    };
+  }
+
+  showCopyButton(): boolean {
+    return (
+      this.node instanceof UiPropertyTreeNode &&
+      (this.node.isRoot() || !this.showChevron())
+    );
+  }
+
+  getCopyText(): string {
+    const node = assertDefined(this.node) as UiPropertyTreeNode;
+    if (this.showChevron()) {
+      return node.name;
+    }
+    return `${node.name}: ${node.formattedValue()}`;
+  }
+
   private getAllDiffTypesOfChildren(
     node: UiHierarchyTreeNode | UiPropertyTreeNode,
-  ) {
-    const classes = new Set();
-    for (const child of node.getAllChildren().values()) {
+  ): Set<DiffType> {
+    const classes = new Set<DiffType>();
+    for (const child of node.getAllChildren()) {
       classes.add(child.getDiff());
       for (const diffClass of this.getAllDiffTypesOfChildren(child)) {
         classes.add(diffClass);

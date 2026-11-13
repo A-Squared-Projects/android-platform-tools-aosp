@@ -16,8 +16,8 @@
 
 #pragma once
 
+#include "QueuedTransactionState.h"
 #include "RequestedLayerState.h"
-#include "TransactionState.h"
 
 namespace android::surfaceflinger::frontend {
 
@@ -43,7 +43,8 @@ public:
     // the layers it is unreachable. When using the LayerLifecycleManager for layer trace
     // generation we may encounter layers which are known because we don't have an explicit
     // lifecycle. Ignore these errors while we have to interop with legacy.
-    void applyTransactions(const std::vector<TransactionState>&, bool ignoreUnknownLayers = false);
+    void applyTransactions(const std::vector<QueuedTransactionState>&,
+                           bool ignoreUnknownLayers = false);
     // Ignore unknown handles when iteroping with legacy front end. In the old world, we
     // would create child layers which are not necessary with the new front end. This means
     // we will get notified for handle changes that don't exist in the new front end.
@@ -80,7 +81,11 @@ public:
     const std::vector<RequestedLayerState*>& getChangedLayers() const;
     const ftl::Flags<RequestedLayerState::Changes> getGlobalChanges() const;
     const RequestedLayerState* getLayerFromId(uint32_t) const;
-    bool isLayerSecure(uint32_t) const;
+    // Traverse through parent layers to identify if any are secure, as a layer's secure
+    // flag is inherited from its parents. Return an unexpected status if a layer cycle
+    // is identified.
+    base::expected<bool, status_t> isLayerSecure(uint32_t layerId,
+                                                 std::unordered_set<uint32_t>& visited) const;
 
 private:
     friend class LayerLifecycleManagerTest;

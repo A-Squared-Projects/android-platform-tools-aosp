@@ -19,6 +19,8 @@
 
 #include <binder/IInterface.h>
 #include <cutils/compiler.h>
+#include <feature_override/FeatureOverrideParser.h>
+#include <graphicsenv/FeatureOverrides.h>
 #include <graphicsenv/GpuStatsInfo.h>
 #include <graphicsenv/IGpuService.h>
 #include <serviceutils/PriorityDumper.h>
@@ -46,6 +48,7 @@ public:
 
 protected:
     status_t shellCommand(int in, int out, int err, std::vector<String16>& args) override;
+    const FeatureOverrides &getCachedFeatureOverrides() override;
 
 private:
     /*
@@ -63,7 +66,11 @@ private:
                         const uint64_t* values, const uint32_t valueCount) override;
     void setUpdatableDriverPath(const std::string& driverPath) override;
     std::string getUpdatableDriverPath() override;
+    void getFeatureOverrides(FeatureOverrides& featureOverrides) override;
     void toggleAngleAsSystemDriver(bool enabled) override;
+    std::string getPersistGraphicsEgl() override;
+    void addVulkanEngineName(const std::string& appPackageName, const uint64_t driverVersionCode,
+                             const char *engineName) override;
 
     /*
      * IBinder interface
@@ -83,6 +90,8 @@ private:
 
     status_t doDump(int fd, const Vector<String16>& args, bool asProto);
 
+    status_t cmdFeatureOverrides(int out, int /*err*/);
+
     /*
      * Attributes
      */
@@ -94,6 +103,7 @@ private:
     std::string mDeveloperDriverPath;
     std::unique_ptr<std::thread> mGpuMemAsyncInitThread;
     std::unique_ptr<std::thread> mGpuWorkAsyncInitThread;
+    FeatureOverrideParser mFeatureOverrideParser;
 };
 
 } // namespace android

@@ -72,10 +72,10 @@ class OnStandardStreamsCallbackAction : public ActionInterface<OnStandardStreams
     }
     virtual Result Perform(const ArgumentTuple& args) {
         if (type_ == kStreamStdout) {
-            ::std::tr1::get<0>(args)->OnStdout(output_.c_str(), output_.size());
+            ::std::tr1::get<0>(args)->OnStdoutReceived(output_.c_str(), output_.size());
         }
         if (type_ == kStreamStderr) {
-            ::std::tr1::get<0>(args)->OnStderr(output_.c_str(), output_.size());
+            ::std::tr1::get<0>(args)->OnStderrReceived(output_.c_str(), output_.size());
         }
     }
 
@@ -84,13 +84,13 @@ class OnStandardStreamsCallbackAction : public ActionInterface<OnStandardStreams
     std::string output_;
 };
 
-// Matcher used to emulated StandardStreamsCallbackInterface.OnStdout(buffer,
+// Matcher used to emulated StandardStreamsCallbackInterface.OnStdoutReceived(buffer,
 // length)
 Action<OnStandardStreamsCallbackFunction> WriteOnStdout(const std::string& output) {
     return MakeAction(new OnStandardStreamsCallbackAction(kStreamStdout, output));
 }
 
-// Matcher used to emulated StandardStreamsCallbackInterface.OnStderr(buffer,
+// Matcher used to emulated StandardStreamsCallbackInterface.OnStderrReceived(buffer,
 // length)
 Action<OnStandardStreamsCallbackFunction> WriteOnStderr(const std::string& output) {
     return MakeAction(new OnStandardStreamsCallbackAction(kStreamStderr, output));

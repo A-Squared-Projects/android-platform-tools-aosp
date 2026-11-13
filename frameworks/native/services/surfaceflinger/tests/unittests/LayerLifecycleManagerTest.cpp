@@ -21,7 +21,7 @@
 
 #include "FrontEnd/LayerLifecycleManager.h"
 #include "LayerHierarchyTest.h"
-#include "TransactionState.h"
+#include "QueuedTransactionState.h"
 
 using namespace android::surfaceflinger;
 
@@ -61,18 +61,6 @@ public:
 
 class LayerLifecycleManagerTest : public LayerHierarchyTestBase {
 protected:
-    std::unique_ptr<RequestedLayerState> rootLayer(uint32_t id) {
-        return std::make_unique<RequestedLayerState>(createArgs(/*id=*/id, /*canBeRoot=*/true,
-                                                                /*parent=*/UNASSIGNED_LAYER_ID,
-                                                                /*mirror=*/UNASSIGNED_LAYER_ID));
-    }
-
-    std::unique_ptr<RequestedLayerState> childLayer(uint32_t id, uint32_t parentId) {
-        return std::make_unique<RequestedLayerState>(createArgs(/*id=*/id, /*canBeRoot=*/false,
-                                                                parentId,
-                                                                /*mirror=*/UNASSIGNED_LAYER_ID));
-    }
-
     RequestedLayerState* getRequestedLayerState(LayerLifecycleManager& lifecycleManager,
                                                 uint32_t layerId) {
         return lifecycleManager.getLayerFromId(layerId);
@@ -116,17 +104,20 @@ TEST_F(LayerLifecycleManagerTest, updateLayerStates) {
     EXPECT_FALSE(managedLayers.front()->changes.test(RequestedLayerState::Changes::Z));
 
     // apply transactions that do not affect the hierarchy
-    std::vector<TransactionState> transactions;
+    std::vector<QueuedTransactionState> transactions;
     transactions.emplace_back();
     transactions.back().states.push_back({});
     transactions.back().states.front().state.backgroundBlurRadius = 22;
-    transactions.back().states.front().state.what = layer_state_t::eBackgroundBlurRadiusChanged;
+    transactions.back().states.front().state.backgroundBlurScale = 0.5f;
+    transactions.back().states.front().state.what |= layer_state_t::eBackgroundBlurRadiusChanged;
+    transactions.back().states.front().state.what |= layer_state_t::eBackgroundBlurScaleChanged;
     transactions.back().states.front().layerId = 1;
     lifecycleManager.applyTransactions(transactions);
     EXPECT_FALSE(lifecycleManager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
     lifecycleManager.commitChanges();
     EXPECT_FALSE(lifecycleManager.getGlobalChanges().test(RequestedLayerState::Changes::Hierarchy));
     EXPECT_EQ(managedLayers.front()->backgroundBlurRadius, 22u);
+    EXPECT_EQ(managedLayers.front()->backgroundBlurScale, 0.5f);
 }
 
 TEST_F(LayerLifecycleManagerTest, layerWithoutHandleIsDestroyed) {
@@ -309,7 +300,7 @@ TEST_F(LayerLifecycleManagerTest, canAddBackgroundLayer) {
     layers.emplace_back(rootLayer(1));
     lifecycleManager.addLayers(std::move(layers));
 
-    std::vector<TransactionState> transactions;
+    std::vector<QueuedTransactionState> transactions;
     transactions.emplace_back();
     transactions.back().states.push_back({});
     transactions.back().states.front().state.bgColor.a = 0.5;
@@ -338,7 +329,7 @@ TEST_F(LayerLifecycleManagerTest, canDestroyBackgroundLayer) {
     layers.emplace_back(rootLayer(1));
     lifecycleManager.addLayers(std::move(layers));
 
-    std::vector<TransactionState> transactions;
+    std::vector<QueuedTransactionState> transactions;
     transactions.emplace_back();
     transactions.back().states.push_back({});
     transactions.back().states.front().state.bgColor.a = 0.5;
@@ -372,7 +363,7 @@ TEST_F(LayerLifecycleManagerTest, onParentDestroyDestroysBackgroundLayer) {
     layers.emplace_back(rootLayer(1));
     lifecycleManager.addLayers(std::move(layers));
 
-    std::vector<TransactionState> transactions;
+    std::vector<QueuedTransactionState> transactions;
     transactions.emplace_back();
     transactions.back().states.push_back({});
     transactions.back().states.front().state.bgColor.a = 0.5;
@@ -461,8 +452,8 @@ TEST_F(LayerLifecycleManagerTest, layerOpacityChangesSetsVisibilityChangeFlag) {
                                                                HAL_PIXEL_FORMAT_RGBA_8888,
                                                                GRALLOC_USAGE_PROTECTED /*usage*/));
     EXPECT_EQ(mLifecycleManager.getGlobalChanges().get(),
-              ftl::Flags<RequestedLayerState::Changes>(RequestedLayerState::Changes::Buffer |
-                                                       RequestedLayerState::Changes::Content)
+              ftl::Flags<RequestedLayerState::Changes>(
+                      RequestedLayerState::Changes::Buffer | RequestedLayerState::Changes::Content)
                       .get());
     mLifecycleManager.commitChanges();
 
@@ -493,10 +484,10 @@ TEST_F(LayerLifecycleManagerTest, bufferFormatChangesSetsVisibilityChangeFlag) {
                                                                HAL_PIXEL_FORMAT_RGB_888,
                                                                GRALLOC_USAGE_PROTECTED /*usage*/));
     EXPECT_EQ(mLifecycleManager.getGlobalChanges().get(),
-              ftl::Flags<RequestedLayerState::Changes>(RequestedLayerState::Changes::Buffer |
-                                                       RequestedLayerState::Changes::Content |
-                                                       RequestedLayerState::Changes::VisibleRegion |
-                                                       RequestedLayerState::Changes::Visibility)
+              ftl::Flags<RequestedLayerState::Changes>(
+                      RequestedLayerState::Changes::Buffer | RequestedLayerState::Changes::Content |
+                      RequestedLayerState::Changes::VisibleRegion |
+                      RequestedLayerState::Changes::Visibility)
                       .get());
     mLifecycleManager.commitChanges();
 }
@@ -538,7 +529,8 @@ TEST_F(LayerLifecycleManagerTest, alphaChangesAlwaysSetsVisibleRegionFlag) {
               ftl::Flags<RequestedLayerState::Changes>(
                       RequestedLayerState::Changes::Content |
                       RequestedLayerState::Changes::AffectsChildren |
-                      RequestedLayerState::Changes::VisibleRegion)
+                      RequestedLayerState::Changes::VisibleRegion |
+                      RequestedLayerState::Changes::Input)
                       .string());
     EXPECT_EQ(mLifecycleManager.getChangedLayers()[0]->color.a, static_cast<half>(startingAlpha));
     mLifecycleManager.commitChanges();
@@ -551,13 +543,111 @@ TEST_F(LayerLifecycleManagerTest, alphaChangesAlwaysSetsVisibleRegionFlag) {
               ftl::Flags<RequestedLayerState::Changes>(
                       RequestedLayerState::Changes::Content |
                       RequestedLayerState::Changes::AffectsChildren |
-                      RequestedLayerState::Changes::VisibleRegion)
+                      RequestedLayerState::Changes::VisibleRegion |
+                      RequestedLayerState::Changes::Input)
                       .string());
     EXPECT_EQ(mLifecycleManager.getChangedLayers()[0]->color.a, static_cast<half>(endingAlpha));
     mLifecycleManager.commitChanges();
 
     EXPECT_EQ(mLifecycleManager.getGlobalChanges().string(),
               ftl::Flags<RequestedLayerState::Changes>().string());
+}
+
+TEST_F(LayerLifecycleManagerTest, layerSecureChangesSetsVisibilityChangeFlag) {
+    // add a default buffer and make the layer secure
+    setFlags(1, layer_state_t::eLayerSecure, layer_state_t::eLayerSecure);
+    setBuffer(1,
+              std::make_shared<renderengine::mock::
+                                       FakeExternalTexture>(1U /*width*/, 1U /*height*/,
+                                                            1ULL /* bufferId */,
+                                                            HAL_PIXEL_FORMAT_RGBA_8888,
+                                                            GRALLOC_USAGE_SW_READ_NEVER /*usage*/));
+
+    mLifecycleManager.commitChanges();
+
+    // set new buffer but layer secure doesn't change
+    setBuffer(1,
+              std::make_shared<renderengine::mock::
+                                       FakeExternalTexture>(1U /*width*/, 1U /*height*/,
+                                                            2ULL /* bufferId */,
+                                                            HAL_PIXEL_FORMAT_RGBA_8888,
+                                                            GRALLOC_USAGE_SW_READ_NEVER /*usage*/));
+    EXPECT_EQ(mLifecycleManager.getGlobalChanges().get(),
+              ftl::Flags<RequestedLayerState::Changes>(
+                      RequestedLayerState::Changes::Buffer | RequestedLayerState::Changes::Content)
+                      .get());
+    mLifecycleManager.commitChanges();
+
+    // change layer flags and confirm visibility flag is set
+    setFlags(1, layer_state_t::eLayerSecure, 0);
+    EXPECT_TRUE(
+            mLifecycleManager.getGlobalChanges().test(RequestedLayerState::Changes::Visibility));
+    mLifecycleManager.commitChanges();
+}
+
+TEST_F(LayerLifecycleManagerTest, isSimpleBufferUpdate) {
+    auto layer = rootLayer(1);
+
+    // no buffer changes
+    EXPECT_FALSE(layer->isSimpleBufferUpdate({}));
+
+    {
+        layer_state_t state;
+        state.what = layer_state_t::eBufferChanged;
+        EXPECT_TRUE(layer->isSimpleBufferUpdate(state));
+    }
+
+    {
+        layer_state_t state;
+        state.what = layer_state_t::eReparent | layer_state_t::eBufferChanged;
+        EXPECT_FALSE(layer->isSimpleBufferUpdate(state));
+    }
+
+    {
+        layer_state_t state;
+        state.what = layer_state_t::ePositionChanged | layer_state_t::eBufferChanged;
+        state.x = 9;
+        state.y = 10;
+        EXPECT_FALSE(layer->isSimpleBufferUpdate(state));
+    }
+
+    {
+        layer->x = 9;
+        layer->y = 10;
+        layer_state_t state;
+        state.what = layer_state_t::ePositionChanged | layer_state_t::eBufferChanged;
+        state.x = 9;
+        state.y = 10;
+        EXPECT_TRUE(layer->isSimpleBufferUpdate(state));
+    }
+}
+
+TEST_F(LayerLifecycleManagerTest, layerWithBufferNeedsInputInfo) {
+    // If a layer has no buffer or no color, it doesn't have an input info
+    LayerHierarchyTestBase::createRootLayer(3);
+    setColor(3, {-1._hf, -1._hf, -1._hf});
+    mLifecycleManager.commitChanges();
+
+    EXPECT_FALSE(getRequestedLayerState(mLifecycleManager, 3)->needsInputInfo());
+
+    setBuffer(3);
+    mLifecycleManager.commitChanges();
+
+    EXPECT_TRUE(getRequestedLayerState(mLifecycleManager, 3)->needsInputInfo());
+}
+
+TEST_F(LayerLifecycleManagerTest, layerWithColorNeedsInputInfo) {
+    // If a layer has no buffer or no color, it doesn't have an input info
+    LayerHierarchyTestBase::createRootLayer(4);
+    setColor(4, {-1._hf, -1._hf, -1._hf});
+    mLifecycleManager.commitChanges();
+
+    EXPECT_FALSE(getRequestedLayerState(mLifecycleManager, 4)->needsInputInfo());
+
+    setColor(4, {1._hf, 0._hf, 0._hf});
+    mLifecycleManager.commitChanges();
+
+    EXPECT_TRUE(getRequestedLayerState(mLifecycleManager, 4)->needsInputInfo());
 }
 
 } // namespace android::surfaceflinger::frontend

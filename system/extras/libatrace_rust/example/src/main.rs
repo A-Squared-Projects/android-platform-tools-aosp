@@ -66,7 +66,7 @@ fn main() {
 
     // Methods starting with atrace_* are direct wrappers of libcutils methods.
     let enabled_tags = atrace::atrace_get_enabled_tags();
-    println!("Enabled tags: {:?}", enabled_tags);
+    println!("Enabled tags: {enabled_tags:?}");
 
     println!("Spawning async trace events");
     let async_event_handler = spawn_async_event();

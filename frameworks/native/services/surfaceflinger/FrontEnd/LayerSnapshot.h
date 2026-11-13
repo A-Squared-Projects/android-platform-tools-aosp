@@ -16,28 +16,44 @@
 
 #pragma once
 
+#include <PowerAdvisor/Workload.h>
+#include <android/gui/ISystemContentPriorityConstants.h>
 #include <compositionengine/LayerFECompositionState.h>
+#include <gui/CornerRadii.h>
 #include <renderengine/LayerSettings.h>
 #include "DisplayHardware/ComposerHal.h"
 #include "LayerHierarchy.h"
 #include "RequestedLayerState.h"
 #include "Scheduler/LayerInfo.h"
 #include "android-base/stringprintf.h"
+#include "compositionengine/LayerFE.h"
 
 namespace android::surfaceflinger::frontend {
 
 struct RoundedCornerState {
     RoundedCornerState() = default;
-    RoundedCornerState(const FloatRect& cropRect, const vec2& radius)
-          : cropRect(cropRect), radius(radius) {}
 
     // Rounded rectangle in local layer coordinate space.
     FloatRect cropRect = FloatRect();
-    // Radius of the rounded rectangle.
-    vec2 radius;
-    bool hasRoundedCorners() const { return radius.x > 0.0f && radius.y > 0.0f; }
+    // Radius of the rounded rectangle for composition
+    gui::CornerRadii radii;
+    // Requested radius of the rounded rectangle
+    gui::CornerRadii requestedRadii;
+    // Radius drawn by client for the rounded rectangle
+    gui::CornerRadii clientDrawnRadii;
+    // Radius reported to client based on layerCropRect and bounds
+    gui::CornerRadii croppedRequestedRadii;
+
+    bool hasClientDrawnRadius() const { return radii.isEmpty() && !clientDrawnRadii.isEmpty(); }
+    bool hasRequestedRadius() const { return !requestedRadii.isEmpty(); }
+    bool hasRoundedCorners() const {
+        return !radii.isEmpty() ||
+                (!clientDrawnRadii.isEmpty() && clientDrawnRadii == requestedRadii);
+    }
+
     bool operator==(RoundedCornerState const& rhs) const {
-        return cropRect == rhs.cropRect && radius == rhs.radius;
+        return cropRect == rhs.cropRect && radii == rhs.radii &&
+                requestedRadii == rhs.requestedRadii && clientDrawnRadii == rhs.clientDrawnRadii;
     }
 };
 
@@ -67,21 +83,30 @@ struct LayerSnapshot : public compositionengine::LayerFECompositionState {
     bool contentOpaque;
     bool layerOpaqueFlagSet;
     RoundedCornerState roundedCorner;
+    // roundedCorner of the parent but in local space.
+    RoundedCornerState parentRoundedCorner;
+    // geomLayerCrop of the parent but in local space.
+    FloatRect parentGeomLayerCrop;
+
     FloatRect transformedBounds;
     Rect transformedBoundsWithoutTransparentRegion;
     bool premultipliedAlpha;
     ui::Transform parentTransform;
     Rect bufferSize;
-    Rect croppedBufferSize;
+    FloatRect croppedBufferSize;
     std::shared_ptr<renderengine::ExternalTexture> externalTexture;
     gui::LayerMetadata layerMetadata;
     gui::LayerMetadata relativeLayerMetadata;
     bool hasReadyFrame; // used in post composition to check if there is another frame ready
+    bool autoRefresh;
     ui::Transform localTransformInverse;
     gui::WindowInfo inputInfo;
     ui::Transform localTransform;
+    // set to true if this snapshot will ignore local transforms. Used when the snapshot
+    // is a mirror root
+    bool ignoreLocalTransform;
     gui::DropInputMode dropInputMode;
-    bool isTrustedOverlay;
+    gui::TrustedOverlay trustedOverlay;
     gui::GameMode gameMode;
     scheduler::LayerInfo::FrameRate frameRate;
     scheduler::LayerInfo::FrameRate inheritedFrameRate;
@@ -96,7 +121,8 @@ struct LayerSnapshot : public compositionengine::LayerFECompositionState {
     uint32_t touchCropId;
     gui::Uid uid = gui::Uid::INVALID;
     gui::Pid pid = gui::Pid::INVALID;
-    enum class Reachablilty : uint32_t {
+    int32_t systemContentPriority = gui::ISystemContentPriorityConstants::Unset;
+    enum class Reachability : uint32_t {
         // Can traverse the hierarchy from a root node and reach this snapshot
         Reachable,
         // Cannot traverse the hierarchy from a root node and reach this snapshot
@@ -122,7 +148,7 @@ struct LayerSnapshot : public compositionengine::LayerFECompositionState {
         // and input.
         ReachableByRelativeParent
     };
-    Reachablilty reachablilty;
+    Reachability reachability;
     // True when the surfaceDamage is recognized as a small area update.
     bool isSmallDirty = false;
 
@@ -136,6 +162,8 @@ struct LayerSnapshot : public compositionengine::LayerFECompositionState {
     bool hasBlur() const;
     bool hasBufferOrSidebandStream() const;
     bool hasEffect() const;
+    bool hasBoxShadowSettings() const;
+    bool hasBorderSettings() const;
     bool hasSomethingToDraw() const;
     bool isContentOpaque() const;
     bool isHiddenByPolicy() const;
@@ -148,6 +176,10 @@ struct LayerSnapshot : public compositionengine::LayerFECompositionState {
     friend std::ostream& operator<<(std::ostream& os, const LayerSnapshot& obj);
     void merge(const RequestedLayerState& requested, bool forceUpdate, bool displayChanges,
                bool forceFullDamage, uint32_t displayRotationFlags);
+    // Returns a char summarizing the composition request
+    // This function tries to maintain parity with planner::Plan chars.
+    char classifyCompositionForDebug(
+            const compositionengine::LayerFE::HwcLayerDebugState& hwcState) const;
 };
 
 } // namespace android::surfaceflinger::frontend

@@ -48,7 +48,7 @@ static int find_offset(uint64_t file_size, int roots, uint64_t *offset,
 
     if (file_size % FEC_BLOCKSIZE) {
         /* must be a multiple of block size */
-        error("file size not multiple of " stringify(FEC_BLOCKSIZE));
+        error("file size not multiple of " STRINGIFY(FEC_BLOCKSIZE));
         errno = EINVAL;
         return -1;
     }

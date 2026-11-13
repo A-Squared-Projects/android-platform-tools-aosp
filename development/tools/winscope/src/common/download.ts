@@ -1,0 +1,40 @@
+/*
+ * Copyright (C) 2024 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import {trySanitizeUrl} from 'compat/safevalues';
+import {setAnchorHref} from 'compat/safevalues/dom';
+import {assertDefined} from './assert';
+
+/**
+ * Type for requesting a download
+ */
+export type DownloadRequest = (url: string, filename: string) => void;
+
+/**
+ * Downloads a file from the given URL with the given filename.
+ *
+ * @param url The URL of the file to download.
+ * @param filename The desired filename of the downloaded file.
+ */
+export function downloadFromUrl(url: string, filename: string) {
+  const a = document.createElement('a');
+  document.body.appendChild(a);
+  setAnchorHref(a, assertDefined(trySanitizeUrl(url)));
+  a.download = filename;
+  a.click();
+  window.URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+}

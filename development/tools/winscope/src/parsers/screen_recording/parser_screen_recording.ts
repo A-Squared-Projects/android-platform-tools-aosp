@@ -14,39 +14,128 @@
  * limitations under the License.
  */
 
-import {ArrayUtils} from 'common/array_utils';
-import {assertDefined} from 'common/assert_utils';
-import {Timestamp, TimestampType} from 'common/time';
-import {AbstractParser} from 'parsers/abstract_parser';
-import {ScreenRecordingTraceEntry} from 'trace/screen_recording';
-import {ScreenRecordingUtils} from 'trace/screen_recording_utils';
-import {TraceType} from 'trace/trace_type';
+import {searchSubarray} from 'common/typed_array';
+import {Timestamp} from 'common/time/time';
+import {ParserTimestampConverter} from 'common/time/timestamp_converter';
+import {MonotonicScreenRecording} from 'messaging/user_warnings';
+import {AbstractParser} from 'parsers/legacy/abstract_parser';
+import {UserNotifier} from 'services/user_notifier';
+import {timestampToVideoTimeSeconds} from 'trace/screen_recording_utils';
+import {TraceFile} from 'trace/trace_file';
+import {CoarseVersion} from 'trace_api/coarse_version';
+import {MediaBasedTraceEntry} from 'trace_api/media_based_trace_entry';
+import {TraceMetadata} from 'trace_api/trace_metadata';
+import {TraceType} from 'trace_api/trace_type';
+import {ParserExternalMetadata} from './parser_external_metadata';
+import {ParserFilename} from './parser_filename';
+import {ParserMetadataV1Or2} from './parser_metadata_v1_or_v2';
+import {ParserMetadataV3} from './parser_metadata_v3';
+import {
+  parseIntFromBuffer,
+  ScreenRecordingParser,
+  WINSCOPE_MAGIC_STRING,
+} from './utils';
 
-class ScreenRecordingMetadataEntry {
+export class ParserScreenRecording extends AbstractParser<
+  MediaBasedTraceEntry,
+  bigint
+> {
+  private realToBootTimeOffsetNs: bigint | undefined;
+  private makeTimestampFromExactValue = false;
+
   constructor(
-    public timestampElapsedNs: bigint,
-    public timestampRealtimeNs: bigint,
-  ) {}
-}
+    trace: TraceFile,
+    timestampConverter: ParserTimestampConverter,
+    metadata: TraceMetadata,
+  ) {
+    super(trace, timestampConverter, metadata);
+  }
 
-class ParserScreenRecording extends AbstractParser {
   override getTraceType(): TraceType {
     return TraceType.SCREEN_RECORDING;
   }
 
-  override getMagicNumber(): number[] {
-    return ParserScreenRecording.MPEG4_MAGIC_NMBER;
+  override getCoarseVersion(): CoarseVersion {
+    return CoarseVersion.LATEST;
   }
 
-  override decodeTrace(videoData: Uint8Array): ScreenRecordingMetadataEntry[] {
+  override getMagicNumber(): number[] | undefined {
+    return undefined;
+  }
+
+  override getRealToMonotonicTimeOffsetNs(): bigint | undefined {
+    return undefined;
+  }
+
+  override getRealToBootTimeOffsetNs(): bigint | undefined {
+    return this.realToBootTimeOffsetNs;
+  }
+
+  override async decodeTrace(videoData: Uint8Array): Promise<Array<bigint>> {
     const posVersion = this.searchMagicString(videoData);
-    const [posTimeOffset, metadataVersion] = this.parseMetadataVersion(
+
+    let parser: ScreenRecordingParser;
+    if (posVersion !== undefined) {
+      parser = this.getParserForEmbeddedMetadata(videoData, posVersion);
+    } else if (this.metadata?.screenRecordingOffsets !== undefined) {
+      parser = new ParserExternalMetadata(this.metadata.screenRecordingOffsets);
+    } else {
+      parser = new ParserFilename(this.traceFile.file.name);
+    }
+
+    const result = await parser.parse(videoData);
+    this.realToBootTimeOffsetNs = result.realToBootTimeOffsetNs;
+    if (result.realToBootTimeOffsetNs === 0n) {
+      this.makeTimestampFromExactValue = true;
+    }
+    return result.timestamps;
+  }
+
+  protected override getTimestamp(decodedEntry: bigint): Timestamp {
+    if (this.makeTimestampFromExactValue) {
+      return this.timestampConverter.makeTimestampFromRealNs(decodedEntry);
+    }
+    return this.timestampConverter.makeTimestampFromBootTimeNs(decodedEntry);
+  }
+
+  override processDecodedEntry(
+    index: number,
+    entry: bigint,
+  ): MediaBasedTraceEntry {
+    const videoTimeSeconds = timestampToVideoTimeSeconds(
+      this.decodedEntries[0],
+      entry,
+    );
+    const videoData = this.traceFile.file;
+    return new MediaBasedTraceEntry(videoTimeSeconds, videoData);
+  }
+
+  private searchMagicString(videoData: Uint8Array): number | undefined {
+    let pos = searchSubarray(videoData, WINSCOPE_MAGIC_STRING);
+    if (pos === undefined) {
+      return undefined;
+    }
+    pos += WINSCOPE_MAGIC_STRING.length;
+    return pos;
+  }
+
+  private getParserForEmbeddedMetadata(
+    videoData: Uint8Array,
+    posVersion: number,
+  ): ScreenRecordingParser {
+    const [posTimeOffset, metadataVersion] = parseIntFromBuffer(
       videoData,
       posVersion,
     );
 
-    if (metadataVersion !== 1 && metadataVersion !== 2) {
-      throw TypeError(`Metadata version "${metadataVersion}" not supported`);
+    if (metadataVersion < 1 || metadataVersion > 3) {
+      throw new TypeError(
+        `Metadata version "${metadataVersion}" not supported`,
+      );
+    }
+
+    if (metadataVersion === 3) {
+      return new ParserMetadataV3();
     }
 
     if (metadataVersion === 1) {
@@ -59,151 +148,8 @@ class ParserScreenRecording extends AbstractParser {
       // If no device suspensions are involved, SYSTEM_TIME_MONOTONIC should
       // indeed correspond to SYSTEM_TIME_BOOTTIME and things will work as
       // expected.
-      console.warn(`Screen recording may not be synchronized with the
-        other traces. Metadata contains monotonic time instead of elapsed.`);
+      UserNotifier.add(new MonotonicScreenRecording());
     }
-
-    const [posCount, timeOffsetNs] = this.parseRealToElapsedTimeOffsetNs(
-      videoData,
-      posTimeOffset,
-    );
-    const [posTimestamps, count] = this.parseFramesCount(videoData, posCount);
-    const timestampsElapsedNs = this.parseTimestampsElapsedNs(
-      videoData,
-      posTimestamps,
-      count,
-    );
-
-    return timestampsElapsedNs.map((timestampElapsedNs: bigint) => {
-      return new ScreenRecordingMetadataEntry(
-        timestampElapsedNs,
-        timestampElapsedNs + timeOffsetNs,
-      );
-    });
+    return new ParserMetadataV1Or2(posTimeOffset);
   }
-
-  override getTimestamp(
-    type: TimestampType,
-    decodedEntry: ScreenRecordingMetadataEntry,
-  ): undefined | Timestamp {
-    if (type !== TimestampType.ELAPSED && type !== TimestampType.REAL) {
-      return undefined;
-    }
-    if (type === TimestampType.ELAPSED) {
-      return this.timestampFactory.makeElapsedTimestamp(
-        decodedEntry.timestampElapsedNs,
-      );
-    } else if (type === TimestampType.REAL) {
-      return this.timestampFactory.makeRealTimestamp(
-        decodedEntry.timestampRealtimeNs,
-      );
-    }
-    return undefined;
-  }
-
-  override processDecodedEntry(
-    index: number,
-    timestampType: TimestampType,
-    entry: ScreenRecordingMetadataEntry,
-  ): ScreenRecordingTraceEntry {
-    const initialTimestamp = assertDefined(
-      this.getTimestamps(TimestampType.ELAPSED),
-    )[0];
-    const currentTimestamp = this.timestampFactory.makeElapsedTimestamp(
-      entry.timestampElapsedNs,
-    );
-    const videoTimeSeconds = ScreenRecordingUtils.timestampToVideoTimeSeconds(
-      initialTimestamp,
-      currentTimestamp,
-    );
-    const videoData = this.traceFile.file;
-    return new ScreenRecordingTraceEntry(videoTimeSeconds, videoData);
-  }
-
-  private searchMagicString(videoData: Uint8Array): number {
-    let pos = ArrayUtils.searchSubarray(
-      videoData,
-      ParserScreenRecording.WINSCOPE_META_MAGIC_STRING,
-    );
-    if (pos === undefined) {
-      throw new TypeError("video data doesn't contain winscope magic string");
-    }
-    pos += ParserScreenRecording.WINSCOPE_META_MAGIC_STRING.length;
-    return pos;
-  }
-
-  private parseMetadataVersion(
-    videoData: Uint8Array,
-    pos: number,
-  ): [number, number] {
-    if (pos + 4 > videoData.length) {
-      throw new TypeError(
-        'Failed to parse metadata version. Video data is too short.',
-      );
-    }
-    const version = Number(
-      ArrayUtils.toUintLittleEndian(videoData, pos, pos + 4),
-    );
-    pos += 4;
-    return [pos, version];
-  }
-
-  private parseRealToElapsedTimeOffsetNs(
-    videoData: Uint8Array,
-    pos: number,
-  ): [number, bigint] {
-    if (pos + 8 > videoData.length) {
-      throw new TypeError(
-        'Failed to parse realtime-to-elapsed time offset. Video data is too short.',
-      );
-    }
-    const offset = ArrayUtils.toIntLittleEndian(videoData, pos, pos + 8);
-    pos += 8;
-    return [pos, offset];
-  }
-
-  private parseFramesCount(
-    videoData: Uint8Array,
-    pos: number,
-  ): [number, number] {
-    if (pos + 4 > videoData.length) {
-      throw new TypeError(
-        'Failed to parse frames count. Video data is too short.',
-      );
-    }
-    const count = Number(
-      ArrayUtils.toUintLittleEndian(videoData, pos, pos + 4),
-    );
-    pos += 4;
-    return [pos, count];
-  }
-
-  private parseTimestampsElapsedNs(
-    videoData: Uint8Array,
-    pos: number,
-    count: number,
-  ): Array<bigint> {
-    if (pos + count * 8 > videoData.length) {
-      throw new TypeError(
-        'Failed to parse timestamps. Video data is too short.',
-      );
-    }
-    const timestamps: Array<bigint> = [];
-    for (let i = 0; i < count; ++i) {
-      const timestamp = ArrayUtils.toUintLittleEndian(videoData, pos, pos + 8);
-      pos += 8;
-      timestamps.push(timestamp);
-    }
-    return timestamps;
-  }
-
-  private static readonly MPEG4_MAGIC_NMBER = [
-    0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x6d, 0x70, 0x34, 0x32,
-  ]; // ....ftypmp42
-  private static readonly WINSCOPE_META_MAGIC_STRING = [
-    0x23, 0x56, 0x56, 0x31, 0x4e, 0x53, 0x43, 0x30, 0x50, 0x45, 0x54, 0x31,
-    0x4d, 0x45, 0x32, 0x23,
-  ]; // #VV1NSC0PET1ME2#
 }
-
-export {ParserScreenRecording};

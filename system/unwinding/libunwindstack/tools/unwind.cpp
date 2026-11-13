@@ -26,13 +26,16 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <unwindstack/DexFiles.h>
-#include <unwindstack/Elf.h>
-#include <unwindstack/JitDebug.h>
-#include <unwindstack/Maps.h>
-#include <unwindstack/Memory.h>
+#include <algorithm>
+#include <string>
+#include <vector>
+
+#include <android-base/file.h>
+#include <android-base/stringprintf.h>
+#include <android-base/strings.h>
+#include <procinfo/process.h>
+#include <unwindstack/AndroidUnwinder.h>
 #include <unwindstack/Regs.h>
-#include <unwindstack/Unwinder.h>
 
 static bool Attach(pid_t pid) {
   if (ptrace(PTRACE_SEIZE, pid, 0, 0) == -1) {
@@ -56,43 +59,49 @@ static bool Attach(pid_t pid) {
   return false;
 }
 
-void DoUnwind(pid_t pid) {
+void DoUnwind(pid_t pid, bool print_abi = false) {
   unwindstack::Regs* regs = unwindstack::Regs::RemoteGet(pid);
   if (regs == nullptr) {
     printf("Unable to get remote reg data\n");
     return;
   }
 
-  printf("ABI: ");
-  switch (regs->Arch()) {
-    case unwindstack::ARCH_ARM:
-      printf("arm");
-      break;
-    case unwindstack::ARCH_X86:
-      printf("x86");
-      break;
-    case unwindstack::ARCH_ARM64:
-      printf("arm64");
-      break;
-    case unwindstack::ARCH_X86_64:
-      printf("x86_64");
-      break;
-    case unwindstack::ARCH_RISCV64:
-      printf("riscv64");
-      break;
-    default:
-      printf("unknown\n");
-      return;
+  if (print_abi) {
+    printf("ABI: ");
+    switch (regs->Arch()) {
+      case unwindstack::ARCH_ARM:
+        printf("arm");
+        break;
+      case unwindstack::ARCH_X86:
+        printf("x86");
+        break;
+      case unwindstack::ARCH_ARM64:
+        printf("arm64");
+        break;
+      case unwindstack::ARCH_X86_64:
+        printf("x86_64");
+        break;
+      case unwindstack::ARCH_RISCV64:
+        printf("riscv64");
+        break;
+      default:
+        printf("unknown\n");
+        return;
+    }
+    printf("\n");
   }
-  printf("\n");
 
-  unwindstack::UnwinderFromPid unwinder(1024, pid);
-  unwinder.SetRegs(regs);
-  unwinder.Unwind();
+  unwindstack::AndroidRemoteUnwinder unwinder(pid);
+  unwindstack::AndroidUnwinderData data;
+  if (!unwinder.Unwind(regs, data)) {
+    printf("Unable to unwind pid %d: %s\n", pid, data.GetErrorString().c_str());
+    return;
+  }
+  data.DemangleFunctionNames();
 
   // Print the frames.
-  for (size_t i = 0; i < unwinder.NumFrames(); i++) {
-    printf("%s\n", unwinder.FormatFrame(i).c_str());
+  for (const auto& frame : data.frames) {
+    printf("%s\n", unwinder.FormatFrame(frame).c_str());
   }
 }
 
@@ -108,9 +117,51 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  DoUnwind(pid);
+  std::string proc(android::base::StringPrintf("/proc/%d/", pid));
+  printf("Pid: %d\n", pid);
+  std::string executable;
+  android::base::Readlink(proc + "exe", &executable);
+  if (executable.empty()) {
+    executable = "Unknown";
+  }
+  printf("Executable: %s\n", executable.c_str());
+  std::string cmdline;
+  android::base::ReadFileToString(proc + "cmdline", &cmdline);
+  if (cmdline.empty()) {
+    cmdline = "Unknown";
+  }
+  printf("Command Line: %s\n", cmdline.c_str());
+
+  DoUnwind(pid, /*print_abi*/ true);
 
   ptrace(PTRACE_DETACH, pid, 0, 0);
+
+  std::vector<pid_t> tids;
+  android::procinfo::GetProcessTids(pid, &tids);
+  std::sort(tids.begin(), tids.end());
+  for (const auto& tid : tids) {
+    if (tid == pid) {
+      // Main thread has already been unwound.
+      continue;
+    }
+    if (!Attach(tid)) {
+      printf("Failed to attach to pid %d: %s\n", tid, strerror(errno));
+      return 1;
+    }
+
+    std::string thread_name;
+    android::base::ReadFileToString(android::base::StringPrintf("/proc/%d/comm", tid),
+                                    &thread_name);
+    thread_name = android::base::Trim(thread_name);
+    if (thread_name.empty()) {
+      thread_name = "Unknown Thread";
+    }
+    printf("\nTid: %d Thread name: %s\n", tid, thread_name.c_str());
+
+    DoUnwind(tid);
+
+    ptrace(PTRACE_DETACH, tid, 0, 0);
+  }
 
   return 0;
 }

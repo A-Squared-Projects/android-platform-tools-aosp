@@ -14,68 +14,41 @@
  * limitations under the License.
  */
 
-import {PropertyTreeNode} from 'trace/tree_node/property_tree_node';
+import {TraceEntry} from 'trace_api/trace';
+import {HierarchyTreeNode} from 'tree_node/hierarchy_tree_node';
+import {LazyPropertiesStrategyType} from 'tree_node/properties_provider';
+import {
+  LogEntry,
+  LogField,
+  LogHeader,
+  UiDataLog,
+} from 'viewers/common/ui_data_log';
 import {UiPropertyTreeNode} from 'viewers/common/ui_property_tree_node';
 import {UserOptions} from 'viewers/common/user_options';
 
-class UiData {
+export class UiData implements UiDataLog {
   constructor(
-    public allVSyncIds: string[],
-    public allPids: string[],
-    public allUids: string[],
-    public allTypes: string[],
-    public allLayerAndDisplayIds: string[],
-    public allTransactionIds: string[],
-    public allFlags: string[],
-    public entries: UiDataEntry[],
-    public currentEntryIndex: undefined | number,
-    public selectedEntryIndex: undefined | number,
+    public headers: LogHeader[],
+    public entries: TransactionsEntry[],
+    public currentIndex: undefined | number,
+    public selectedIndex: undefined | number,
     public scrollToIndex: undefined | number,
-    public currentPropertiesTree: undefined | UiPropertyTreeNode,
+    public propertiesTree: undefined | UiPropertyTreeNode,
     public propertiesUserOptions: UserOptions,
   ) {}
 
-  static EMPTY = new UiData(
-    [],
-    [],
-    [],
-    [],
-    [],
-    [],
-    [],
-    [],
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    {},
-  );
+  isFetchingData = false;
+  checkScrollViewport = false;
+
+  static createEmpty(): UiData {
+    return new UiData([], [], undefined, undefined, undefined, undefined, {});
+  }
 }
 
-class UiDataEntry {
+export class TransactionsEntry implements LogEntry {
   constructor(
-    public originalIndexInTraceEntry: number,
-    public time: PropertyTreeNode,
-    public vsyncId: number,
-    public pid: string,
-    public uid: string,
-    public type: string,
-    public layerOrDisplayId: string,
-    public transactionId: string,
-    public what: string,
-    public propertiesTree: PropertyTreeNode | undefined,
+    public traceEntry: TraceEntry<HierarchyTreeNode>,
+    public fields: LogField[],
+    public getPropertiesTree: LazyPropertiesStrategyType | undefined,
   ) {}
 }
-
-class UiDataEntryType {
-  static DISPLAY_ADDED = 'DISPLAY_ADDED';
-  static DISPLAY_REMOVED = 'DISPLAY_REMOVED';
-  static DISPLAY_CHANGED = 'DISPLAY_CHANGED';
-  static LAYER_ADDED = 'LAYER_ADDED';
-  static LAYER_DESTROYED = 'LAYER_DESTROYED';
-  static LAYER_CHANGED = 'LAYER_CHANGED';
-  static LAYER_HANDLE_DESTROYED = 'LAYER_HANDLE_DESTROYED';
-  static NO_OP = 'NO_OP';
-}
-
-export {UiData, UiDataEntry, UiDataEntryType};

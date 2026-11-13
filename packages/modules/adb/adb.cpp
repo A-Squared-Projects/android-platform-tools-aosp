@@ -74,6 +74,8 @@ using namespace std::chrono_literals;
 
 #if ADB_HOST
 #include "adb_host.pb.h"
+#include "client/detach.h"
+#include "client/mdns_utils.h"
 #include "client/usb.h"
 #endif
 
@@ -116,6 +118,29 @@ uint32_t calculate_apacket_checksum(const apacket* p) {
     return sum;
 }
 
+std::string command_to_string(uint32_t cmd) {
+    switch (cmd) {
+        case A_SYNC:
+            return "A_SYNC";
+        case A_CNXN:
+            return "A_CNXN";
+        case A_OPEN:
+            return "A_OPEN";
+        case A_OKAY:
+            return "A_OKAY";
+        case A_CLSE:
+            return "A_CLSE";
+        case A_WRTE:
+            return "A_WRTE";
+        case A_AUTH:
+            return "A_AUTH";
+        case A_STLS:
+            return "A_STLS";
+        default:
+            return "UNKNOWN (" + std::to_string(cmd) + ")";
+    }
+}
+
 std::string to_string(ConnectionState state) {
     switch (state) {
         case kCsOffline:
@@ -140,8 +165,10 @@ std::string to_string(ConnectionState state) {
             return "authorizing";
         case kCsConnecting:
             return "connecting";
-        default:
-            return "unknown";
+        case kCsDetached:
+            return "detached";
+        case kCsAny:
+            return "any";
     }
 }
 
@@ -174,11 +201,11 @@ void handle_online(atransport *t)
 void handle_offline(atransport *t)
 {
     if (t->GetConnectionState() == kCsOffline) {
-        LOG(INFO) << t->serial_name() << ": already offline";
+        VLOG(ADB) << t->serial_name() << ": already offline";
         return;
     }
 
-    LOG(INFO) << t->serial_name() << ": offline";
+    VLOG(ADB) << t->serial_name() << ": offline";
 
 #if !ADB_HOST && defined(__ANDROID__)
     DecrementActiveConnections();
@@ -405,12 +432,11 @@ static void handle_new_connection(atransport* t, apacket* p) {
 #endif
 }
 
-void handle_packet(apacket *p, atransport *t)
-{
-    D("handle_packet() %c%c%c%c", ((char*) (&(p->msg.command)))[0],
-            ((char*) (&(p->msg.command)))[1],
-            ((char*) (&(p->msg.command)))[2],
-            ((char*) (&(p->msg.command)))[3]);
+void handle_packet(apacket* p, atransport* t) {
+    VLOG(PACKETS) << std::format("packet <-- {}{}{}{}", ((char*)(&(p->msg.command)))[0],
+                                 ((char*)(&(p->msg.command)))[1], ((char*)(&(p->msg.command)))[2],
+                                 ((char*)(&(p->msg.command)))[3]);
+
     print_packet("recv", p);
     CHECK_EQ(p->payload.size(), p->msg.data_length);
 
@@ -510,13 +536,13 @@ void handle_packet(apacket *p, atransport *t)
         s->peer->peer = s;
 
         if (t->SupportsDelayedAck()) {
-            LOG(DEBUG) << "delayed ack available: send buffer = " << send_bytes;
+            VLOG(PACKETS) << "delayed ack available: send buffer = " << send_bytes;
             s->available_send_bytes = send_bytes;
 
             // TODO: Make this adjustable at connection time?
             send_ready(s->id, s->peer->id, t, INITIAL_DELAYED_ACK_BYTES);
         } else {
-            LOG(DEBUG) << "delayed ack unavailable";
+            VLOG(PACKETS) << "delayed ack unavailable";
             send_ready(s->id, s->peer->id, t, 0);
         }
 
@@ -548,7 +574,6 @@ void handle_packet(apacket *p, atransport *t)
                     s->peer->peer = s;
 
                     local_socket_ack(s, acked_bytes);
-                    s->ready(s);
                 } else if (s->peer->id == p->msg.arg0) {
                     /* Other READY messages must use the same local-id */
                     local_socket_ack(s, acked_bytes);
@@ -1334,18 +1359,19 @@ HostRequestResult handle_host_request(std::string_view service, TransportType ty
         }
         status.set_usb_backend_forced(getenv("ADB_LIBUSB") != nullptr);
 
-        if (using_bonjour()) {
-            status.set_mdns_backend(adb::proto::AdbServerStatus::BONJOUR);
-        } else {
-            status.set_mdns_backend(adb::proto::AdbServerStatus::OPENSCREEN);
-        }
-        status.set_mdns_backend_forced(getenv("ADB_MDNS_OPENSCREEN") != nullptr);
+        status.set_mdns_backend(adb::proto::AdbServerStatus::OPENSCREEN);
+        status.set_mdns_backend_forced(false);
 
         status.set_version(std::string(PLATFORM_TOOLS_VERSION));
         status.set_build(android::build::GetBuildNumber());
         status.set_executable_absolute_path(android::base::GetExecutablePath());
         status.set_log_absolute_path(GetLogFilePath());
         status.set_os(GetOSVersion());
+        status.set_burst_mode(burst_mode_enabled());
+        status.set_trace_level(get_trace_setting());
+        status.set_mdns_enabled(mdns::is_enabled());
+        status.set_keystore_path(adb_auth_get_userkey_path());
+        status.set_known_hosts_path(known_wifi_hosts_file.KeyStorePath());
 
         std::string server_status_string;
         status.SerializeToString(&server_status_string);
@@ -1496,7 +1522,10 @@ HostRequestResult handle_host_request(std::string_view service, TransportType ty
         if (!ParseUint(&port, service)) {
           LOG(ERROR) << "received invalid port for emulator: " << service;
         } else {
-          local_connect(port);
+            // We are running on the fdevent thread. Connect is a long operation which
+            // can potentially block 10s until connection is established. We must run
+            // it on another thread.
+            std::thread([=] { connect_emulator(port); }).detach();
         }
 
         /* we don't even need to send a reply */
@@ -1527,6 +1556,7 @@ HostRequestResult handle_host_request(std::string_view service, TransportType ty
             return HostRequestResult::Handled;
         }
 
+        attached_devices.RegisterAttach(t->serial_name());
         if (t->Attach(&error)) {
             SendOkay(reply_fd,
                      android::base::StringPrintf("%s attached", t->serial_name().c_str()));
@@ -1554,6 +1584,7 @@ HostRequestResult handle_host_request(std::string_view service, TransportType ty
         // function that called us.
         s->transport = nullptr;
 
+        attached_devices.RegisterDetach(t->serial_name());
         if (t->Detach(&error)) {
             SendOkay(reply_fd,
                      android::base::StringPrintf("%s detached", t->serial_name().c_str()));

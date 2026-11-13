@@ -18,7 +18,6 @@
 
 #include <ftl/flags.h>
 #include <gui/WindowInfo.h>
-#include <gui/constants.h>
 #include <ui/Transform.h>
 #include <utils/BitSet.h>
 #include <bitset>
@@ -78,8 +77,8 @@ public:
     // (ignored for KeyEvents)
     float globalScaleFactor = 1.0f;
 
-    // Current display transform. Used for compatibility for raw coordinates.
-    ui::Transform displayTransform;
+    // The raw coordinate transform that's used for compatibility for MotionEvent's getRaw APIs.
+    ui::Transform rawTransform;
 
     // Event time for the first motion event (ACTION_DOWN) dispatched to this input target if
     // FLAG_SPLIT is set.
@@ -92,7 +91,8 @@ public:
     InputTarget() = default;
     InputTarget(const std::shared_ptr<Connection>&, ftl::Flags<Flags> = {});
 
-    void addPointers(std::bitset<MAX_POINTER_ID + 1> pointerIds, const ui::Transform& transform);
+    android::base::Result<void> addPointers(std::bitset<MAX_POINTER_ID + 1> pointerIds,
+                                            const ui::Transform& transform);
     void setDefaultPointerTransform(const ui::Transform& transform);
 
     /**

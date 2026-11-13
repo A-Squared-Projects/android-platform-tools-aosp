@@ -17,6 +17,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+#include <android/app/IProcessObserver.h>
+#include <android/app/RunningAppProcessInfo.h>
 #include <android/permission_manager.h>
 #include <binder/ActivityManager.h>
 #include <binder/IActivityManager.h>
@@ -147,9 +149,11 @@ public:
          data.writeInterfaceToken(IActivityManager::getInterfaceDescriptor());
          data.writeInt32(uid);
          data.writeString16(callingPackage);
-         remote()->transact(IS_UID_ACTIVE_TRANSACTION, data, &reply);
+         status_t err = remote()->transact(IS_UID_ACTIVE_TRANSACTION, data, &reply);
          // fail on exception
-         if (reply.readExceptionCode() != 0) return false;
+         if (err != NO_ERROR || ((err = reply.readExceptionCode()) != NO_ERROR)) {
+             return false;
+         }
          return reply.readInt32() == 1;
     }
 
@@ -159,9 +163,9 @@ public:
         data.writeInterfaceToken(IActivityManager::getInterfaceDescriptor());
         data.writeInt32(uid);
         data.writeString16(callingPackage);
-        remote()->transact(GET_UID_PROCESS_STATE_TRANSACTION, data, &reply);
+        status_t err = remote()->transact(GET_UID_PROCESS_STATE_TRANSACTION, data, &reply);
         // fail on exception
-        if (reply.readExceptionCode() != 0) {
+        if (err != NO_ERROR || ((err = reply.readExceptionCode()) != NO_ERROR)) {
             return ActivityManager::PROCESS_STATE_UNKNOWN;
         }
         return reply.readInt32();
@@ -192,7 +196,7 @@ public:
         data.writeInt32(appPid);
         status_t err = remote()->transact(LOG_FGS_API_BEGIN_TRANSACTION, data, &reply,
                                           IBinder::FLAG_ONEWAY);
-        if (err != NO_ERROR || ((err = reply.readExceptionCode()) != NO_ERROR)) {
+        if (err != NO_ERROR) {
             ALOGD("%s: FGS Logger Transaction failed, %d", __func__, err);
             return err;
         }
@@ -207,7 +211,7 @@ public:
         data.writeInt32(appPid);
         status_t err =
                 remote()->transact(LOG_FGS_API_END_TRANSACTION, data, &reply, IBinder::FLAG_ONEWAY);
-        if (err != NO_ERROR || ((err = reply.readExceptionCode()) != NO_ERROR)) {
+        if (err != NO_ERROR) {
             ALOGD("%s: FGS Logger Transaction failed, %d", __func__, err);
             return err;
         }
@@ -224,11 +228,46 @@ public:
         data.writeInt32(appPid);
         status_t err = remote()->transact(LOG_FGS_API_STATE_CHANGED_TRANSACTION, data, &reply,
                                           IBinder::FLAG_ONEWAY);
-        if (err != NO_ERROR || ((err = reply.readExceptionCode()) != NO_ERROR)) {
+        if (err != NO_ERROR) {
             ALOGD("%s: FGS Logger Transaction failed, %d", __func__, err);
             return err;
         }
         return NO_ERROR;
+    }
+
+    virtual status_t registerProcessObserver(const sp<app::IProcessObserver>& observer) {
+        Parcel data;
+        Parcel reply;
+        data.writeInterfaceToken(IActivityManager::getInterfaceDescriptor());
+        data.writeStrongBinder(observer);
+        status_t err = remote()->transact(REGISTER_PROCESS_OBSERVER, data, &reply, 0);
+        if (err != NO_ERROR || ((err = reply.readExceptionCode()) != NO_ERROR)) {
+            return err;
+        }
+        return OK;
+    }
+
+    virtual status_t unregisterProcessObserver(const sp<app::IProcessObserver>& observer) {
+        Parcel data;
+        Parcel reply;
+        data.writeInterfaceToken(IActivityManager::getInterfaceDescriptor());
+        data.writeStrongBinder(observer);
+        status_t err = remote()->transact(UNREGISTER_PROCESS_OBSERVER, data, &reply, 0);
+        if (err != NO_ERROR || ((err = reply.readExceptionCode()) != NO_ERROR)) {
+            return err;
+        }
+        return OK;
+    }
+
+    virtual status_t getRunningAppProcesses(::std::vector<app::RunningAppProcessInfo>* output) {
+        Parcel data;
+        Parcel reply;
+        data.writeInterfaceToken(IActivityManager::getInterfaceDescriptor());
+        status_t err = remote()->transact(GET_RUNNING_APP_PROCESSES, data, &reply, 0);
+        if (err != NO_ERROR || ((err = reply.readExceptionCode()) != NO_ERROR)) {
+            return err;
+        }
+        return reply.readParcelableVector(output);
     }
 };
 

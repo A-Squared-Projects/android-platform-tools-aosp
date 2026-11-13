@@ -20,6 +20,9 @@ using namespace ::aidl::android::hardware::input;
 
 namespace android {
 
+const static ui::Transform kIdentityTransform;
+const static std::array<uint8_t, 32> kInvalidHmac{};
+
 static common::Source getSource(uint32_t source) {
     static_assert(static_cast<common::Source>(AINPUT_SOURCE_UNKNOWN) == common::Source::UNKNOWN,
                   "SOURCE_UNKNOWN mismatch");
@@ -156,20 +159,6 @@ static common::PolicyFlag getPolicyFlags(int32_t flags) {
     static_assert(static_cast<common::PolicyFlag>(POLICY_FLAG_PASS_TO_USER) ==
                   common::PolicyFlag::PASS_TO_USER);
     return static_cast<common::PolicyFlag>(flags);
-}
-
-static common::EdgeFlag getEdgeFlags(int32_t flags) {
-    static_assert(static_cast<common::EdgeFlag>(AMOTION_EVENT_EDGE_FLAG_NONE) ==
-                  common::EdgeFlag::NONE);
-    static_assert(static_cast<common::EdgeFlag>(AMOTION_EVENT_EDGE_FLAG_TOP) ==
-                  common::EdgeFlag::TOP);
-    static_assert(static_cast<common::EdgeFlag>(AMOTION_EVENT_EDGE_FLAG_BOTTOM) ==
-                  common::EdgeFlag::BOTTOM);
-    static_assert(static_cast<common::EdgeFlag>(AMOTION_EVENT_EDGE_FLAG_LEFT) ==
-                  common::EdgeFlag::LEFT);
-    static_assert(static_cast<common::EdgeFlag>(AMOTION_EVENT_EDGE_FLAG_RIGHT) ==
-                  common::EdgeFlag::RIGHT);
-    return static_cast<common::EdgeFlag>(flags);
 }
 
 static common::Meta getMetastate(int32_t state) {
@@ -311,7 +300,7 @@ common::MotionEvent notifyMotionArgsToHalMotionEvent(const NotifyMotionArgs& arg
     common::MotionEvent event;
     event.deviceId = args.deviceId;
     event.source = getSource(args.source);
-    event.displayId = args.displayId;
+    event.displayId = args.displayId.val();
     event.downTime = args.downTime;
     event.eventTime = args.eventTime;
     event.deviceTimestamp = 0;
@@ -320,7 +309,8 @@ common::MotionEvent notifyMotionArgsToHalMotionEvent(const NotifyMotionArgs& arg
     event.actionButton = getActionButton(args.actionButton);
     event.flags = getFlags(args.flags);
     event.policyFlags = getPolicyFlags(args.policyFlags);
-    event.edgeFlags = getEdgeFlags(args.edgeFlags);
+    // TODO(b/321101159): remove the edgeFlags field from the AIDL MotionEvent.
+    event.edgeFlags = common::EdgeFlag::NONE;
     event.metaState = getMetastate(args.metaState);
     event.buttonState = getButtonState(args.buttonState);
     event.xPrecision = args.xPrecision;
@@ -334,6 +324,34 @@ common::MotionEvent notifyMotionArgsToHalMotionEvent(const NotifyMotionArgs& arg
 
     event.frames = convertVideoFrames(args.videoFrames);
 
+    return event;
+}
+
+MotionEvent toMotionEvent(const NotifyMotionArgs& args, const ui::Transform* transform,
+                          const ui::Transform* rawTransform, const std::array<uint8_t, 32>* hmac) {
+    if (transform == nullptr) transform = &kIdentityTransform;
+    if (rawTransform == nullptr) rawTransform = &kIdentityTransform;
+    if (hmac == nullptr) hmac = &kInvalidHmac;
+
+    MotionEvent event;
+    event.initialize(args.id, args.deviceId, args.source, args.displayId, *hmac, args.action,
+                     args.actionButton, ftl::Flags<MotionFlag>(args.flags),
+                     AMOTION_EVENT_EDGE_FLAG_NONE, args.metaState, args.buttonState,
+                     args.classification, *transform, args.xPrecision, args.yPrecision,
+                     args.xCursorPosition, args.yCursorPosition, *rawTransform, args.downTime,
+                     args.eventTime, args.getPointerCount(), args.pointerProperties.data(),
+                     args.pointerCoords.data());
+    return event;
+}
+
+KeyEvent toKeyEvent(const NotifyKeyArgs& args, int32_t repeatCount,
+                    const std::array<uint8_t, 32>* hmac) {
+    if (hmac == nullptr) hmac = &kInvalidHmac;
+
+    KeyEvent event;
+    event.initialize(args.id, args.deviceId, args.source, args.displayId, *hmac, args.action,
+                     args.flags, args.keyCode, args.scanCode, args.metaState, repeatCount,
+                     args.downTime, args.eventTime);
     return event;
 }
 

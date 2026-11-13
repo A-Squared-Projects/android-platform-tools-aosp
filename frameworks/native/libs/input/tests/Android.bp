@@ -10,19 +10,25 @@ package {
 
 cc_test {
     name: "libinput_tests",
-    cpp_std: "c++20",
     host_supported: true,
     srcs: [
         "BlockingQueue_test.cpp",
         "IdGenerator_test.cpp",
         "InputChannel_test.cpp",
+        "InputConsumerFilteredResampling_test.cpp",
+        "InputConsumerResampling_test.cpp",
+        "InputConsumer_test.cpp",
         "InputDevice_test.cpp",
         "InputEvent_test.cpp",
+        "InputPublisherAndConsumerNoResampling_test.cpp",
         "InputPublisherAndConsumer_test.cpp",
         "InputVerifier_test.cpp",
-        "MotionPredictor_test.cpp",
         "MotionPredictorMetricsManager_test.cpp",
+        "MotionPredictor_test.cpp",
+        "OneEuroFilter_test.cpp",
+        "Resampler_test.cpp",
         "RingBuffer_test.cpp",
+        "TestInputChannel.cpp",
         "TfLiteMotionPredictor_test.cpp",
         "TouchResampling_test.cpp",
         "TouchVideoFrame_test.cpp",
@@ -35,6 +41,7 @@ cc_test {
         "tensorflow_headers",
     ],
     static_libs: [
+        "libflagtest",
         "libgmock",
         "libgui_window_info_static",
         "libinput",
@@ -45,51 +52,58 @@ cc_test {
     ],
     cflags: [
         "-Wall",
-        "-Wextra",
         "-Werror",
+        "-Wextra",
         "-Wno-unused-parameter",
     ],
     sanitize: {
+        address: true,
         hwaddress: true,
         undefined: true,
         all_undefined: true,
         diag: {
+            cfi: true,
+            integer_overflow: true,
+            memtag_heap: true,
             undefined: true,
+            misc_undefined: [
+                "all",
+                "bounds",
+            ],
         },
     },
     shared_libs: [
+        "libPlatformProperties",
+        "libaconfig_storage_read_api_cc",
         "libbase",
         "libbinder",
         "libcutils",
         "liblog",
-        "libPlatformProperties",
         "libtinyxml2",
         "libutils",
         "server_configurable_flags",
     ],
     data: [
-        "data/*",
         ":motion_predictor_model",
+        "data/*",
+    ],
+    device_first_data: [
+        ":keychars_test_data",
+        ":keylayout_test_data",
     ],
     test_options: {
         unit_test: true,
     },
     test_suites: ["device-tests"],
     target: {
-        host: {
-            sanitize: {
-                address: true,
-            },
-        },
         android: {
             static_libs: [
-                // Stats logging library and its dependencies.
                 "libstatslog_libinput",
-                "libstatsbootstrap",
-                "android.os.statsbootstrap_aidl-cpp",
+                "libstatssocket_lazy",
             ],
         },
     },
+    native_coverage: false,
 }
 
 // NOTE: This is a compile time test, and does not need to be
@@ -105,10 +119,10 @@ cc_library_static {
         "-Wextra",
     ],
     shared_libs: [
-        "libinput",
-        "libcutils",
-        "libutils",
-        "libbinder",
         "libbase",
+        "libbinder",
+        "libcutils",
+        "libinput",
+        "libutils",
     ],
 }

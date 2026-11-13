@@ -22,9 +22,11 @@
 #include <pwd.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <list>
 #include <vector>
 
@@ -222,11 +224,6 @@ void LogStatistics::Subtract(LogStatisticsElement element) {
     }
 
     tagNameTable.Subtract(TagNameKey(element), element);
-}
-
-const char* LogStatistics::UidToName(uid_t uid) const {
-    auto lock = std::lock_guard{lock_};
-    return UidToNameLocked(uid);
 }
 
 // caller must own and free character string
@@ -789,23 +786,12 @@ std::string LogStatistics::Format(uid_t uid, pid_t pid, unsigned int logMask) co
 namespace android {
 
 uid_t pidToUid(pid_t pid) {
-    char buffer[512];
-    snprintf(buffer, sizeof(buffer), "/proc/%u/status", pid);
-    FILE* fp = fopen(buffer, "re");
-    if (fp) {
-        while (fgets(buffer, sizeof(buffer), fp)) {
-            int uid = AID_LOGD;
-            char space = 0;
-            if ((sscanf(buffer, "Uid: %d%c", &uid, &space) == 2) &&
-                isspace(space)) {
-                fclose(fp);
-                return uid;
-            }
-        }
-        fclose(fp);
-    }
-    return AID_LOGD;  // associate this with the logger
+    char path[32];
+    snprintf(path, sizeof(path), "/proc/%u", pid);
+    struct stat sb;
+    return !stat(path, &sb) ? sb.st_uid : AID_LOGD;
 }
+
 }
 
 uid_t LogStatistics::PidToUid(pid_t pid) {

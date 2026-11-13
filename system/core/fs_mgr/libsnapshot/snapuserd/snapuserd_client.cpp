@@ -35,6 +35,7 @@
 #include <android-base/properties.h>
 #include <android-base/strings.h>
 #include <fs_mgr/file_wait.h>
+#include <libdm/dm.h>
 #include <snapuserd/snapuserd_client.h>
 
 namespace android {
@@ -51,6 +52,7 @@ bool EnsureSnapuserdStarted() {
             return false;
         }
     }
+
     if (!android::base::WaitForProperty("snapuserd.ready", "true", 10s)) {
         LOG(ERROR) << "Timed out waiting for snapuserd to be ready.";
         return false;
@@ -188,7 +190,8 @@ bool SnapuserdClient::WaitForDeviceDelete(const std::string& control_device) {
     }
     std::string response = Receivemsg();
     if (response != "success") {
-        LOG(ERROR) << "Failed waiting to delete device " << control_device;
+        LOG(ERROR) << "Failed waiting to delete device " << control_device << " received:'"
+                   << response << "'";
         return false;
     }
     return true;
@@ -204,6 +207,15 @@ bool SnapuserdClient::SupportsSecondStageSocketHandoff() {
     return response == "success";
 }
 
+bool SnapuserdClient::SupportsUblk() {
+    std::string msg = "supports,ublk";
+    if (!Sendmsg(msg)) {
+        LOG(ERROR) << "Failed to send message " << msg << " to snapuserd";
+    }
+    std::string response = Receivemsg();
+    return response == "success";
+}
+
 std::string SnapuserdClient::Receivemsg() {
     char msg[PACKET_SIZE];
     ssize_t ret = TEMP_FAILURE_RETRY(recv(sockfd_, msg, sizeof(msg), 0));
@@ -212,7 +224,7 @@ std::string SnapuserdClient::Receivemsg() {
         return {};
     }
     if (ret == 0) {
-        LOG(DEBUG) << "Snapuserd:client disconnected";
+        LOG(INFO) << "Snapuserd:client disconnected";
         return {};
     }
     return std::string(msg, ret);
@@ -282,6 +294,28 @@ uint64_t SnapuserdClient::InitDmUserCow(const std::string& misc_name, const std:
     return num_sectors;
 }
 
+uint64_t SnapuserdClient::CreateUserSnapshot(const std::string& misc_name, uint64_t num_sectors) {
+    LOG(INFO) << "misc_name: " << misc_name << " num_sectors: " << num_sectors;
+    // TODOUBLK: b/414812023 : Either send explicit command to server or handle the creation in
+    // addHandler() in that case, this poke is not needed.
+    return 0;
+}
+
+std::optional<std::string> SnapuserdClient::GetDeviceName(const std::string& misc_name) {
+    std::string msg = "get_device_name," + misc_name;
+    if (!Sendmsg(msg)) {
+        LOG(ERROR) << "Failed to send message " << msg << " to snapuserd daemon";
+        return std::nullopt;
+    }
+    std::string str = Receivemsg();
+    std::vector<std::string> input = android::base::Split(str, ",");
+    if (input.empty() || input[0] != "success") {
+        LOG(ERROR) << "Failed to receive device name for " << msg << " from snapuserd daemon";
+        return std::nullopt;
+    }
+    return input[1];
+}
+
 bool SnapuserdClient::DetachSnapuserd() {
     if (!Sendmsg("detach")) {
         LOG(ERROR) << "Failed to detach snapuserd.";
@@ -310,6 +344,11 @@ double SnapuserdClient::GetMergePercent() {
     }
     std::string response = Receivemsg();
 
+    // If server socket disconnects most likely because of device reboot,
+    // then we just return 0.
+    if (response.empty()) {
+        return 0.0;
+    }
     return std::stod(response);
 }
 
@@ -333,7 +372,21 @@ bool SnapuserdClient::QueryUpdateVerification() {
 }
 
 std::string SnapuserdClient::GetDaemonAliveIndicatorPath() {
-    return "/metadata/ota/" + std::string(kDaemonAliveIndicator);
+    std::string metadata_dir;
+    std::string temp_metadata_mnt = "/mnt/scratch_ota_metadata_super";
+
+    auto& dm = ::android::dm::DeviceMapper::Instance();
+    auto partition_name = android::base::Basename(temp_metadata_mnt);
+
+    bool invalid_partition = (dm.GetState(partition_name) == dm::DmDeviceState::INVALID);
+    std::string temp_device;
+    if (!invalid_partition && dm.GetDmDevicePathByName(partition_name, &temp_device)) {
+        metadata_dir = temp_metadata_mnt + "/" + "ota/";
+    } else {
+        metadata_dir = "/metadata/ota/";
+    }
+
+    return metadata_dir + std::string(kDaemonAliveIndicator);
 }
 
 bool SnapuserdClient::IsTransitionedDaemonReady() {
@@ -367,6 +420,24 @@ void SnapuserdClient::NotifyTransitionDaemonIsReady() {
         PLOG(ERROR) << "Unable to write daemon alive indicator path: "
                     << GetDaemonAliveIndicatorPath();
     }
+}
+
+bool SnapuserdClient::PauseMerge() {
+    if (!Sendmsg("pause_merge")) {
+        LOG(ERROR) << "Failed to pause snapshot merge.";
+        return false;
+    }
+    std::string response = Receivemsg();
+    return response == "success";
+}
+
+bool SnapuserdClient::ResumeMerge() {
+    if (!Sendmsg("resume_merge")) {
+        LOG(ERROR) << "Failed to resume snapshot merge.";
+        return false;
+    }
+    std::string response = Receivemsg();
+    return response == "success";
 }
 
 }  // namespace snapshot

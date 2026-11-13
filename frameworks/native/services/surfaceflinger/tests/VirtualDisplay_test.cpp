@@ -27,13 +27,10 @@ namespace {
 class VirtualDisplayTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        sp<IGraphicBufferConsumer> consumer;
-
-        BufferQueue::createBufferQueue(&mProducer, &consumer);
-        consumer->setConsumerName(String8("Virtual disp consumer"));
-        consumer->setDefaultBufferSize(100, 100);
-
-        mGLConsumer = sp<GLConsumer>::make(consumer, GLConsumer::TEXTURE_EXTERNAL, true, false);
+        mGLConsumer = sp<GLConsumer>::make(GLConsumer::TEXTURE_EXTERNAL, true, false, false);
+        mGLConsumer->setName(String8("Virtual disp consumer (VirtualDisplayTest)"));
+        mGLConsumer->setDefaultBufferSize(100, 100);
+        mProducer = mGLConsumer->getSurface()->getIGraphicBufferProducer();
     }
 
     sp<IGraphicBufferProducer> mProducer;
@@ -41,14 +38,15 @@ protected:
 };
 
 TEST_F(VirtualDisplayTest, VirtualDisplayDestroyedSurfaceReuse) {
+    static const std::string kDisplayName("VirtualDisplay");
     sp<IBinder> virtualDisplay =
-            SurfaceComposerClient::createDisplay(String8("VirtualDisplay"), false /*secure*/);
+            SurfaceComposerClient::createVirtualDisplay(kDisplayName, false /*isSecure*/);
 
     SurfaceComposerClient::Transaction t;
     t.setDisplaySurface(virtualDisplay, mProducer);
     t.apply(true);
 
-    SurfaceComposerClient::destroyDisplay(virtualDisplay);
+    EXPECT_EQ(NO_ERROR, SurfaceComposerClient::destroyVirtualDisplay(virtualDisplay));
     virtualDisplay.clear();
     // Sync here to ensure the display was completely destroyed in SF
     t.apply(true);

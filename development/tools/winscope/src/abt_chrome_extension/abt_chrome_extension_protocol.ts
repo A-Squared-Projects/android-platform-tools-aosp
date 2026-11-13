@@ -14,10 +14,9 @@
  * limitations under the License.
  */
 
-import {FunctionUtils} from 'common/function_utils';
 import {
-  BuganizerAttachmentsDownloaded,
-  BuganizerAttachmentsDownloadStart,
+  RemoteToolDownloadStart,
+  RemoteToolFilesReceived,
   WinscopeEvent,
   WinscopeEventType,
 } from 'messaging/winscope_event';
@@ -33,12 +32,17 @@ import {
   WebCommandMessage,
 } from './messages';
 
+/**
+ * Protocol for communication between Winscope and the ABT Chrome extension.
+ *
+ * The extension is used to download traces from Buganizer.
+ */
 export class AbtChromeExtensionProtocol
   implements WinscopeEventEmitter, WinscopeEventListener
 {
   static readonly ABT_EXTENSION_ID = 'mbbaofdfoekifkfpgehgffcpagbbjkmj';
 
-  private emitEvent: EmitEvent = FunctionUtils.DO_NOTHING_ASYNC;
+  private emitEvent: EmitEvent = () => Promise.resolve();
 
   setEmitEvent(callback: EmitEvent) {
     this.emitEvent = callback;
@@ -51,7 +55,7 @@ export class AbtChromeExtensionProtocol
         return;
       }
 
-      await this.emitEvent(new BuganizerAttachmentsDownloadStart());
+      await this.emitEvent(new RemoteToolDownloadStart());
 
       const openRequestMessage: OpenRequest = {
         action: MessageType.OPEN_REQUEST,
@@ -66,8 +70,8 @@ export class AbtChromeExtensionProtocol
   }
 
   private async onMessageReceived(message: WebCommandMessage) {
-    if (this.isOpenBuganizerResponseMessage(message)) {
-      await this.onOpenBuganizerResponseMessageReceived(message);
+    if (this.isOpenFromBuganizerResponseMessage(message)) {
+      await this.onOpenFromBuganizerResponseMessageReceived(message);
     } else {
       console.warn(
         'ABT chrome extension protocol received unexpected message:',
@@ -76,7 +80,7 @@ export class AbtChromeExtensionProtocol
     }
   }
 
-  private async onOpenBuganizerResponseMessageReceived(
+  private async onOpenFromBuganizerResponseMessageReceived(
     message: OpenBuganizerResponse,
   ) {
     console.log(
@@ -101,10 +105,10 @@ export class AbtChromeExtensionProtocol
     });
 
     const files = await Promise.all(filesBlobPromises);
-    await this.emitEvent(new BuganizerAttachmentsDownloaded(files));
+    await this.emitEvent(new RemoteToolFilesReceived(files));
   }
 
-  private isOpenBuganizerResponseMessage(
+  private isOpenFromBuganizerResponseMessage(
     message: WebCommandMessage,
   ): message is OpenBuganizerResponse {
     return message.action === MessageType.OPEN_BUGANIZER_RESPONSE;

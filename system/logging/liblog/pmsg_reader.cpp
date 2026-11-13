@@ -40,7 +40,7 @@ int PmsgRead(struct logger_list* logger_list, struct log_msg* log_msg) {
 
   memset(log_msg, 0, sizeof(*log_msg));
 
-  if (atomic_load(&logger_list->fd) <= 0) {
+  if (logger_list->fd.load() <= 0) {
     int i, fd = open("/sys/fs/pstore/pmsg-ramoops-0", O_RDONLY | O_CLOEXEC);
 
     if (fd < 0) {
@@ -53,7 +53,7 @@ int PmsgRead(struct logger_list* logger_list, struct log_msg* log_msg) {
         return -errno;
       }
     }
-    i = atomic_exchange(&logger_list->fd, fd);
+    i = logger_list->fd.exchange(fd);
     if ((i > 0) && (i != fd)) {
       close(i);
     }
@@ -64,7 +64,7 @@ int PmsgRead(struct logger_list* logger_list, struct log_msg* log_msg) {
     int fd;
 
     if (preread_count < sizeof(buf)) {
-      fd = atomic_load(&logger_list->fd);
+      fd = logger_list->fd.load();
       if (fd <= 0) {
         return -EBADF;
       }
@@ -78,7 +78,8 @@ int PmsgRead(struct logger_list* logger_list, struct log_msg* log_msg) {
       return preread_count ? -EIO : -EAGAIN;
     }
     if ((buf.p.magic != LOGGER_MAGIC) || (buf.p.len <= sizeof(buf)) ||
-        (buf.p.len > (sizeof(buf) + LOGGER_ENTRY_MAX_PAYLOAD)) || (buf.l.id >= LOG_ID_MAX) ||
+        (buf.p.len > (sizeof(buf) + LOGGER_ENTRY_MAX_PAYLOAD)) ||
+        !__android_log_id_is_valid(static_cast<log_id_t>(buf.l.id)) ||
         (buf.l.realtime.tv_nsec >= NS_PER_SEC) ||
         ((buf.l.id != LOG_ID_EVENTS) && (buf.l.id != LOG_ID_SECURITY) &&
          ((buf.prio == ANDROID_LOG_UNKNOWN) || (buf.prio == ANDROID_LOG_DEFAULT) ||
@@ -98,7 +99,7 @@ int PmsgRead(struct logger_list* logger_list, struct log_msg* log_msg) {
         (!logger_list->pid || (logger_list->pid == buf.p.pid))) {
       char* msg = reinterpret_cast<char*>(&log_msg->entry) + sizeof(log_msg->entry);
       *msg = buf.prio;
-      fd = atomic_load(&logger_list->fd);
+      fd = logger_list->fd.load();
       if (fd <= 0) {
         return -EBADF;
       }
@@ -122,7 +123,7 @@ int PmsgRead(struct logger_list* logger_list, struct log_msg* log_msg) {
       return ret + sizeof(buf.prio) + log_msg->entry.hdr_size;
     }
 
-    fd = atomic_load(&logger_list->fd);
+    fd = logger_list->fd.load();
     if (fd <= 0) {
       return -EBADF;
     }
@@ -130,7 +131,7 @@ int PmsgRead(struct logger_list* logger_list, struct log_msg* log_msg) {
     if (current < 0) {
       return -errno;
     }
-    fd = atomic_load(&logger_list->fd);
+    fd = logger_list->fd.load();
     if (fd <= 0) {
       return -EBADF;
     }
@@ -145,7 +146,7 @@ int PmsgRead(struct logger_list* logger_list, struct log_msg* log_msg) {
 }
 
 void PmsgClose(struct logger_list* logger_list) {
-  int fd = atomic_exchange(&logger_list->fd, 0);
+  int fd = logger_list->fd.exchange(0);
   if (fd > 0) {
     close(fd);
   }

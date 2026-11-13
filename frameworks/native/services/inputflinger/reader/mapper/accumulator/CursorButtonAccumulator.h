@@ -29,7 +29,7 @@ public:
     CursorButtonAccumulator();
     void reset(const InputDeviceContext& deviceContext);
 
-    void process(const RawEvent* rawEvent);
+    void process(const RawEvent& rawEvent);
 
     uint32_t getButtonState() const;
     inline bool isLeftPressed() const { return mBtnLeft; }
@@ -41,6 +41,8 @@ public:
     inline bool isExtraPressed() const { return mBtnExtra; }
     inline bool isTaskPressed() const { return mBtnTask; }
 
+    void setSwapLeftRightButtons(bool shouldSwap);
+
 private:
     bool mBtnLeft;
     bool mBtnRight;
@@ -50,6 +52,8 @@ private:
     bool mBtnForward;
     bool mBtnExtra;
     bool mBtnTask;
+
+    bool mSwapLeftRightButtons = false;
 
     void clearButtons();
 };

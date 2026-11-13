@@ -140,7 +140,6 @@ int main(int argc, char** argv)
     info.reserved[1] = (uint16_t)l | ((uint32_t)t << 16);
     info.reserved[2] = (uint16_t)(l+w) | ((uint32_t)(t+h) << 16);
 
-    int err;
     int c = 0;
     int64_t time = systemTime();
     while (1) {
@@ -151,7 +150,7 @@ int main(int argc, char** argv)
 
         info.activate = FB_ACTIVATE_VBL;
         info.yoffset = info.yres_virtual/2;
-        err = ioctl(fd, FBIOPUT_VSCREENINFO, &info);
+        ioctl(fd, FBIOPUT_VSCREENINFO, &info);
 
         c+=2;
         if (c==60*2) {

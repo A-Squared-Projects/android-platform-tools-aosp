@@ -23,15 +23,13 @@
 
 #include <SkSurface.h>
 
-#undef LOG_TAG
-#define LOG_TAG "RefreshRateOverlay"
-
 namespace android {
 
-auto RefreshRateOverlay::draw(int vsyncRate, int renderFps, SkColor color,
+auto RefreshRateOverlay::draw(int refreshRate, int renderFps, bool idle, SkColor color,
                               ui::Transform::RotationFlags rotation, ftl::Flags<Features> features)
         -> Buffers {
     const size_t loopCount = features.test(Features::Spinner) ? 6 : 1;
+    const bool isSetByHwc = features.test(Features::SetByHwc);
 
     Buffers buffers;
     buffers.reserve(loopCount);
@@ -71,7 +69,11 @@ auto RefreshRateOverlay::draw(int vsyncRate, int renderFps, SkColor color,
         canvas->setMatrix(canvasTransform);
 
         int left = 0;
-        drawNumber(vsyncRate, left, color, *canvas);
+        if (idle && !isSetByHwc) {
+            drawDash(left, *canvas);
+        } else {
+            drawNumber(refreshRate, left, color, *canvas);
+        }
         left += 3 * (kDigitWidth + kDigitSpace);
         if (features.test(Features::Spinner)) {
             switch (i) {
@@ -104,7 +106,11 @@ auto RefreshRateOverlay::draw(int vsyncRate, int renderFps, SkColor color,
         left += kDigitWidth + kDigitSpace;
 
         if (features.test(Features::RenderRate)) {
-            drawNumber(renderFps, left, color, *canvas);
+            if (idle) {
+                drawDash(left, *canvas);
+            } else {
+                drawNumber(renderFps, left, color, *canvas);
+            }
         }
         left += 3 * (kDigitWidth + kDigitSpace);
 
@@ -138,6 +144,14 @@ void RefreshRateOverlay::drawNumber(int number, int left, SkColor color, SkCanva
     SegmentDrawer::drawDigit(number % 10, left, color, canvas);
 }
 
+void RefreshRateOverlay::drawDash(int left, SkCanvas& canvas) {
+    left += kDigitWidth + kDigitSpace;
+    SegmentDrawer::drawSegment(SegmentDrawer::Segment::Middle, left, SK_ColorRED, canvas);
+
+    left += kDigitWidth + kDigitSpace;
+    SegmentDrawer::drawSegment(SegmentDrawer::Segment::Middle, left, SK_ColorRED, canvas);
+}
+
 std::unique_ptr<RefreshRateOverlay> RefreshRateOverlay::create(FpsRange range,
                                                                ftl::Flags<Features> features) {
     std::unique_ptr<RefreshRateOverlay> overlay =
@@ -167,11 +181,23 @@ RefreshRateOverlay::RefreshRateOverlay(ConstructorTag, FpsRange fpsRange,
             .apply();
 }
 
+RefreshRateOverlay::~RefreshRateOverlay() {
+    for (const auto& pair : mBufferCache) {
+        for (const sp<GraphicBuffer>& buffer : pair.second) {
+            android::removeBufferFromLocalCache(buffer);
+        }
+    }
+
+    mBufferCache.clear();
+    mSurfaceControl.reset();
+}
+
 bool RefreshRateOverlay::initCheck() const {
     return mSurfaceControl != nullptr;
 }
 
-auto RefreshRateOverlay::getOrCreateBuffers(Fps vsyncRate, Fps renderFps) -> const Buffers& {
+auto RefreshRateOverlay::getOrCreateBuffers(Fps refreshRate, Fps renderFps, bool idle)
+        -> const Buffers& {
     static const Buffers kNoBuffers;
     if (!mSurfaceControl) return kNoBuffers;
 
@@ -197,22 +223,16 @@ auto RefreshRateOverlay::getOrCreateBuffers(Fps vsyncRate, Fps renderFps) -> con
 
     createTransaction().setTransform(mSurfaceControl->get(), transform).apply();
 
-    BufferCache::const_iterator it =
-            mBufferCache.find({vsyncRate.getIntValue(), renderFps.getIntValue(), transformHint});
+    BufferCache::const_iterator it = mBufferCache.find(
+            {refreshRate.getIntValue(), renderFps.getIntValue(), transformHint, idle});
     if (it == mBufferCache.end()) {
-        // HWC minFps is not known by the framework in order
-        // to consider lower rates we set minFps to 0.
-        const int minFps = isSetByHwc() ? 0 : mFpsRange.min.getIntValue();
         const int maxFps = mFpsRange.max.getIntValue();
 
-        // Clamp to the range. The current vsyncRate may be outside of this range if the display
-        // has changed its set of supported refresh rates.
-        const int displayIntFps = std::clamp(vsyncRate.getIntValue(), minFps, maxFps);
+        // Clamp to supported refresh rate range: the current refresh rate may be outside of this
+        // range if the display has changed its set of supported refresh rates.
+        const int refreshIntFps = std::clamp(refreshRate.getIntValue(), 0, maxFps);
         const int renderIntFps = renderFps.getIntValue();
-
-        // Ensure non-zero range to avoid division by zero.
-        const float fpsScale =
-                static_cast<float>(displayIntFps - minFps) / std::max(1, maxFps - minFps);
+        const float fpsScale = static_cast<float>(refreshIntFps) / maxFps;
 
         constexpr SkColor kMinFpsColor = SK_ColorRED;
         constexpr SkColor kMaxFpsColor = SK_ColorGREEN;
@@ -228,10 +248,10 @@ auto RefreshRateOverlay::getOrCreateBuffers(Fps vsyncRate, Fps renderFps) -> con
 
         const SkColor color = colorBase.toSkColor();
 
-        auto buffers = draw(displayIntFps, renderIntFps, color, transformHint, mFeatures);
+        auto buffers = draw(refreshIntFps, renderIntFps, idle, color, transformHint, mFeatures);
         it = mBufferCache
-                     .try_emplace({displayIntFps, renderIntFps, transformHint}, std::move(buffers))
-                     .first;
+                     .try_emplace({refreshIntFps, renderIntFps, transformHint, idle},
+                     std::move(buffers)).first;
     }
 
     return it->second;
@@ -260,25 +280,33 @@ void RefreshRateOverlay::setLayerStack(ui::LayerStack stack) {
     createTransaction().setLayerStack(mSurfaceControl->get(), stack).apply();
 }
 
-void RefreshRateOverlay::changeRefreshRate(Fps vsyncRate, Fps renderFps) {
-    mVsyncRate = vsyncRate;
+void RefreshRateOverlay::changeRefreshRate(Fps refreshRate, Fps renderFps) {
+    mRefreshRate = refreshRate;
     mRenderFps = renderFps;
-    const auto buffer = getOrCreateBuffers(vsyncRate, renderFps)[mFrame];
+    const auto buffer = getOrCreateBuffers(refreshRate, renderFps, mIsVrrIdle)[mFrame];
+    createTransaction().setBuffer(mSurfaceControl->get(), buffer).apply();
+}
+
+void RefreshRateOverlay::onVrrIdle(bool idle) {
+    mIsVrrIdle = idle;
+    if (!mRefreshRate || !mRenderFps) return;
+
+    const auto buffer = getOrCreateBuffers(*mRefreshRate, *mRenderFps, mIsVrrIdle)[mFrame];
     createTransaction().setBuffer(mSurfaceControl->get(), buffer).apply();
 }
 
 void RefreshRateOverlay::changeRenderRate(Fps renderFps) {
-    if (mFeatures.test(Features::RenderRate) && mVsyncRate && FlagManager::getInstance().misc1()) {
+    if (mFeatures.test(Features::RenderRate) && mRefreshRate) {
         mRenderFps = renderFps;
-        const auto buffer = getOrCreateBuffers(*mVsyncRate, renderFps)[mFrame];
+        const auto buffer = getOrCreateBuffers(*mRefreshRate, renderFps, mIsVrrIdle)[mFrame];
         createTransaction().setBuffer(mSurfaceControl->get(), buffer).apply();
     }
 }
 
 void RefreshRateOverlay::animate() {
-    if (!mFeatures.test(Features::Spinner) || !mVsyncRate) return;
+    if (!mFeatures.test(Features::Spinner) || !mRefreshRate) return;
 
-    const auto& buffers = getOrCreateBuffers(*mVsyncRate, *mRenderFps);
+    const auto& buffers = getOrCreateBuffers(*mRefreshRate, *mRenderFps, mIsVrrIdle);
     mFrame = (mFrame + 1) % buffers.size();
     const auto buffer = buffers[mFrame];
     createTransaction().setBuffer(mSurfaceControl->get(), buffer).apply();

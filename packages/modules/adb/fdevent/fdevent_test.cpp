@@ -191,13 +191,13 @@ TEST_F(FdeventTest, run_on_looper_thread_queued) {
 
     // Block the looper thread for a long time while we queue our callbacks.
     fdevent_run_on_looper([]() {
-        fdevent_check_looper();
+        CHECK_LOOPER_THREAD();
         std::this_thread::sleep_for(std::chrono::seconds(1));
     });
 
     for (int i = 0; i < 1000000; ++i) {
         fdevent_run_on_looper([i, &vec]() {
-            fdevent_check_looper();
+            CHECK_LOOPER_THREAD();
             vec.push_back(i);
         });
     }
@@ -216,9 +216,9 @@ TEST_F(FdeventTest, run_on_looper_thread_reentrant) {
     PrepareThread();
 
     fdevent_run_on_looper([&b]() {
-        fdevent_check_looper();
+        CHECK_LOOPER_THREAD();
         fdevent_run_on_looper([&b]() {
-            fdevent_check_looper();
+            CHECK_LOOPER_THREAD();
             b = true;
         });
     });
@@ -261,12 +261,12 @@ TEST_F(FdeventTest, timeout) {
                 } else if (rc == 1) {
                     event = TimeoutEvent::read;
                 } else {
-                    abort();
+                    FAIL() << "unexpected read() result: " << rc;
                 }
             } else if ((events & FDE_TIMEOUT)) {
                 event = TimeoutEvent::timeout;
             } else {
-                abort();
+                FAIL() << "unexpected events: " << events;
             }
 
             CHECK_EQ(fde, test->fde);

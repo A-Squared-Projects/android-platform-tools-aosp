@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 
+/**
+ * An enum for message types.
+ */
 export enum MessageType {
   UNKNOWN = 0,
   PING,
@@ -21,42 +24,86 @@ export enum MessageType {
   BUGREPORT,
   TIMESTAMP,
   FILES,
+
+  // Winscope-specific messages
+  TEST_FAILURE_INFO = 1000,
 }
 
+/**
+ * An enum for timestamp types.
+ */
+export enum TimestampType {
+  UNKNOWN = 0,
+  CLOCK_BOOTTIME,
+  CLOCK_REALTIME,
+}
+
+/**
+ * An interface for a message.
+ */
 export interface Message {
   type: MessageType;
 }
 
+/**
+ * A ping message.
+ */
 export class MessagePing implements Message {
   type = MessageType.PING;
 }
 
+/**
+ * A pong message.
+ */
 export class MessagePong implements Message {
   type = MessageType.PONG;
 }
 
+/**
+ * A bugreport message.
+ */
 export class MessageBugReport implements Message {
   type = MessageType.BUGREPORT;
 
   constructor(
     public file: File,
     public timestampNs?: bigint,
+    public timestampType?: TimestampType,
     public issueId?: string,
   ) {}
 }
 
+/**
+ * A timestamp message.
+ */
 export class MessageTimestamp implements Message {
   type = MessageType.TIMESTAMP;
 
-  constructor(public timestampNs: bigint, public sections?: string[]) {}
+  constructor(
+    public timestampNs: bigint,
+    public timestampType?: TimestampType,
+    public sections?: string[],
+  ) {}
 }
 
+/**
+ * A files message.
+ */
 export class MessageFiles implements Message {
   type = MessageType.FILES;
 
   constructor(
     public files: File[],
     public timestampNs?: bigint,
-    public issueId?: string,
+    public timestampType?: TimestampType,
   ) {}
+}
+
+/**
+ * A test failure info message.
+ */
+export class MessageTestFailureInfo implements Message {
+  type = MessageType.TEST_FAILURE_INFO;
+
+  constructor(public stackTrace?: string) {}
 }

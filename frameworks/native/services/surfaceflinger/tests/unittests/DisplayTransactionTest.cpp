@@ -37,15 +37,6 @@ DisplayTransactionTest::DisplayTransactionTest(bool withMockScheduler) {
     mFlinger.mutableSupportsWideColor() = false;
     mFlinger.mutableDisplayColorSetting() = DisplayColorSetting::kUnmanaged;
 
-    mFlinger.setCreateBufferQueueFunction([](auto, auto, auto) {
-        ADD_FAILURE() << "Unexpected request to create a buffer queue.";
-    });
-
-    mFlinger.setCreateNativeWindowSurface([](auto) {
-        ADD_FAILURE() << "Unexpected request to create a native window surface.";
-        return nullptr;
-    });
-
     if (withMockScheduler) {
         injectMockScheduler(PhysicalDisplayId::fromPort(0));
     }
@@ -64,17 +55,6 @@ DisplayTransactionTest::~DisplayTransactionTest() {
 
 void DisplayTransactionTest::injectMockScheduler(PhysicalDisplayId displayId) {
     LOG_ALWAYS_FATAL_IF(mFlinger.scheduler());
-
-    EXPECT_CALL(*mEventThread, registerDisplayEventConnection(_));
-    EXPECT_CALL(*mEventThread, createEventConnection(_, _))
-            .WillOnce(Return(
-                    sp<EventThreadConnection>::make(mEventThread, mock::EventThread::kCallingUid)));
-
-    EXPECT_CALL(*mSFEventThread, registerDisplayEventConnection(_));
-    EXPECT_CALL(*mSFEventThread, createEventConnection(_, _))
-            .WillOnce(Return(sp<EventThreadConnection>::make(mSFEventThread,
-                                                             mock::EventThread::kCallingUid)));
-
     mFlinger.setupScheduler(std::make_unique<mock::VsyncController>(),
                             std::make_shared<mock::VSyncTracker>(),
                             std::unique_ptr<EventThread>(mEventThread),
@@ -96,30 +76,6 @@ void DisplayTransactionTest::injectMockComposer(int virtualDisplayCount) {
     mFlinger.enableHalVirtualDisplays(true);
 
     Mock::VerifyAndClear(mComposer);
-}
-
-void DisplayTransactionTest::injectFakeBufferQueueFactory() {
-    // This setup is only expected once per test.
-    ASSERT_TRUE(mConsumer == nullptr && mProducer == nullptr);
-
-    mConsumer = sp<mock::GraphicBufferConsumer>::make();
-    mProducer = sp<mock::GraphicBufferProducer>::make();
-
-    mFlinger.setCreateBufferQueueFunction([this](auto outProducer, auto outConsumer, bool) {
-        *outProducer = mProducer;
-        *outConsumer = mConsumer;
-    });
-}
-
-void DisplayTransactionTest::injectFakeNativeWindowSurfaceFactory() {
-    // This setup is only expected once per test.
-    ASSERT_TRUE(mNativeWindowSurface == nullptr);
-
-    mNativeWindowSurface = new surfaceflinger::mock::NativeWindowSurface();
-
-    mFlinger.setCreateNativeWindowSurface([this](auto) {
-        return std::unique_ptr<surfaceflinger::NativeWindowSurface>(mNativeWindowSurface);
-    });
 }
 
 bool DisplayTransactionTest::hasPhysicalHwcDisplay(HWDisplayId hwcDisplayId) const {

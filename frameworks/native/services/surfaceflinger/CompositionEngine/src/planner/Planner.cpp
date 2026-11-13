@@ -16,16 +16,14 @@
 
 // #define LOG_NDEBUG 0
 
-#undef LOG_TAG
-#define LOG_TAG "Planner"
 #define ATRACE_TAG ATRACE_TAG_GRAPHICS
 
 #include <android-base/properties.h>
+#include <common/trace.h>
 #include <compositionengine/LayerFECompositionState.h>
 #include <compositionengine/impl/OutputLayerCompositionState.h>
 #include <compositionengine/impl/planner/Planner.h>
 
-#include <utils/Trace.h>
 #include <chrono>
 
 namespace android::compositionengine::impl::planner {
@@ -83,7 +81,7 @@ void Planner::setDisplaySize(ui::Size size) {
 
 void Planner::plan(
         compositionengine::Output::OutputLayersEnumerator<compositionengine::Output>&& layers) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     std::unordered_set<LayerId> removedLayers;
     removedLayers.reserve(mPreviousLayers.size());
 
@@ -165,7 +163,7 @@ void Planner::plan(
 
 void Planner::reportFinalPlan(
         compositionengine::Output::OutputLayersEnumerator<compositionengine::Output>&& layers) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     if (!mPredictorEnabled) {
         return;
     }
@@ -204,7 +202,7 @@ void Planner::reportFinalPlan(
 void Planner::renderCachedSets(const OutputCompositionState& outputState,
                                std::optional<std::chrono::steady_clock::time_point> renderDeadline,
                                bool deviceHandlesColorTransform) {
-    ATRACE_CALL();
+    SFTRACE_CALL();
     mFlattener.renderCachedSets(outputState, renderDeadline, deviceHandlesColorTransform);
 }
 

@@ -17,10 +17,21 @@
 #undef LOG_TAG
 #define LOG_TAG "LibSurfaceFlingerUnittests"
 
+#include <common/test/FlagUtils.h>
+#include <gui/BufferItemConsumer.h>
+#include <gui/Surface.h>
+#include <ui/ScreenPartStatus.h>
+
 #include "DisplayTransactionTestHelpers.h"
 
 namespace android {
 namespace {
+
+template <typename Id>
+class MockDisplayIdGenerator : public DisplayIdGenerator<Id> {
+public:
+    MOCK_METHOD(std::optional<Id>, generateId, (), (override));
+};
 
 struct DisplayTransactionCommitTest : DisplayTransactionTest {
     template <typename Case>
@@ -57,33 +68,19 @@ template <typename Case>
 void DisplayTransactionCommitTest::setupCommonPreconditions() {
     // Wide color displays support is configured appropriately
     Case::WideColorSupport::injectConfigChange(this);
-
-    // SurfaceFlinger will use a test-controlled factory for BufferQueues
-    injectFakeBufferQueueFactory();
-
-    // SurfaceFlinger will use a test-controlled factory for native window
-    // surfaces.
-    injectFakeNativeWindowSurfaceFactory();
 }
 
 template <typename Case, bool connected>
 void DisplayTransactionCommitTest::expectHotplugReceived(mock::EventThread* eventThread) {
-    const auto convert = [](auto physicalDisplayId) {
-        return std::make_optional(DisplayId{physicalDisplayId});
-    };
-
-    EXPECT_CALL(*eventThread,
-                onHotplugReceived(ResultOf(convert, Case::Display::DISPLAY_ID::get()), connected))
-            .Times(1);
+    const auto physicalDisplayId = asPhysicalDisplayId(Case::Display::DISPLAY_ID::get());
+    ASSERT_TRUE(physicalDisplayId);
+    EXPECT_CALL(*eventThread, onHotplugReceived(*physicalDisplayId, connected)).Times(1);
 }
 
 template <typename Case>
 void DisplayTransactionCommitTest::setupCommonCallExpectationsForConnectProcessing() {
     Case::Display::setupHwcHotplugCallExpectations(this);
 
-    Case::Display::setupFramebufferConsumerBufferQueueCallExpectations(this);
-    Case::Display::setupFramebufferProducerBufferQueueCallExpectations(this);
-    Case::Display::setupNativeWindowSurfaceCreationCallExpectations(this);
     Case::Display::setupHwcGetActiveConfigCallExpectations(this);
 
     Case::WideColorSupport::setupComposerCallExpectations(this);
@@ -111,7 +108,7 @@ void DisplayTransactionCommitTest::verifyDisplayIsConnected(const sp<IBinder>& d
 
     std::optional<DisplayDeviceState::Physical> expectedPhysical;
     if (Case::Display::CONNECTION_TYPE::value) {
-        const auto displayId = PhysicalDisplayId::tryCast(Case::Display::DISPLAY_ID::get());
+        const auto displayId = asPhysicalDisplayId(Case::Display::DISPLAY_ID::get());
         ASSERT_TRUE(displayId);
         const auto hwcDisplayId = Case::Display::HWC_DISPLAY_ID_OPT::value;
         ASSERT_TRUE(hwcDisplayId);
@@ -137,10 +134,10 @@ void DisplayTransactionCommitTest::verifyPhysicalDisplayIsConnected() {
     EXPECT_TRUE(hasPhysicalHwcDisplay(Case::Display::HWC_DISPLAY_ID));
 
     // SF should have a display token.
-    const auto displayId = Case::Display::DISPLAY_ID::get();
-    ASSERT_TRUE(PhysicalDisplayId::tryCast(displayId));
+    const auto displayIdOpt = asPhysicalDisplayId(Case::Display::DISPLAY_ID::get());
+    ASSERT_TRUE(displayIdOpt);
 
-    const auto displayOpt = mFlinger.mutablePhysicalDisplays().get(displayId);
+    const auto displayOpt = mFlinger.mutablePhysicalDisplays().get(*displayIdOpt);
     ASSERT_TRUE(displayOpt);
 
     const auto& display = displayOpt->get();
@@ -163,7 +160,7 @@ void DisplayTransactionCommitTest::processesHotplugConnectCommon() {
     setupCommonPreconditions<Case>();
 
     // A hotplug connect event is enqueued for a display
-    Case::Display::injectPendingHotplugEvent(this, Connection::CONNECTED);
+    Case::Display::injectPendingHotplugEvent(this, HWComposer::HotplugEvent::Connected);
 
     // --------------------------------------------------------------------
     // Call Expectations
@@ -186,7 +183,6 @@ void DisplayTransactionCommitTest::processesHotplugConnectCommon() {
     EXPECT_CALL(*mComposer,
                 setVsyncEnabled(Case::Display::HWC_DISPLAY_ID, IComposerClient::Vsync::DISABLE))
             .WillOnce(Return(Error::NONE));
-    EXPECT_CALL(*mConsumer, consumerDisconnect()).WillOnce(Return(NO_ERROR));
 }
 
 template <typename Case>
@@ -197,7 +193,7 @@ void DisplayTransactionCommitTest::ignoresHotplugConnectCommon() {
     setupCommonPreconditions<Case>();
 
     // A hotplug connect event is enqueued for a display
-    Case::Display::injectPendingHotplugEvent(this, Connection::CONNECTED);
+    Case::Display::injectPendingHotplugEvent(this, HWComposer::HotplugEvent::Connected);
 
     // --------------------------------------------------------------------
     // Invocation
@@ -219,7 +215,7 @@ void DisplayTransactionCommitTest::processesHotplugDisconnectCommon() {
     setupCommonPreconditions<Case>();
 
     // A hotplug disconnect event is enqueued for a display
-    Case::Display::injectPendingHotplugEvent(this, Connection::DISCONNECTED);
+    Case::Display::injectPendingHotplugEvent(this, HWComposer::HotplugEvent::Disconnected);
 
     // The display is already completely set up.
     Case::Display::injectHwcDisplay(this);
@@ -229,7 +225,7 @@ void DisplayTransactionCommitTest::processesHotplugDisconnectCommon() {
     // --------------------------------------------------------------------
     // Call Expectations
 
-    EXPECT_CALL(*mComposer, getDisplayIdentificationData(Case::Display::HWC_DISPLAY_ID, _, _))
+    EXPECT_CALL(*mComposer, getDisplayIdentificationData(Case::Display::HWC_DISPLAY_ID, _, _, _))
             .Times(0);
 
     setupCommonCallExpectationsForDisconnectProcessing<Case>();
@@ -246,9 +242,9 @@ void DisplayTransactionCommitTest::processesHotplugDisconnectCommon() {
     EXPECT_FALSE(hasPhysicalHwcDisplay(Case::Display::HWC_DISPLAY_ID));
 
     // SF should not have a PhysicalDisplay.
-    const auto displayId = Case::Display::DISPLAY_ID::get();
-    ASSERT_TRUE(PhysicalDisplayId::tryCast(displayId));
-    ASSERT_FALSE(mFlinger.mutablePhysicalDisplays().contains(displayId));
+    const auto physicalDisplayIdOpt = asPhysicalDisplayId(Case::Display::DISPLAY_ID::get());
+    ASSERT_TRUE(physicalDisplayIdOpt);
+    ASSERT_FALSE(mFlinger.mutablePhysicalDisplays().contains(*physicalDisplayIdOpt));
 
     // The existing token should have been removed.
     verifyDisplayIsNotConnected(existing.token());
@@ -265,6 +261,13 @@ TEST_F(DisplayTransactionCommitTest, processesHotplugConnectExternalDisplay) {
     processesHotplugConnectCommon<SimpleExternalDisplayCase>();
 }
 
+TEST_F(DisplayTransactionCommitTest, processesHotplugConnectNonSecureExternalDisplay) {
+    // Inject a primary display.
+    PrimaryDisplayVariant::injectHwcDisplay(this);
+
+    processesHotplugConnectCommon<SimpleExternalDisplayNonSecureCase>();
+}
+
 TEST_F(DisplayTransactionCommitTest, ignoresHotplugConnectIfPrimaryAndExternalAlreadyConnected) {
     // Inject both a primary and external display.
     PrimaryDisplayVariant::injectHwcDisplay(this);
@@ -272,12 +275,32 @@ TEST_F(DisplayTransactionCommitTest, ignoresHotplugConnectIfPrimaryAndExternalAl
 
     // TODO: This is an unnecessary call.
     EXPECT_CALL(*mComposer,
-                getDisplayIdentificationData(TertiaryDisplayVariant::HWC_DISPLAY_ID, _, _))
-            .WillOnce(DoAll(SetArgPointee<1>(TertiaryDisplay::PORT),
-                            SetArgPointee<2>(TertiaryDisplay::GET_IDENTIFICATION_DATA()),
+                getDisplayIdentificationData(TertiaryDisplayVariant::HWC_DISPLAY_ID, _, _, _))
+            .WillOnce(DoAll(SetArgPointee<1>(TertiaryDisplay<Secure::TRUE>::PORT),
+                            SetArgPointee<2>(
+                                    TertiaryDisplay<Secure::TRUE>::GET_IDENTIFICATION_DATA()),
+                            SetArgPointee<3>(android::ScreenPartStatus::UNSUPPORTED),
                             Return(Error::NONE)));
 
     ignoresHotplugConnectCommon<SimpleTertiaryDisplayCase>();
+}
+
+TEST_F(DisplayTransactionCommitTest,
+       ignoresHotplugConnectNonSecureIfPrimaryAndExternalAlreadyConnected) {
+    // Inject both a primary and external display.
+    PrimaryDisplayVariant::injectHwcDisplay(this);
+    ExternalDisplayVariant::injectHwcDisplay(this);
+
+    // TODO: This is an unnecessary call.
+    EXPECT_CALL(*mComposer,
+                getDisplayIdentificationData(TertiaryDisplayVariant::HWC_DISPLAY_ID, _, _, _))
+            .WillOnce(DoAll(SetArgPointee<1>(TertiaryDisplay<Secure::TRUE>::PORT),
+                            SetArgPointee<2>(
+                                    TertiaryDisplay<Secure::TRUE>::GET_IDENTIFICATION_DATA()),
+                            SetArgPointee<3>(android::ScreenPartStatus::UNSUPPORTED),
+                            Return(Error::NONE)));
+
+    ignoresHotplugConnectCommon<SimpleTertiaryDisplayNonSecureCase>();
 }
 
 TEST_F(DisplayTransactionCommitTest, processesHotplugDisconnectPrimaryDisplay) {
@@ -287,6 +310,10 @@ TEST_F(DisplayTransactionCommitTest, processesHotplugDisconnectPrimaryDisplay) {
 
 TEST_F(DisplayTransactionCommitTest, processesHotplugDisconnectExternalDisplay) {
     processesHotplugDisconnectCommon<SimpleExternalDisplayCase>();
+}
+
+TEST_F(DisplayTransactionCommitTest, processesHotplugDisconnectNonSecureExternalDisplay) {
+    processesHotplugDisconnectCommon<SimpleExternalDisplayNonSecureCase>();
 }
 
 TEST_F(DisplayTransactionCommitTest, processesHotplugConnectThenDisconnectPrimary) {
@@ -300,9 +327,10 @@ TEST_F(DisplayTransactionCommitTest, processesHotplugConnectThenDisconnectPrimar
                 setupCommonPreconditions<Case>();
 
                 // A hotplug connect event is enqueued for a display
-                Case::Display::injectPendingHotplugEvent(this, Connection::CONNECTED);
+                Case::Display::injectPendingHotplugEvent(this, HWComposer::HotplugEvent::Connected);
                 // A hotplug disconnect event is also enqueued for the same display
-                Case::Display::injectPendingHotplugEvent(this, Connection::DISCONNECTED);
+                Case::Display::injectPendingHotplugEvent(this,
+                                                         HWComposer::HotplugEvent::Disconnected);
 
                 // --------------------------------------------------------------------
                 // Call Expectations
@@ -314,7 +342,6 @@ TEST_F(DisplayTransactionCommitTest, processesHotplugConnectThenDisconnectPrimar
                             setVsyncEnabled(Case::Display::HWC_DISPLAY_ID,
                                             IComposerClient::Vsync::DISABLE))
                         .WillOnce(Return(Error::NONE));
-                EXPECT_CALL(*mConsumer, consumerDisconnect()).WillOnce(Return(NO_ERROR));
 
                 // --------------------------------------------------------------------
                 // Invocation
@@ -328,9 +355,10 @@ TEST_F(DisplayTransactionCommitTest, processesHotplugConnectThenDisconnectPrimar
                 EXPECT_FALSE(hasPhysicalHwcDisplay(Case::Display::HWC_DISPLAY_ID));
 
                 // SF should not have a PhysicalDisplay.
-                const auto displayId = Case::Display::DISPLAY_ID::get();
-                ASSERT_TRUE(PhysicalDisplayId::tryCast(displayId));
-                ASSERT_FALSE(mFlinger.mutablePhysicalDisplays().contains(displayId));
+                const auto physicalDisplayIdOpt =
+                        asPhysicalDisplayId(Case::Display::DISPLAY_ID::get());
+                ASSERT_TRUE(physicalDisplayIdOpt);
+                ASSERT_FALSE(mFlinger.mutablePhysicalDisplays().contains(*physicalDisplayIdOpt));
             }(),
             testing::KilledBySignal(SIGABRT), "Primary display cannot be disconnected.");
 }
@@ -351,9 +379,10 @@ TEST_F(DisplayTransactionCommitTest, processesHotplugDisconnectThenConnectPrimar
                 existing.inject();
 
                 // A hotplug disconnect event is enqueued for a display
-                Case::Display::injectPendingHotplugEvent(this, Connection::DISCONNECTED);
+                Case::Display::injectPendingHotplugEvent(this,
+                                                         HWComposer::HotplugEvent::Disconnected);
                 // A hotplug connect event is also enqueued for the same display
-                Case::Display::injectPendingHotplugEvent(this, Connection::CONNECTED);
+                Case::Display::injectPendingHotplugEvent(this, HWComposer::HotplugEvent::Connected);
 
                 // --------------------------------------------------------------------
                 // Call Expectations
@@ -371,10 +400,12 @@ TEST_F(DisplayTransactionCommitTest, processesHotplugDisconnectThenConnectPrimar
 
                 // The existing token should have been removed.
                 verifyDisplayIsNotConnected(existing.token());
-                const auto displayId = Case::Display::DISPLAY_ID::get();
-                ASSERT_TRUE(PhysicalDisplayId::tryCast(displayId));
+                const auto physicalDisplayIdOpt =
+                        asPhysicalDisplayId(Case::Display::DISPLAY_ID::get());
+                ASSERT_TRUE(physicalDisplayIdOpt);
 
-                const auto displayOpt = mFlinger.mutablePhysicalDisplays().get(displayId);
+                const auto displayOpt =
+                        mFlinger.mutablePhysicalDisplays().get(*physicalDisplayIdOpt);
                 ASSERT_TRUE(displayOpt);
                 EXPECT_NE(existing.token(), displayOpt->get().token());
 
@@ -388,7 +419,6 @@ TEST_F(DisplayTransactionCommitTest, processesHotplugDisconnectThenConnectPrimar
                             setVsyncEnabled(Case::Display::HWC_DISPLAY_ID,
                                             IComposerClient::Vsync::DISABLE))
                         .WillOnce(Return(Error::NONE));
-                EXPECT_CALL(*mConsumer, consumerDisconnect()).WillOnce(Return(NO_ERROR));
             }(),
             testing::KilledBySignal(SIGABRT), "Primary display cannot be disconnected.");
 }
@@ -411,31 +441,15 @@ TEST_F(DisplayTransactionCommitTest, processesVirtualDisplayAdded) {
     DisplayDeviceState state;
     state.isSecure = static_cast<bool>(Case::Display::SECURE);
 
-    sp<mock::GraphicBufferProducer> surface{sp<mock::GraphicBufferProducer>::make()};
-    state.surface = surface;
+    auto [consumer, surface] = BufferItemConsumer::create(0);
+    ASSERT_EQ(OK, consumer->setDefaultBufferSize(Case::Display::WIDTH, Case::Display::HEIGHT));
+    ASSERT_EQ(OK, consumer->setDefaultBufferFormat(DEFAULT_VIRTUAL_DISPLAY_SURFACE_FORMAT));
+    state.surface = surface->getIGraphicBufferProducer();
+
     mFlinger.mutableCurrentState().displays.add(displayToken, state);
 
     // --------------------------------------------------------------------
     // Call Expectations
-
-    Case::Display::setupFramebufferConsumerBufferQueueCallExpectations(this);
-    Case::Display::setupNativeWindowSurfaceCreationCallExpectations(this);
-
-    EXPECT_CALL(*surface, query(NATIVE_WINDOW_WIDTH, _))
-            .WillRepeatedly(DoAll(SetArgPointee<1>(Case::Display::WIDTH), Return(NO_ERROR)));
-    EXPECT_CALL(*surface, query(NATIVE_WINDOW_HEIGHT, _))
-            .WillRepeatedly(DoAll(SetArgPointee<1>(Case::Display::HEIGHT), Return(NO_ERROR)));
-    EXPECT_CALL(*surface, query(NATIVE_WINDOW_FORMAT, _))
-            .WillRepeatedly(DoAll(SetArgPointee<1>(DEFAULT_VIRTUAL_DISPLAY_SURFACE_FORMAT),
-                                  Return(NO_ERROR)));
-    EXPECT_CALL(*surface, query(NATIVE_WINDOW_CONSUMER_USAGE_BITS, _))
-            .WillRepeatedly(DoAll(SetArgPointee<1>(0), Return(NO_ERROR)));
-
-    EXPECT_CALL(*surface, setAsyncMode(true)).Times(1);
-
-    EXPECT_CALL(*mProducer, connect(_, NATIVE_WINDOW_API_EGL, false, _)).Times(1);
-    EXPECT_CALL(*mProducer, disconnect(_, _)).Times(1);
-
     Case::Display::setupHwcVirtualDisplayCreationCallExpectations(this);
     Case::WideColorSupport::setupComposerCallExpectations(this);
     Case::HdrSupport::setupComposerCallExpectations(this);
@@ -457,11 +471,13 @@ TEST_F(DisplayTransactionCommitTest, processesVirtualDisplayAdded) {
 
     EXPECT_CALL(*mComposer, destroyVirtualDisplay(Case::Display::HWC_DISPLAY_ID))
             .WillOnce(Return(Error::NONE));
-    EXPECT_CALL(*mConsumer, consumerDisconnect()).WillOnce(Return(NO_ERROR));
 
     // Cleanup
     mFlinger.mutableCurrentState().displays.removeItem(displayToken);
     mFlinger.mutableDrawingState().displays.removeItem(displayToken);
+
+    // Deletion will happen on its own thread. Give it time to remove itself.
+    std::this_thread::sleep_for(1s);
 }
 
 TEST_F(DisplayTransactionCommitTest, processesVirtualDisplayAddedWithNoSurface) {
@@ -511,9 +527,9 @@ TEST_F(DisplayTransactionCommitTest, processesVirtualDisplayRemoval) {
     // Preconditions
 
     // A virtual display is set up but is removed from the current state.
-    const auto displayId = Case::Display::DISPLAY_ID::get();
-    ASSERT_TRUE(HalVirtualDisplayId::tryCast(displayId));
-    mFlinger.mutableHwcDisplayData().try_emplace(displayId);
+    const auto displayId = asHalDisplayId(Case::Display::DISPLAY_ID::get());
+    ASSERT_TRUE(displayId);
+    mFlinger.mutableHwcDisplayData().try_emplace(*displayId);
     Case::Display::injectHwcDisplay(this);
     auto existing = Case::Display::makeFakeExistingDisplayInjector(this);
     existing.inject();
@@ -529,6 +545,255 @@ TEST_F(DisplayTransactionCommitTest, processesVirtualDisplayRemoval) {
 
     // The existing token should have been removed
     verifyDisplayIsNotConnected(existing.token());
+}
+
+TEST_F(DisplayTransactionCommitTest, acquireHalVirtualDisplayId) {
+    using Case = SimplePrimaryDisplayCase;
+
+    // --------------------------------------------------------------------
+    // Preconditions
+
+    // Set up a primary physical display.
+    processesHotplugConnectCommon<Case>();
+    const uint64_t primaryDisplayId = asDisplayId(Case::Display::DISPLAY_ID::get()).value;
+
+    // The HWC supports at least one virtual display
+    injectMockComposer(1);
+
+    // --------------------------------------------------------------------
+    // Call Expectations
+    static constexpr ui::Size kResolution{1920U, 1080U};
+    static ui::PixelFormat format = static_cast<ui::PixelFormat>(PIXEL_FORMAT_RGBA_8888);
+    EXPECT_CALL(*mComposer,
+                createVirtualDisplay(static_cast<uint32_t>(kResolution.width),
+                                     static_cast<uint32_t>(kResolution.height),
+                                     testing::Pointee(format), _))
+            .Times(1)
+            .WillOnce(Return(Error::NONE));
+
+    // --------------------------------------------------------------------
+    // Invocation
+    const std::string name("virtual.test");
+    auto builder = compositionengine::DisplayCreationArgsBuilder();
+    auto virtualDisplayIdVariantOpt =
+            mFlinger.acquireVirtualDisplay(kResolution, format, name, builder);
+
+    ASSERT_TRUE(virtualDisplayIdVariantOpt);
+    ASSERT_TRUE(std::holds_alternative<HalVirtualDisplayId>(*virtualDisplayIdVariantOpt));
+    ASSERT_NE(primaryDisplayId, asVirtualDisplayId(*virtualDisplayIdVariantOpt)->value);
+}
+
+TEST_F(DisplayTransactionCommitTest, acquireGpuVirtualDisplayId) {
+    using Case = SimplePrimaryDisplayCase;
+
+    // --------------------------------------------------------------------
+    // Preconditions
+
+    // Set up a primary physical display.
+    processesHotplugConnectCommon<Case>();
+    const uint64_t primaryDisplayId = asDisplayId(Case::Display::DISPLAY_ID::get()).value;
+
+    // --------------------------------------------------------------------
+    // Call Expectations
+
+    // The HAL should not be involved in the creation of GPU virtual displays.
+    EXPECT_CALL(*mComposer, createVirtualDisplay(_, _, _, _)).Times(0);
+
+    // --------------------------------------------------------------------
+    // Invocation
+    constexpr ui::Size kResolution{1920U, 1080U};
+    ui::PixelFormat format = static_cast<ui::PixelFormat>(PIXEL_FORMAT_RGBA_8888);
+    const std::string name("virtual.test");
+    auto builder = compositionengine::DisplayCreationArgsBuilder();
+    auto virtualDisplayIdVariantOpt =
+            mFlinger.acquireVirtualDisplay(kResolution, format, name, builder);
+
+    ASSERT_TRUE(virtualDisplayIdVariantOpt);
+    ASSERT_TRUE(std::holds_alternative<GpuVirtualDisplayId>(*virtualDisplayIdVariantOpt));
+    ASSERT_NE(primaryDisplayId, asVirtualDisplayId(*virtualDisplayIdVariantOpt)->value);
+}
+
+TEST_F(DisplayTransactionCommitTest, acquireGpuVirtualDisplayIdFailure) {
+    // --------------------------------------------------------------------
+    // Preconditions
+
+    // Setting the HAL generator to nullptr disables HWC composition for virtual displays.
+    auto gpuDisplayIdGenerator = std::make_unique<MockDisplayIdGenerator<GpuVirtualDisplayId>>();
+    auto* mockGpuDisplayIdGeneratorPtr = gpuDisplayIdGenerator.get();
+    mFlinger.injectDisplayIdGenerators(std::move(gpuDisplayIdGenerator), nullptr);
+
+    // --------------------------------------------------------------------
+    // Call Expectations
+
+    // The GPU display ID generator will fail to provide a valid virtual display ID.
+    EXPECT_CALL(*mockGpuDisplayIdGeneratorPtr, generateId())
+            .WillOnce(testing::Return(std::nullopt));
+    // The HAL should not be involved in the creation of GPU virtual displays.
+    EXPECT_CALL(*mComposer, createVirtualDisplay(_, _, _, _)).Times(0);
+
+    // --------------------------------------------------------------------
+    // Invocation
+    constexpr ui::Size kResolution{1920U, 1080U};
+    const ui::PixelFormat format = static_cast<ui::PixelFormat>(PIXEL_FORMAT_RGBA_8888);
+    const std::string name("virtual.test");
+    auto builder = compositionengine::DisplayCreationArgsBuilder();
+    auto virtualDisplayIdVariantOpt =
+            mFlinger.acquireVirtualDisplay(kResolution, format, name, builder);
+
+    ASSERT_FALSE(virtualDisplayIdVariantOpt);
+}
+
+TEST_F(DisplayTransactionCommitTest, acquireHalVirtualDisplayIdWithConflictResolutionSuccess) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stable_edid_ids, true);
+    using Case = SimplePrimaryDisplayCase;
+
+    // --------------------------------------------------------------------
+    // Preconditions
+
+    // Set up a primary physical display.
+    processesHotplugConnectCommon<Case>();
+    const uint64_t primaryDisplayId = asDisplayId(Case::Display::DISPLAY_ID::get()).value;
+
+    // Injecting a mock Hal generator enables Hal composition.
+    auto halDisplayIdGenerator = std::make_unique<MockDisplayIdGenerator<HalVirtualDisplayId>>();
+    auto* mockHalDisplayIdGeneratorPtr = halDisplayIdGenerator.get();
+    auto gpuDisplayIdGenerator = std::make_unique<MockDisplayIdGenerator<GpuVirtualDisplayId>>();
+    auto* mockGpuDisplayIdGeneratorPtr = gpuDisplayIdGenerator.get();
+    mFlinger.injectDisplayIdGenerators(std::move(gpuDisplayIdGenerator),
+                                       std::move(halDisplayIdGenerator));
+
+    // --------------------------------------------------------------------
+    // Call Expectations
+
+    // The HAL display ID generator will return the primary physical display's ID once
+    // to produce conflict in the virtual display acquisition logic, then return a non-conflicting
+    // ID.
+    const uint64_t nonConflictingVirtualId =
+            asDisplayId(HwcVirtualDisplayCase::Display::DISPLAY_ID::get()).value;
+    EXPECT_CALL(*mockHalDisplayIdGeneratorPtr, generateId())
+            .WillOnce(testing::Return(HalVirtualDisplayId::fromValue(primaryDisplayId)))
+            .WillOnce(testing::Return(HalVirtualDisplayId::fromValue(nonConflictingVirtualId)));
+
+    // There should be no effort to generate GPU display IDs.
+    EXPECT_CALL(*mockGpuDisplayIdGeneratorPtr, generateId()).Times(0);
+
+    static constexpr ui::Size kResolution{1920U, 1080U};
+    static ui::PixelFormat format = static_cast<ui::PixelFormat>(PIXEL_FORMAT_RGBA_8888);
+    EXPECT_CALL(*mComposer,
+                createVirtualDisplay(static_cast<uint32_t>(kResolution.width),
+                                     static_cast<uint32_t>(kResolution.height),
+                                     testing::Pointee(format), _))
+            .Times(1)
+            .WillOnce(Return(Error::NONE));
+    EXPECT_CALL(*mComposer, setClientTargetSlotCount(_)).WillOnce(Return(hal::Error::NONE));
+
+    // --------------------------------------------------------------------
+    // Invocation
+    const std::string name("virtual.test");
+    auto builder = compositionengine::DisplayCreationArgsBuilder();
+    auto virtualDisplayIdVariantOpt =
+            mFlinger.acquireVirtualDisplay(kResolution, format, name, builder);
+
+    ASSERT_TRUE(virtualDisplayIdVariantOpt);
+    ASSERT_TRUE(std::holds_alternative<HalVirtualDisplayId>(*virtualDisplayIdVariantOpt));
+
+    const uint64_t halVirtualDisplayIdValue =
+            asVirtualDisplayId(*virtualDisplayIdVariantOpt)->value;
+    ASSERT_EQ(nonConflictingVirtualId, halVirtualDisplayIdValue);
+    ASSERT_NE(primaryDisplayId, halVirtualDisplayIdValue);
+}
+
+TEST_F(DisplayTransactionCommitTest, acquireGpuVirtualDisplayIdWithConflictResolutionSuccess) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stable_edid_ids, true);
+    using Case = SimplePrimaryDisplayCase;
+
+    // --------------------------------------------------------------------
+    // Preconditions
+
+    // Set up a primary physical display.
+    processesHotplugConnectCommon<Case>();
+    const uint64_t primaryDisplayId = asDisplayId(Case::Display::DISPLAY_ID::get()).value;
+
+    // Setting the HAL generator to nullptr disables HWC composition for virtual displays.
+    auto gpuDisplayIdGenerator = std::make_unique<MockDisplayIdGenerator<GpuVirtualDisplayId>>();
+    auto* mockGpuDisplayIdGeneratorPtr = gpuDisplayIdGenerator.get();
+    mFlinger.injectDisplayIdGenerators(std::move(gpuDisplayIdGenerator), nullptr);
+
+    // --------------------------------------------------------------------
+    // Call Expectations
+
+    // The GPU display ID generator will return the primary physical display's ID once
+    // to produce conflict in the virtual display acquisition logic, then return a non-conflicting
+    // ID.
+    const uint64_t nonConflictingVirtualId =
+            asDisplayId(NonHwcVirtualDisplayCase::Display::DISPLAY_ID::get()).value;
+    EXPECT_CALL(*mockGpuDisplayIdGeneratorPtr, generateId())
+            .WillOnce(testing::Return(GpuVirtualDisplayId::fromValue(primaryDisplayId)))
+            .WillOnce(testing::Return(GpuVirtualDisplayId::fromValue(nonConflictingVirtualId)));
+
+    // The HAL should not be involved in the creation of GPU virtual displays.
+    EXPECT_CALL(*mComposer, createVirtualDisplay(_, _, _, _)).Times(0);
+
+    // --------------------------------------------------------------------
+    // Invocation
+    constexpr ui::Size kResolution{1920U, 1080U};
+    const ui::PixelFormat format = static_cast<ui::PixelFormat>(PIXEL_FORMAT_RGBA_8888);
+    const std::string name("virtual.test");
+    auto builder = compositionengine::DisplayCreationArgsBuilder();
+    auto virtualDisplayIdVariantOpt =
+            mFlinger.acquireVirtualDisplay(kResolution, format, name, builder);
+
+    ASSERT_TRUE(virtualDisplayIdVariantOpt);
+    ASSERT_TRUE(std::holds_alternative<GpuVirtualDisplayId>(*virtualDisplayIdVariantOpt));
+
+    const uint64_t gpuVirtualDisplayIdValue =
+            asVirtualDisplayId(*virtualDisplayIdVariantOpt)->value;
+    ASSERT_EQ(nonConflictingVirtualId, gpuVirtualDisplayIdValue);
+    ASSERT_NE(primaryDisplayId, gpuVirtualDisplayIdValue);
+}
+
+TEST_F(DisplayTransactionCommitTest, acquireVirtualDisplayIdWithConflictResolutionCompleteFailure) {
+    SET_FLAG_FOR_TEST(com::android::graphics::surfaceflinger::flags::stable_edid_ids, true);
+    using Case = SimplePrimaryDisplayCase;
+
+    // --------------------------------------------------------------------
+    // Preconditions
+
+    // Set up a primary physical display.
+    processesHotplugConnectCommon<Case>();
+    const uint64_t primaryDisplayId = asDisplayId(Case::Display::DISPLAY_ID::get()).value;
+
+    // Injecting a mock Hal generator enables Hal composition.
+    auto halDisplayIdGenerator = std::make_unique<MockDisplayIdGenerator<HalVirtualDisplayId>>();
+    auto* mockHalDisplayIdGeneratorPtr = halDisplayIdGenerator.get();
+    auto gpuDisplayIdGenerator = std::make_unique<MockDisplayIdGenerator<GpuVirtualDisplayId>>();
+    auto* mockGpuDisplayIdGeneratorPtr = gpuDisplayIdGenerator.get();
+    mFlinger.injectDisplayIdGenerators(std::move(gpuDisplayIdGenerator),
+                                       std::move(halDisplayIdGenerator));
+
+    // --------------------------------------------------------------------
+    // Call Expectations
+
+    // The generators will repeatedly return the primary physical display's ID
+    // to produce conflict in the virtual display acquisition logic.
+    EXPECT_CALL(*mockHalDisplayIdGeneratorPtr, generateId())
+            .Times(10)
+            .WillRepeatedly(testing::Return(HalVirtualDisplayId::fromValue(primaryDisplayId)));
+    EXPECT_CALL(*mockGpuDisplayIdGeneratorPtr, generateId())
+            .Times(10)
+            .WillRepeatedly(testing::Return(GpuVirtualDisplayId::fromValue(primaryDisplayId)));
+    EXPECT_CALL(*mComposer, createVirtualDisplay(_, _, _, _)).Times(0);
+
+    // --------------------------------------------------------------------
+    // Invocation
+    static constexpr ui::Size kResolution{1920U, 1080U};
+    static const ui::PixelFormat format = static_cast<ui::PixelFormat>(PIXEL_FORMAT_RGBA_8888);
+    static const std::string name("virtual.test");
+    auto builder = compositionengine::DisplayCreationArgsBuilder();
+    auto virtualDisplayIdVariantOpt =
+            mFlinger.acquireVirtualDisplay(kResolution, format, name, builder);
+
+    ASSERT_FALSE(virtualDisplayIdVariantOpt);
 }
 
 TEST_F(DisplayTransactionCommitTest, processesDisplayLayerStackChanges) {

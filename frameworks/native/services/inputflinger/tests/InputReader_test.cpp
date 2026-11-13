@@ -23,30 +23,27 @@
 #include <InputMapper.h>
 #include <InputReader.h>
 #include <InputReaderBase.h>
-#include <InputReaderFactory.h>
-#include <JoystickInputMapper.h>
 #include <KeyboardInputMapper.h>
 #include <MultiTouchInputMapper.h>
+#include <NotifyArgsBuilders.h>
 #include <PeripheralController.h>
-#include <SensorInputMapper.h>
+#include <ScopedFlagOverride.h>
 #include <SingleTouchInputMapper.h>
-#include <SwitchInputMapper.h>
 #include <TestEventMatchers.h>
 #include <TestInputListener.h>
 #include <TouchInputMapper.h>
 #include <UinputDevice.h>
-#include <VibratorInputMapper.h>
 #include <android-base/thread_annotations.h>
+#include <android/os/PointerCaptureMode.h>
 #include <com_android_input_flags.h>
+#include <flag_macros.h>
 #include <ftl/enum.h>
 #include <gtest/gtest.h>
-#include <gui/constants.h>
 #include <ui/Rotation.h>
 
 #include <thread>
 #include "FakeEventHub.h"
 #include "FakeInputReaderPolicy.h"
-#include "FakePointerController.h"
 #include "InputMapperTest.h"
 #include "InstrumentedInputReader.h"
 #include "TestConstants.h"
@@ -57,17 +54,19 @@ namespace android {
 
 using namespace ftl::flag_operators;
 using testing::AllOf;
+using testing::VariantWith;
 using std::chrono_literals::operator""ms;
 using std::chrono_literals::operator""s;
 
 // Arbitrary display properties.
-static constexpr int32_t DISPLAY_ID = 0;
+static constexpr ui::LogicalDisplayId DISPLAY_ID = ui::LogicalDisplayId::DEFAULT;
+static constexpr ui::LogicalDisplayId INVALID_DISPLAY_ID = ui::LogicalDisplayId::INVALID;
 static const std::string DISPLAY_UNIQUE_ID = "local:1";
-static constexpr int32_t SECONDARY_DISPLAY_ID = DISPLAY_ID + 1;
-static const std::string SECONDARY_DISPLAY_UNIQUE_ID = "local:2";
+static constexpr ui::LogicalDisplayId SECONDARY_DISPLAY_ID =
+        ui::LogicalDisplayId{DISPLAY_ID.val() + 1};
 static constexpr int32_t DISPLAY_WIDTH = 480;
 static constexpr int32_t DISPLAY_HEIGHT = 800;
-static constexpr int32_t VIRTUAL_DISPLAY_ID = 1;
+static constexpr ui::LogicalDisplayId VIRTUAL_DISPLAY_ID = ui::LogicalDisplayId{1};
 static constexpr int32_t VIRTUAL_DISPLAY_WIDTH = 400;
 static constexpr int32_t VIRTUAL_DISPLAY_HEIGHT = 500;
 static const char* VIRTUAL_DISPLAY_UNIQUE_ID = "virtual:1";
@@ -310,9 +309,9 @@ private:
         return {};
     }
 
-    std::list<NotifyArgs> process(const RawEvent* rawEvent) override {
+    std::list<NotifyArgs> process(const RawEvent& rawEvent) override {
         std::scoped_lock<std::mutex> lock(mLock);
-        mLastEvent = *rawEvent;
+        mLastEvent = rawEvent;
         mProcessWasCalled = true;
         mStateChangedCondition.notify_all();
         return mProcessResult;
@@ -359,7 +358,7 @@ private:
     virtual void fadePointer() {
     }
 
-    virtual std::optional<int32_t> getAssociatedDisplay() {
+    virtual std::optional<ui::LogicalDisplayId> getAssociatedDisplay() {
         if (mViewport) {
             return std::make_optional(mViewport->displayId);
         }
@@ -387,30 +386,29 @@ TEST_F(InputReaderPolicyTest, Viewports_GetCleared) {
     static const std::string uniqueId = "local:0";
 
     // We didn't add any viewports yet, so there shouldn't be any.
-    std::optional<DisplayViewport> internalViewport =
-            mFakePolicy->getDisplayViewportByType(ViewportType::INTERNAL);
-    ASSERT_FALSE(internalViewport);
+    ASSERT_FALSE(mFakePolicy->getDisplayViewportByType(ViewportType::INTERNAL));
 
     // Add an internal viewport, then clear it
-    mFakePolicy->addDisplayViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
-                                    /*isActive=*/true, uniqueId, NO_PORT, ViewportType::INTERNAL);
-
+    DisplayViewport internalViewport =
+            createViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                           /*isActive=*/true, uniqueId, NO_PORT, ViewportType::INTERNAL);
+    mFakePolicy->addDisplayViewport(internalViewport);
     // Check matching by uniqueId
-    internalViewport = mFakePolicy->getDisplayViewportByUniqueId(uniqueId);
-    ASSERT_TRUE(internalViewport);
-    ASSERT_EQ(ViewportType::INTERNAL, internalViewport->type);
+    std::optional<DisplayViewport> receivedInternalViewport =
+            mFakePolicy->getDisplayViewportByUniqueId(uniqueId);
+    ASSERT_TRUE(receivedInternalViewport.has_value());
+    ASSERT_EQ(internalViewport, *receivedInternalViewport);
 
     // Check matching by viewport type
-    internalViewport = mFakePolicy->getDisplayViewportByType(ViewportType::INTERNAL);
-    ASSERT_TRUE(internalViewport);
-    ASSERT_EQ(uniqueId, internalViewport->uniqueId);
+    receivedInternalViewport = mFakePolicy->getDisplayViewportByType(ViewportType::INTERNAL);
+    ASSERT_TRUE(receivedInternalViewport.has_value());
+    ASSERT_EQ(internalViewport, *receivedInternalViewport);
 
     mFakePolicy->clearViewports();
+
     // Make sure nothing is found after clear
-    internalViewport = mFakePolicy->getDisplayViewportByUniqueId(uniqueId);
-    ASSERT_FALSE(internalViewport);
-    internalViewport = mFakePolicy->getDisplayViewportByType(ViewportType::INTERNAL);
-    ASSERT_FALSE(internalViewport);
+    ASSERT_FALSE(mFakePolicy->getDisplayViewportByUniqueId(uniqueId));
+    ASSERT_FALSE(mFakePolicy->getDisplayViewportByType(ViewportType::INTERNAL));
 }
 
 TEST_F(InputReaderPolicyTest, Viewports_GetByType) {
@@ -418,53 +416,53 @@ TEST_F(InputReaderPolicyTest, Viewports_GetByType) {
     const std::string externalUniqueId = "local:1";
     const std::string virtualUniqueId1 = "virtual:2";
     const std::string virtualUniqueId2 = "virtual:3";
-    constexpr int32_t virtualDisplayId1 = 2;
-    constexpr int32_t virtualDisplayId2 = 3;
+    constexpr ui::LogicalDisplayId virtualDisplayId1 = ui::LogicalDisplayId{2};
+    constexpr ui::LogicalDisplayId virtualDisplayId2 = ui::LogicalDisplayId{3};
 
     // Add an internal viewport
-    mFakePolicy->addDisplayViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
-                                    /*isActive=*/true, internalUniqueId, NO_PORT,
-                                    ViewportType::INTERNAL);
+    DisplayViewport internalViewport =
+            createViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                           /*isActive=*/true, internalUniqueId, NO_PORT, ViewportType::INTERNAL);
+    mFakePolicy->addDisplayViewport(internalViewport);
     // Add an external viewport
-    mFakePolicy->addDisplayViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
-                                    /*isActive=*/true, externalUniqueId, NO_PORT,
-                                    ViewportType::EXTERNAL);
+    DisplayViewport externalViewport =
+            createViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                           /*isActive=*/true, externalUniqueId, NO_PORT, ViewportType::EXTERNAL);
+    mFakePolicy->addDisplayViewport(externalViewport);
     // Add an virtual viewport
-    mFakePolicy->addDisplayViewport(virtualDisplayId1, DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                                    ui::ROTATION_0, /*isActive=*/true, virtualUniqueId1, NO_PORT,
-                                    ViewportType::VIRTUAL);
+    DisplayViewport virtualViewport1 =
+            createViewport(virtualDisplayId1, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                           /*isActive=*/true, virtualUniqueId1, NO_PORT, ViewportType::VIRTUAL);
+    mFakePolicy->addDisplayViewport(virtualViewport1);
     // Add another virtual viewport
-    mFakePolicy->addDisplayViewport(virtualDisplayId2, DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                                    ui::ROTATION_0, /*isActive=*/true, virtualUniqueId2, NO_PORT,
-                                    ViewportType::VIRTUAL);
+    DisplayViewport virtualViewport2 =
+            createViewport(virtualDisplayId2, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                           /*isActive=*/true, virtualUniqueId2, NO_PORT, ViewportType::VIRTUAL);
+    mFakePolicy->addDisplayViewport(virtualViewport2);
 
     // Check matching by type for internal
-    std::optional<DisplayViewport> internalViewport =
+    std::optional<DisplayViewport> receivedInternalViewport =
             mFakePolicy->getDisplayViewportByType(ViewportType::INTERNAL);
-    ASSERT_TRUE(internalViewport);
-    ASSERT_EQ(internalUniqueId, internalViewport->uniqueId);
+    ASSERT_TRUE(receivedInternalViewport.has_value());
+    ASSERT_EQ(internalViewport, *receivedInternalViewport);
 
     // Check matching by type for external
-    std::optional<DisplayViewport> externalViewport =
+    std::optional<DisplayViewport> receivedExternalViewport =
             mFakePolicy->getDisplayViewportByType(ViewportType::EXTERNAL);
-    ASSERT_TRUE(externalViewport);
-    ASSERT_EQ(externalUniqueId, externalViewport->uniqueId);
+    ASSERT_TRUE(receivedExternalViewport.has_value());
+    ASSERT_EQ(externalViewport, *receivedExternalViewport);
 
     // Check matching by uniqueId for virtual viewport #1
-    std::optional<DisplayViewport> virtualViewport1 =
+    std::optional<DisplayViewport> receivedVirtualViewport1 =
             mFakePolicy->getDisplayViewportByUniqueId(virtualUniqueId1);
-    ASSERT_TRUE(virtualViewport1);
-    ASSERT_EQ(ViewportType::VIRTUAL, virtualViewport1->type);
-    ASSERT_EQ(virtualUniqueId1, virtualViewport1->uniqueId);
-    ASSERT_EQ(virtualDisplayId1, virtualViewport1->displayId);
+    ASSERT_TRUE(receivedVirtualViewport1.has_value());
+    ASSERT_EQ(virtualViewport1, *receivedVirtualViewport1);
 
     // Check matching by uniqueId for virtual viewport #2
-    std::optional<DisplayViewport> virtualViewport2 =
+    std::optional<DisplayViewport> receivedVirtualViewport2 =
             mFakePolicy->getDisplayViewportByUniqueId(virtualUniqueId2);
-    ASSERT_TRUE(virtualViewport2);
-    ASSERT_EQ(ViewportType::VIRTUAL, virtualViewport2->type);
-    ASSERT_EQ(virtualUniqueId2, virtualViewport2->uniqueId);
-    ASSERT_EQ(virtualDisplayId2, virtualViewport2->displayId);
+    ASSERT_TRUE(receivedVirtualViewport2.has_value());
+    ASSERT_EQ(virtualViewport2, *receivedVirtualViewport2);
 }
 
 
@@ -476,32 +474,34 @@ TEST_F(InputReaderPolicyTest, Viewports_GetByType) {
 TEST_F(InputReaderPolicyTest, Viewports_TwoOfSameType) {
     const std::string uniqueId1 = "uniqueId1";
     const std::string uniqueId2 = "uniqueId2";
-    constexpr int32_t displayId1 = 2;
-    constexpr int32_t displayId2 = 3;
+    constexpr ui::LogicalDisplayId displayId1 = ui::LogicalDisplayId{2};
+    constexpr ui::LogicalDisplayId displayId2 = ui::LogicalDisplayId{3};
 
     std::vector<ViewportType> types = {ViewportType::INTERNAL, ViewportType::EXTERNAL,
                                        ViewportType::VIRTUAL};
     for (const ViewportType& type : types) {
         mFakePolicy->clearViewports();
         // Add a viewport
-        mFakePolicy->addDisplayViewport(displayId1, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
-                                        /*isActive=*/true, uniqueId1, NO_PORT, type);
+        DisplayViewport viewport1 =
+                createViewport(displayId1, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                               /*isActive=*/true, uniqueId1, NO_PORT, type);
+        mFakePolicy->addDisplayViewport(viewport1);
         // Add another viewport
-        mFakePolicy->addDisplayViewport(displayId2, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
-                                        /*isActive=*/true, uniqueId2, NO_PORT, type);
+        DisplayViewport viewport2 =
+                createViewport(displayId2, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                               /*isActive=*/true, uniqueId2, NO_PORT, type);
+        mFakePolicy->addDisplayViewport(viewport2);
 
         // Check that correct display viewport was returned by comparing the display IDs.
-        std::optional<DisplayViewport> viewport1 =
+        std::optional<DisplayViewport> receivedViewport1 =
                 mFakePolicy->getDisplayViewportByUniqueId(uniqueId1);
-        ASSERT_TRUE(viewport1);
-        ASSERT_EQ(displayId1, viewport1->displayId);
-        ASSERT_EQ(type, viewport1->type);
+        ASSERT_TRUE(receivedViewport1.has_value());
+        ASSERT_EQ(viewport1, *receivedViewport1);
 
-        std::optional<DisplayViewport> viewport2 =
+        std::optional<DisplayViewport> receivedViewport2 =
                 mFakePolicy->getDisplayViewportByUniqueId(uniqueId2);
-        ASSERT_TRUE(viewport2);
-        ASSERT_EQ(displayId2, viewport2->displayId);
-        ASSERT_EQ(type, viewport2->type);
+        ASSERT_TRUE(receivedViewport2.has_value());
+        ASSERT_EQ(viewport2, *receivedViewport2);
 
         // When there are multiple viewports of the same kind, and uniqueId is not specified
         // in the call to getDisplayViewport, then that situation is not supported.
@@ -521,38 +521,33 @@ TEST_F(InputReaderPolicyTest, Viewports_TwoOfSameType) {
 TEST_F(InputReaderPolicyTest, Viewports_ByTypeReturnsDefaultForInternal) {
     const std::string uniqueId1 = "uniqueId1";
     const std::string uniqueId2 = "uniqueId2";
-    constexpr int32_t nonDefaultDisplayId = 2;
-    static_assert(nonDefaultDisplayId != ADISPLAY_ID_DEFAULT,
-                  "Test display ID should not be ADISPLAY_ID_DEFAULT");
+    constexpr ui::LogicalDisplayId nonDefaultDisplayId = ui::LogicalDisplayId{2};
+    ASSERT_NE(nonDefaultDisplayId, ui::LogicalDisplayId::DEFAULT)
+            << "Test display ID should not be ui::LogicalDisplayId::DEFAULT ";
 
     // Add the default display first and ensure it gets returned.
     mFakePolicy->clearViewports();
-    mFakePolicy->addDisplayViewport(ADISPLAY_ID_DEFAULT, DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                                    ui::ROTATION_0, /*isActive=*/true, uniqueId1, NO_PORT,
-                                    ViewportType::INTERNAL);
-    mFakePolicy->addDisplayViewport(nonDefaultDisplayId, DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                                    ui::ROTATION_0, /*isActive=*/true, uniqueId2, NO_PORT,
-                                    ViewportType::INTERNAL);
-
-    std::optional<DisplayViewport> viewport =
+    DisplayViewport viewport1 = createViewport(ui::LogicalDisplayId::DEFAULT, DISPLAY_WIDTH,
+                                               DISPLAY_HEIGHT, ui::ROTATION_0, /*isActive=*/true,
+                                               uniqueId1, NO_PORT, ViewportType::INTERNAL);
+    mFakePolicy->addDisplayViewport(viewport1);
+    DisplayViewport viewport2 =
+            createViewport(nonDefaultDisplayId, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                           /*isActive=*/true, uniqueId2, NO_PORT, ViewportType::INTERNAL);
+    mFakePolicy->addDisplayViewport(viewport2);
+    std::optional<DisplayViewport> receivedViewport =
             mFakePolicy->getDisplayViewportByType(ViewportType::INTERNAL);
-    ASSERT_TRUE(viewport);
-    ASSERT_EQ(ADISPLAY_ID_DEFAULT, viewport->displayId);
-    ASSERT_EQ(ViewportType::INTERNAL, viewport->type);
+    ASSERT_TRUE(receivedViewport.has_value());
+    ASSERT_EQ(viewport1, *receivedViewport);
 
     // Add the default display second to make sure order doesn't matter.
     mFakePolicy->clearViewports();
-    mFakePolicy->addDisplayViewport(nonDefaultDisplayId, DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                                    ui::ROTATION_0, /*isActive=*/true, uniqueId2, NO_PORT,
-                                    ViewportType::INTERNAL);
-    mFakePolicy->addDisplayViewport(ADISPLAY_ID_DEFAULT, DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                                    ui::ROTATION_0, /*isActive=*/true, uniqueId1, NO_PORT,
-                                    ViewportType::INTERNAL);
+    mFakePolicy->addDisplayViewport(viewport2);
+    mFakePolicy->addDisplayViewport(viewport1);
 
-    viewport = mFakePolicy->getDisplayViewportByType(ViewportType::INTERNAL);
-    ASSERT_TRUE(viewport);
-    ASSERT_EQ(ADISPLAY_ID_DEFAULT, viewport->displayId);
-    ASSERT_EQ(ViewportType::INTERNAL, viewport->type);
+    receivedViewport = mFakePolicy->getDisplayViewportByType(ViewportType::INTERNAL);
+    ASSERT_TRUE(receivedViewport.has_value());
+    ASSERT_EQ(viewport1, *receivedViewport);
 }
 
 /**
@@ -562,36 +557,35 @@ TEST_F(InputReaderPolicyTest, Viewports_GetByPort) {
     constexpr ViewportType type = ViewportType::EXTERNAL;
     const std::string uniqueId1 = "uniqueId1";
     const std::string uniqueId2 = "uniqueId2";
-    constexpr int32_t displayId1 = 1;
-    constexpr int32_t displayId2 = 2;
+    constexpr ui::LogicalDisplayId displayId1 = ui::LogicalDisplayId{1};
+    constexpr ui::LogicalDisplayId displayId2 = ui::LogicalDisplayId{2};
     const uint8_t hdmi1 = 0;
     const uint8_t hdmi2 = 1;
     const uint8_t hdmi3 = 2;
 
     mFakePolicy->clearViewports();
     // Add a viewport that's associated with some display port that's not of interest.
-    mFakePolicy->addDisplayViewport(displayId1, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
-                                    /*isActive=*/true, uniqueId1, hdmi3, type);
+    DisplayViewport viewport1 =
+            createViewport(displayId1, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                           /*isActive=*/true, uniqueId1, hdmi3, type);
+    mFakePolicy->addDisplayViewport(viewport1);
     // Add another viewport, connected to HDMI1 port
-    mFakePolicy->addDisplayViewport(displayId2, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
-                                    /*isActive=*/true, uniqueId2, hdmi1, type);
-
+    DisplayViewport viewport2 =
+            createViewport(displayId2, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                           /*isActive=*/true, uniqueId2, hdmi1, type);
+    mFakePolicy->addDisplayViewport(viewport2);
     // Check that correct display viewport was returned by comparing the display ports.
     std::optional<DisplayViewport> hdmi1Viewport = mFakePolicy->getDisplayViewportByPort(hdmi1);
-    ASSERT_TRUE(hdmi1Viewport);
-    ASSERT_EQ(displayId2, hdmi1Viewport->displayId);
-    ASSERT_EQ(uniqueId2, hdmi1Viewport->uniqueId);
+    ASSERT_TRUE(hdmi1Viewport.has_value());
+    ASSERT_EQ(viewport2, *hdmi1Viewport);
 
     // Check that we can still get the same viewport using the uniqueId
     hdmi1Viewport = mFakePolicy->getDisplayViewportByUniqueId(uniqueId2);
-    ASSERT_TRUE(hdmi1Viewport);
-    ASSERT_EQ(displayId2, hdmi1Viewport->displayId);
-    ASSERT_EQ(uniqueId2, hdmi1Viewport->uniqueId);
-    ASSERT_EQ(type, hdmi1Viewport->type);
+    ASSERT_TRUE(hdmi1Viewport.has_value());
+    ASSERT_EQ(viewport2, *hdmi1Viewport);
 
     // Check that we cannot find a port with "HDMI2", because we never added one
-    std::optional<DisplayViewport> hdmi2Viewport = mFakePolicy->getDisplayViewportByPort(hdmi2);
-    ASSERT_FALSE(hdmi2Viewport);
+    ASSERT_FALSE(mFakePolicy->getDisplayViewportByPort(hdmi2));
 }
 
 // --- InputReaderTest ---
@@ -618,13 +612,10 @@ protected:
     }
 
     void addDevice(int32_t eventHubId, const std::string& name,
-                   ftl::Flags<InputDeviceClass> classes, const PropertyMap* configuration) {
+                   ftl::Flags<InputDeviceClass> classes, std::string sysfsRootPath = "") {
         mFakeEventHub->addDevice(eventHubId, name, classes);
+        mFakeEventHub->setSysfsRootPath(eventHubId, sysfsRootPath);
 
-        if (configuration) {
-            mFakeEventHub->addConfigurationMap(eventHubId, configuration);
-        }
-        mFakeEventHub->finishDeviceScan();
         mReader->loopOnce();
         mReader->loopOnce();
         ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
@@ -645,22 +636,21 @@ protected:
     FakeInputMapper& addDeviceWithFakeInputMapper(int32_t deviceId, int32_t eventHubId,
                                                   const std::string& name,
                                                   ftl::Flags<InputDeviceClass> classes,
-                                                  uint32_t sources,
-                                                  const PropertyMap* configuration) {
+                                                  uint32_t sources) {
         std::shared_ptr<InputDevice> device = mReader->newDevice(deviceId, name);
         FakeInputMapper& mapper =
                 device->addMapper<FakeInputMapper>(eventHubId,
                                                    mFakePolicy->getReaderConfiguration(), sources);
         mReader->pushNextDevice(device);
-        addDevice(eventHubId, name, classes, configuration);
+        addDevice(eventHubId, name, classes);
         return mapper;
     }
 };
 
 TEST_F(InputReaderTest, PolicyGetInputDevices) {
-    ASSERT_NO_FATAL_FAILURE(addDevice(1, "keyboard", InputDeviceClass::KEYBOARD, nullptr));
-    ASSERT_NO_FATAL_FAILURE(addDevice(2, "ignored", ftl::Flags<InputDeviceClass>(0),
-                                      nullptr)); // no classes so device will be ignored
+    ASSERT_NO_FATAL_FAILURE(addDevice(1, "keyboard", InputDeviceClass::KEYBOARD));
+    // no classes so device will be ignored
+    ASSERT_NO_FATAL_FAILURE(addDevice(2, "ignored", ftl::Flags<InputDeviceClass>(0)));
 
     // Should also have received a notification describing the new input devices.
     const std::vector<InputDeviceInfo>& inputDevices = mFakePolicy->getInputDevices();
@@ -672,8 +662,19 @@ TEST_F(InputReaderTest, PolicyGetInputDevices) {
     ASSERT_EQ(0U, inputDevices[0].getMotionRanges().size());
 }
 
+TEST_F(InputReaderTest, GetSysfsRootPath) {
+    constexpr std::string SYSFS_ROOT = "xyz";
+    ASSERT_NO_FATAL_FAILURE(addDevice(1, "keyboard", InputDeviceClass::KEYBOARD, SYSFS_ROOT));
+
+    // Should also have received a notification describing the new input device.
+    ASSERT_EQ(1U, mFakePolicy->getInputDevices().size());
+    InputDeviceInfo inputDevice = mFakePolicy->getInputDevices()[0];
+
+    ASSERT_EQ(SYSFS_ROOT, mReader->getSysfsRootPath(inputDevice.getId()).string());
+}
+
 TEST_F(InputReaderTest, InputDeviceRecreatedOnSysfsNodeChanged) {
-    ASSERT_NO_FATAL_FAILURE(addDevice(1, "keyboard", InputDeviceClass::KEYBOARD, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(1, "keyboard", InputDeviceClass::KEYBOARD));
     mFakeEventHub->setSysfsRootPath(1, "xyz");
 
     // Should also have received a notification describing the new input device.
@@ -710,10 +711,8 @@ TEST_F(InputReaderTest, GetMergedInputDevices) {
     // Push same device instance for next device to be added, so they'll have same identifier.
     mReader->pushNextDevice(device);
     mReader->pushNextDevice(device);
-    ASSERT_NO_FATAL_FAILURE(
-            addDevice(eventHubIds[0], "fake1", InputDeviceClass::KEYBOARD, nullptr));
-    ASSERT_NO_FATAL_FAILURE(
-            addDevice(eventHubIds[1], "fake2", InputDeviceClass::KEYBOARD, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "fake1", InputDeviceClass::KEYBOARD));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "fake2", InputDeviceClass::KEYBOARD));
 
     // Two devices will be merged to one input device as they have same identifier
     ASSERT_EQ(1U, mFakePolicy->getInputDevices().size());
@@ -735,13 +734,11 @@ TEST_F(InputReaderTest, GetMergedInputDevicesEnabled) {
     mReader->pushNextDevice(device);
     // Sensor device is initially disabled
     ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "fake1",
-                                      InputDeviceClass::KEYBOARD | InputDeviceClass::SENSOR,
-                                      nullptr));
+                                      InputDeviceClass::KEYBOARD | InputDeviceClass::SENSOR));
     // Device is disabled because the only sub device is a sensor device and disabled initially.
     ASSERT_FALSE(mFakeEventHub->isDeviceEnabled(eventHubIds[0]));
     ASSERT_FALSE(device->isEnabled());
-    ASSERT_NO_FATAL_FAILURE(
-            addDevice(eventHubIds[1], "fake2", InputDeviceClass::KEYBOARD, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "fake2", InputDeviceClass::KEYBOARD));
     // The merged device is enabled if any sub device is enabled
     ASSERT_TRUE(mFakeEventHub->isDeviceEnabled(eventHubIds[1]));
     ASSERT_TRUE(device->isEnabled());
@@ -756,9 +753,7 @@ TEST_F(InputReaderTest, WhenEnabledChanges_SendsDeviceResetNotification) {
     device->addMapper<FakeInputMapper>(eventHubId, mFakePolicy->getReaderConfiguration(),
                                        AINPUT_SOURCE_KEYBOARD);
     mReader->pushNextDevice(device);
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass, nullptr));
-
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyConfigurationChangedWasCalled(nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass));
 
     NotifyDeviceResetArgs resetArgs;
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled(&resetArgs));
@@ -775,7 +770,6 @@ TEST_F(InputReaderTest, WhenEnabledChanges_SendsDeviceResetNotification) {
     disableDevice(deviceId);
     mReader->loopOnce();
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasNotCalled());
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyConfigurationChangedWasNotCalled());
     ASSERT_EQ(device->isEnabled(), false);
 
     enableDevice(deviceId);
@@ -789,9 +783,8 @@ TEST_F(InputReaderTest, GetKeyCodeState_ForwardsRequestsToMappers) {
     constexpr int32_t deviceId = END_RESERVED_ID + 1000;
     constexpr ftl::Flags<InputDeviceClass> deviceClass = InputDeviceClass::KEYBOARD;
     constexpr int32_t eventHubId = 1;
-    FakeInputMapper& mapper =
-            addDeviceWithFakeInputMapper(deviceId, eventHubId, "fake", deviceClass,
-                                         AINPUT_SOURCE_KEYBOARD, nullptr);
+    FakeInputMapper& mapper = addDeviceWithFakeInputMapper(deviceId, eventHubId, "fake",
+                                                           deviceClass, AINPUT_SOURCE_KEYBOARD);
     mapper.setKeyCodeState(AKEYCODE_A, AKEY_STATE_DOWN);
 
     ASSERT_EQ(AKEY_STATE_UNKNOWN, mReader->getKeyCodeState(0,
@@ -821,9 +814,9 @@ TEST_F(InputReaderTest, GetKeyCodeState_ForwardsRequestsToMappers) {
 TEST_F(InputReaderTest, GetKeyCodeForKeyLocation_ForwardsRequestsToMappers) {
     constexpr int32_t deviceId = END_RESERVED_ID + 1000;
     constexpr int32_t eventHubId = 1;
-    FakeInputMapper& mapper = addDeviceWithFakeInputMapper(deviceId, eventHubId, "keyboard",
-                                                           InputDeviceClass::KEYBOARD,
-                                                           AINPUT_SOURCE_KEYBOARD, nullptr);
+    FakeInputMapper& mapper =
+            addDeviceWithFakeInputMapper(deviceId, eventHubId, "keyboard",
+                                         InputDeviceClass::KEYBOARD, AINPUT_SOURCE_KEYBOARD);
     mapper.addKeyCodeMapping(AKEYCODE_Y, AKEYCODE_Z);
 
     ASSERT_EQ(AKEYCODE_UNKNOWN, mReader->getKeyCodeForKeyLocation(0, AKEYCODE_Y))
@@ -840,9 +833,9 @@ TEST_F(InputReaderTest, GetKeyCodeForKeyLocation_ForwardsRequestsToMappers) {
 TEST_F(InputReaderTest, GetKeyCodeForKeyLocation_NoKeyboardMapper) {
     constexpr int32_t deviceId = END_RESERVED_ID + 1000;
     constexpr int32_t eventHubId = 1;
-    FakeInputMapper& mapper = addDeviceWithFakeInputMapper(deviceId, eventHubId, "joystick",
-                                                           InputDeviceClass::JOYSTICK,
-                                                           AINPUT_SOURCE_GAMEPAD, nullptr);
+    FakeInputMapper& mapper =
+            addDeviceWithFakeInputMapper(deviceId, eventHubId, "joystick",
+                                         InputDeviceClass::JOYSTICK, AINPUT_SOURCE_GAMEPAD);
     mapper.addKeyCodeMapping(AKEYCODE_Y, AKEYCODE_Z);
 
     ASSERT_EQ(AKEYCODE_UNKNOWN, mReader->getKeyCodeForKeyLocation(deviceId, AKEYCODE_Y))
@@ -853,9 +846,8 @@ TEST_F(InputReaderTest, GetScanCodeState_ForwardsRequestsToMappers) {
     constexpr int32_t deviceId = END_RESERVED_ID + 1000;
     constexpr ftl::Flags<InputDeviceClass> deviceClass = InputDeviceClass::KEYBOARD;
     constexpr int32_t eventHubId = 1;
-    FakeInputMapper& mapper =
-            addDeviceWithFakeInputMapper(deviceId, eventHubId, "fake", deviceClass,
-                                         AINPUT_SOURCE_KEYBOARD, nullptr);
+    FakeInputMapper& mapper = addDeviceWithFakeInputMapper(deviceId, eventHubId, "fake",
+                                                           deviceClass, AINPUT_SOURCE_KEYBOARD);
     mapper.setScanCodeState(KEY_A, AKEY_STATE_DOWN);
 
     ASSERT_EQ(AKEY_STATE_UNKNOWN, mReader->getScanCodeState(0,
@@ -886,9 +878,8 @@ TEST_F(InputReaderTest, GetSwitchState_ForwardsRequestsToMappers) {
     constexpr int32_t deviceId = END_RESERVED_ID + 1000;
     constexpr ftl::Flags<InputDeviceClass> deviceClass = InputDeviceClass::KEYBOARD;
     constexpr int32_t eventHubId = 1;
-    FakeInputMapper& mapper =
-            addDeviceWithFakeInputMapper(deviceId, eventHubId, "fake", deviceClass,
-                                         AINPUT_SOURCE_KEYBOARD, nullptr);
+    FakeInputMapper& mapper = addDeviceWithFakeInputMapper(deviceId, eventHubId, "fake",
+                                                           deviceClass, AINPUT_SOURCE_KEYBOARD);
     mapper.setSwitchState(SW_LID, AKEY_STATE_DOWN);
 
     ASSERT_EQ(AKEY_STATE_UNKNOWN, mReader->getSwitchState(0,
@@ -919,9 +910,8 @@ TEST_F(InputReaderTest, MarkSupportedKeyCodes_ForwardsRequestsToMappers) {
     constexpr int32_t deviceId = END_RESERVED_ID + 1000;
     constexpr ftl::Flags<InputDeviceClass> deviceClass = InputDeviceClass::KEYBOARD;
     constexpr int32_t eventHubId = 1;
-    FakeInputMapper& mapper =
-            addDeviceWithFakeInputMapper(deviceId, eventHubId, "fake", deviceClass,
-                                         AINPUT_SOURCE_KEYBOARD, nullptr);
+    FakeInputMapper& mapper = addDeviceWithFakeInputMapper(deviceId, eventHubId, "fake",
+                                                           deviceClass, AINPUT_SOURCE_KEYBOARD);
 
     mapper.addSupportedKeyCode(AKEYCODE_A);
     mapper.addSupportedKeyCode(AKEYCODE_B);
@@ -960,25 +950,14 @@ TEST_F(InputReaderTest, MarkSupportedKeyCodes_ForwardsRequestsToMappers) {
     ASSERT_TRUE(flags[0] && flags[1] && !flags[2] && !flags[3]);
 }
 
-TEST_F(InputReaderTest, LoopOnce_WhenDeviceScanFinished_SendsConfigurationChanged) {
-    constexpr int32_t eventHubId = 1;
-    addDevice(eventHubId, "ignored", InputDeviceClass::KEYBOARD, nullptr);
-
-    NotifyConfigurationChangedArgs args;
-
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyConfigurationChangedWasCalled(&args));
-    ASSERT_EQ(ARBITRARY_TIME, args.eventTime);
-}
-
 TEST_F(InputReaderTest, LoopOnce_ForwardsRawEventsToMappers) {
     constexpr int32_t deviceId = END_RESERVED_ID + 1000;
     constexpr ftl::Flags<InputDeviceClass> deviceClass = InputDeviceClass::KEYBOARD;
     constexpr nsecs_t when = 0;
     constexpr int32_t eventHubId = 1;
     constexpr nsecs_t readTime = 2;
-    FakeInputMapper& mapper =
-            addDeviceWithFakeInputMapper(deviceId, eventHubId, "fake", deviceClass,
-                                         AINPUT_SOURCE_KEYBOARD, nullptr);
+    FakeInputMapper& mapper = addDeviceWithFakeInputMapper(deviceId, eventHubId, "fake",
+                                                           deviceClass, AINPUT_SOURCE_KEYBOARD);
 
     mFakeEventHub->enqueueEvent(when, readTime, eventHubId, EV_KEY, KEY_A, 1);
     mReader->loopOnce();
@@ -1003,7 +982,7 @@ TEST_F(InputReaderTest, DeviceReset_RandomId) {
     device->addMapper<FakeInputMapper>(eventHubId, mFakePolicy->getReaderConfiguration(),
                                        AINPUT_SOURCE_KEYBOARD);
     mReader->pushNextDevice(device);
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass));
 
     NotifyDeviceResetArgs resetArgs;
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled(&resetArgs));
@@ -1037,7 +1016,7 @@ TEST_F(InputReaderTest, DeviceReset_GenerateIdWithInputReaderSource) {
     device->addMapper<FakeInputMapper>(eventHubId, mFakePolicy->getReaderConfiguration(),
                                        AINPUT_SOURCE_KEYBOARD);
     mReader->pushNextDevice(device);
-    ASSERT_NO_FATAL_FAILURE(addDevice(deviceId, "fake", deviceClass, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(deviceId, "fake", deviceClass));
 
     NotifyDeviceResetArgs resetArgs;
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled(&resetArgs));
@@ -1045,7 +1024,7 @@ TEST_F(InputReaderTest, DeviceReset_GenerateIdWithInputReaderSource) {
 }
 
 TEST_F(InputReaderTest, Device_CanDispatchToDisplay) {
-    constexpr int32_t deviceId = END_RESERVED_ID + 1000;
+    constexpr DeviceId deviceId = END_RESERVED_ID + 1000;
     constexpr ftl::Flags<InputDeviceClass> deviceClass = InputDeviceClass::KEYBOARD;
     constexpr int32_t eventHubId = 1;
     const char* DEVICE_LOCATION = "USB1";
@@ -1062,19 +1041,21 @@ TEST_F(InputReaderTest, Device_CanDispatchToDisplay) {
 
     // Add default and second display.
     mFakePolicy->clearViewports();
-    mFakePolicy->addDisplayViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
-                                    /*isActive=*/true, "local:0", NO_PORT, ViewportType::INTERNAL);
-    mFakePolicy->addDisplayViewport(SECONDARY_DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                                    ui::ROTATION_0, /*isActive=*/true, "local:1", hdmi1,
-                                    ViewportType::EXTERNAL);
+    DisplayViewport internalViewport =
+            createViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                           /*isActive=*/true, "local:0", NO_PORT, ViewportType::INTERNAL);
+    mFakePolicy->addDisplayViewport(internalViewport);
+    DisplayViewport externalViewport =
+            createViewport(SECONDARY_DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                           /*isActive=*/true, "local:1", hdmi1, ViewportType::EXTERNAL);
+    mFakePolicy->addDisplayViewport(externalViewport);
     mReader->requestRefreshConfiguration(InputReaderConfiguration::Change::DISPLAY_INFO);
     mReader->loopOnce();
 
     // Add the device, and make sure all of the callbacks are triggered.
     // The device is added after the input port associations are processed since
     // we do not yet support dynamic device-to-display associations.
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass, nullptr));
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyConfigurationChangedWasCalled());
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass));
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled());
     ASSERT_NO_FATAL_FAILURE(mapper.assertConfigureWasCalled());
 
@@ -1101,10 +1082,8 @@ TEST_F(InputReaderTest, WhenEnabledChanges_AllSubdevicesAreUpdated) {
                                        AINPUT_SOURCE_KEYBOARD);
     mReader->pushNextDevice(device);
     mReader->pushNextDevice(device);
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "fake1", deviceClass, nullptr));
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "fake2", deviceClass, nullptr));
-
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyConfigurationChangedWasCalled(nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "fake1", deviceClass));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "fake2", deviceClass));
 
     NotifyDeviceResetArgs resetArgs;
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled(&resetArgs));
@@ -1148,8 +1127,8 @@ TEST_F(InputReaderTest, GetKeyCodeState_ForwardsRequestsToSubdeviceMappers) {
                                                AINPUT_SOURCE_KEYBOARD);
     mReader->pushNextDevice(device);
     mReader->pushNextDevice(device);
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "fake1", deviceClass, nullptr));
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "fake2", deviceClass, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "fake1", deviceClass));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "fake2", deviceClass));
 
     mapperDevice1.setKeyCodeState(AKEYCODE_A, AKEY_STATE_DOWN);
     mapperDevice2.setKeyCodeState(AKEYCODE_B, AKEY_STATE_DOWN);
@@ -1165,24 +1144,99 @@ TEST_F(InputReaderTest, GetKeyCodeState_ForwardsRequestsToSubdeviceMappers) {
 TEST_F(InputReaderTest, ChangingPointerCaptureNotifiesInputListener) {
     NotifyPointerCaptureChangedArgs args;
 
-    auto request = mFakePolicy->setPointerCapture(true);
+    auto request = mFakePolicy->setPointerCapture(PointerCaptureMode::ABSOLUTE,
+                                                  /*window=*/sp<BBinder>::make());
     mReader->requestRefreshConfiguration(InputReaderConfiguration::Change::POINTER_CAPTURE);
     mReader->loopOnce();
     mFakeListener->assertNotifyCaptureWasCalled(&args);
-    ASSERT_TRUE(args.request.enable) << "Pointer Capture should be enabled.";
+    ASSERT_TRUE(args.request.isEnable()) << "Pointer Capture should be enabled.";
     ASSERT_EQ(args.request, request) << "Pointer Capture sequence number should match.";
 
-    mFakePolicy->setPointerCapture(false);
+    mFakePolicy->setPointerCapture(PointerCaptureMode::UNCAPTURED, /*window=*/nullptr);
     mReader->requestRefreshConfiguration(InputReaderConfiguration::Change::POINTER_CAPTURE);
     mReader->loopOnce();
     mFakeListener->assertNotifyCaptureWasCalled(&args);
-    ASSERT_FALSE(args.request.enable) << "Pointer Capture should be disabled.";
+    ASSERT_FALSE(args.request.isEnable()) << "Pointer Capture should be disabled.";
 
     // Verify that the Pointer Capture state is not updated when the configuration value
     // does not change.
     mReader->requestRefreshConfiguration(InputReaderConfiguration::Change::POINTER_CAPTURE);
     mReader->loopOnce();
     mFakeListener->assertNotifyCaptureWasNotCalled();
+}
+
+TEST_F(InputReaderTest, GetLastUsedInputDeviceId) {
+    constexpr int32_t FIRST_DEVICE_ID = END_RESERVED_ID + 1000;
+    constexpr int32_t SECOND_DEVICE_ID = FIRST_DEVICE_ID + 1;
+    FakeInputMapper& firstMapper =
+            addDeviceWithFakeInputMapper(FIRST_DEVICE_ID, FIRST_DEVICE_ID, "first",
+                                         InputDeviceClass::KEYBOARD, AINPUT_SOURCE_KEYBOARD);
+    FakeInputMapper& secondMapper =
+            addDeviceWithFakeInputMapper(SECOND_DEVICE_ID, SECOND_DEVICE_ID, "second",
+                                         InputDeviceClass::TOUCH_MT, AINPUT_SOURCE_STYLUS);
+
+    ASSERT_EQ(ReservedInputDeviceId::INVALID_INPUT_DEVICE_ID, mReader->getLastUsedInputDeviceId());
+
+    // Start a new key gesture from the first device
+    firstMapper.setProcessResult({KeyArgsBuilder(AKEY_EVENT_ACTION_DOWN, AINPUT_SOURCE_KEYBOARD)
+                                          .deviceId(FIRST_DEVICE_ID)
+                                          .build()});
+    mFakeEventHub->enqueueEvent(ARBITRARY_TIME, ARBITRARY_TIME, FIRST_DEVICE_ID, 0, 0, 0);
+    mReader->loopOnce();
+    ASSERT_EQ(firstMapper.getDeviceId(), mReader->getLastUsedInputDeviceId());
+
+    // Start a new touch gesture from the second device
+    secondMapper.setProcessResult(
+            {MotionArgsBuilder(AMOTION_EVENT_ACTION_DOWN, AINPUT_SOURCE_STYLUS)
+                     .deviceId(SECOND_DEVICE_ID)
+                     .pointer(PointerBuilder(/*id=*/0, ToolType::FINGER))
+                     .build()});
+    mFakeEventHub->enqueueEvent(ARBITRARY_TIME, ARBITRARY_TIME, SECOND_DEVICE_ID, 0, 0, 0);
+    mReader->loopOnce();
+    ASSERT_EQ(SECOND_DEVICE_ID, mReader->getLastUsedInputDeviceId());
+
+    // Releasing the key is not a new gesture, so it does not update the last used device
+    firstMapper.setProcessResult({KeyArgsBuilder(AKEY_EVENT_ACTION_UP, AINPUT_SOURCE_KEYBOARD)
+                                          .deviceId(FIRST_DEVICE_ID)
+                                          .build()});
+    mFakeEventHub->enqueueEvent(ARBITRARY_TIME, ARBITRARY_TIME, FIRST_DEVICE_ID, 0, 0, 0);
+    mReader->loopOnce();
+    ASSERT_EQ(SECOND_DEVICE_ID, mReader->getLastUsedInputDeviceId());
+
+    // But pressing a new key does start a new gesture
+    firstMapper.setProcessResult({KeyArgsBuilder(AKEY_EVENT_ACTION_DOWN, AINPUT_SOURCE_KEYBOARD)
+                                          .deviceId(FIRST_DEVICE_ID)
+                                          .build()});
+    mFakeEventHub->enqueueEvent(ARBITRARY_TIME, ARBITRARY_TIME, FIRST_DEVICE_ID, 0, 0, 0);
+    mReader->loopOnce();
+    ASSERT_EQ(FIRST_DEVICE_ID, mReader->getLastUsedInputDeviceId());
+
+    // Moving or ending a touch gesture does not update the last used device
+    secondMapper.setProcessResult(
+            {MotionArgsBuilder(AMOTION_EVENT_ACTION_MOVE, AINPUT_SOURCE_STYLUS)
+                     .deviceId(SECOND_DEVICE_ID)
+                     .pointer(PointerBuilder(/*id=*/0, ToolType::STYLUS))
+                     .build()});
+    mFakeEventHub->enqueueEvent(ARBITRARY_TIME, ARBITRARY_TIME, SECOND_DEVICE_ID, 0, 0, 0);
+    mReader->loopOnce();
+    ASSERT_EQ(FIRST_DEVICE_ID, mReader->getLastUsedInputDeviceId());
+    secondMapper.setProcessResult({MotionArgsBuilder(AMOTION_EVENT_ACTION_UP, AINPUT_SOURCE_STYLUS)
+                                           .deviceId(SECOND_DEVICE_ID)
+                                           .pointer(PointerBuilder(/*id=*/0, ToolType::STYLUS))
+                                           .build()});
+    mFakeEventHub->enqueueEvent(ARBITRARY_TIME, ARBITRARY_TIME, SECOND_DEVICE_ID, 0, 0, 0);
+    mReader->loopOnce();
+    ASSERT_EQ(FIRST_DEVICE_ID, mReader->getLastUsedInputDeviceId());
+
+    // Starting a new hover gesture updates the last used device
+    secondMapper.setProcessResult(
+            {MotionArgsBuilder(AMOTION_EVENT_ACTION_HOVER_ENTER, AINPUT_SOURCE_STYLUS)
+                     .deviceId(SECOND_DEVICE_ID)
+                     .pointer(PointerBuilder(/*id=*/0, ToolType::STYLUS))
+                     .build()});
+    mFakeEventHub->enqueueEvent(ARBITRARY_TIME, ARBITRARY_TIME, SECOND_DEVICE_ID, 0, 0, 0);
+    mReader->loopOnce();
+    ASSERT_EQ(SECOND_DEVICE_ID, mReader->getLastUsedInputDeviceId());
 }
 
 class FakeVibratorInputMapper : public FakeInputMapper {
@@ -1207,7 +1261,7 @@ TEST_F(InputReaderTest, VibratorGetVibratorIds) {
                                                        AINPUT_SOURCE_KEYBOARD);
     mReader->pushNextDevice(device);
 
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass));
     ASSERT_NO_FATAL_FAILURE(mapper.assertConfigureWasCalled());
 
     ASSERT_EQ(mapper.getVibratorIds().size(), 2U);
@@ -1271,7 +1325,7 @@ TEST_F(InputReaderTest, BatteryGetCapacity) {
             device->addController<FakePeripheralController>(eventHubId);
     mReader->pushNextDevice(device);
 
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass));
 
     ASSERT_EQ(controller.getBatteryCapacity(FakeEventHub::DEFAULT_BATTERY),
               FakeEventHub::BATTERY_CAPACITY);
@@ -1289,7 +1343,7 @@ TEST_F(InputReaderTest, BatteryGetStatus) {
             device->addController<FakePeripheralController>(eventHubId);
     mReader->pushNextDevice(device);
 
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass));
 
     ASSERT_EQ(controller.getBatteryStatus(FakeEventHub::DEFAULT_BATTERY),
               FakeEventHub::BATTERY_STATUS);
@@ -1306,7 +1360,7 @@ TEST_F(InputReaderTest, BatteryGetDevicePath) {
     device->addController<FakePeripheralController>(eventHubId);
     mReader->pushNextDevice(device);
 
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass));
 
     ASSERT_EQ(mReader->getBatteryDevicePath(deviceId), FakeEventHub::BATTERY_DEVPATH);
 }
@@ -1328,12 +1382,88 @@ TEST_F(InputReaderTest, LightGetColor) {
     mFakeEventHub->addRawLightInfo(/*rawId=*/1, std::move(info));
     mFakeEventHub->fakeLightBrightness(/*rawId=*/1, 0x55);
 
-    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass, nullptr));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubId, "fake", deviceClass));
 
     ASSERT_TRUE(controller.setLightColor(/*lightId=*/1, LIGHT_BRIGHTNESS));
     ASSERT_EQ(controller.getLightColor(/*lightId=*/1), LIGHT_BRIGHTNESS);
     ASSERT_TRUE(mReader->setLightColor(deviceId, /*lightId=*/1, LIGHT_BRIGHTNESS));
     ASSERT_EQ(mReader->getLightColor(deviceId, /*lightId=*/1), LIGHT_BRIGHTNESS);
+}
+
+TEST_F(InputReaderTest, SetPowerWakeUp) {
+    ASSERT_NO_FATAL_FAILURE(addDevice(1, "1st", InputDeviceClass::KEYBOARD));
+    ASSERT_NO_FATAL_FAILURE(addDevice(2, "2nd", InputDeviceClass::KEYBOARD));
+    ASSERT_NO_FATAL_FAILURE(addDevice(3, "3rd", InputDeviceClass::KEYBOARD));
+
+    ASSERT_EQ(mFakeEventHub->fakeReadKernelWakeup(1), false);
+
+    ASSERT_TRUE(mFakeEventHub->setKernelWakeEnabled(2, true));
+    ASSERT_EQ(mFakeEventHub->fakeReadKernelWakeup(2), true);
+
+    ASSERT_TRUE(mFakeEventHub->setKernelWakeEnabled(3, false));
+    ASSERT_EQ(mFakeEventHub->fakeReadKernelWakeup(3), false);
+}
+
+TEST_F(InputReaderTest, MergeableInputDevices) {
+    constexpr int32_t eventHubIds[2] = {END_RESERVED_ID, END_RESERVED_ID + 1};
+
+    // By default, all of the default-created eventhub devices will have the same identifier
+    // (implicitly vid 0, pid 0, etc.), which is why we expect them to be merged.
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "1st", InputDeviceClass::KEYBOARD));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "2nd", InputDeviceClass::JOYSTICK));
+
+    // The two devices will be merged to one input device as they have same identifier, and none are
+    // pointer devices.
+    ASSERT_EQ(1U, mFakePolicy->getInputDevices().size());
+}
+
+TEST_F(InputReaderTest, MergeableDevicesWithTouch) {
+    constexpr int32_t eventHubIds[3] = {END_RESERVED_ID, END_RESERVED_ID + 1, END_RESERVED_ID + 2};
+
+    // By default, all of the default-created eventhub devices will have the same identifier
+    // (implicitly vid 0, pid 0, etc.), which is why we expect them to be merged.
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "1st", InputDeviceClass::TOUCH_MT));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "2nd", InputDeviceClass::KEYBOARD));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[2], "3rd", InputDeviceClass::GAMEPAD));
+
+    // The three devices will be merged to one input device as they have same identifier, and only
+    // one is a pointer device.
+    ASSERT_EQ(1U, mFakePolicy->getInputDevices().size());
+}
+
+TEST_F(InputReaderTest, UnmergeableTouchDevices) {
+    SCOPED_FLAG_OVERRIDE(prevent_merging_input_pointer_devices, true);
+
+    constexpr int32_t eventHubIds[3] = {END_RESERVED_ID, END_RESERVED_ID + 1, END_RESERVED_ID + 2};
+
+    // By default, all of the default-created eventhub devices will have the same identifier
+    // (implicitly vid 0, pid 0, etc.), which is why they can potentially be merged.
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "1st", InputDeviceClass::TOUCH));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "2nd", InputDeviceClass::TOUCH_MT));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[2], "2nd", InputDeviceClass::CURSOR));
+
+    // The three devices will not be merged, as they have same identifier, but are all pointer
+    // devices.
+    ASSERT_EQ(3U, mFakePolicy->getInputDevices().size());
+}
+
+TEST_F(InputReaderTest, MergeableMixedDevices) {
+    SCOPED_FLAG_OVERRIDE(prevent_merging_input_pointer_devices, true);
+
+    constexpr int32_t eventHubIds[4] = {END_RESERVED_ID, END_RESERVED_ID + 1, END_RESERVED_ID + 2,
+                                        END_RESERVED_ID + 3};
+
+    // By default, all of the default-created eventhub devices will have the same identifier
+    // (implicitly vid 0, pid 0, etc.), which is why they can potentially be merged.
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[0], "1st", InputDeviceClass::TOUCH));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[1], "2nd", InputDeviceClass::TOUCH_MT));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[2], "3rd", InputDeviceClass::DPAD));
+    ASSERT_NO_FATAL_FAILURE(addDevice(eventHubIds[3], "4th", InputDeviceClass::JOYSTICK));
+
+    // Non-touch devices can be merged with one of the touch devices, as they have same identifier,
+    // but the two touch devices will not combine with each other. It is not specified which touch
+    // device the non-touch devices merge with.
+    ASSERT_EQ(2U, mFakePolicy->getInputDevices().size());
 }
 
 // --- InputReaderIntegrationTest ---
@@ -1349,18 +1479,17 @@ protected:
     sp<FakeInputReaderPolicy> mFakePolicy;
     std::unique_ptr<InputReaderInterface> mReader;
 
-    std::shared_ptr<FakePointerController> mFakePointerController;
-
     constexpr static auto EVENT_HAPPENED_TIMEOUT = 2000ms;
     constexpr static auto EVENT_DID_NOT_HAPPEN_TIMEOUT = 30ms;
+
+    const std::string UNIQUE_ID = "local:0";
+    const std::string INPUT_PORT = "uinput/input0";
 
     void SetUp() override {
 #if !defined(__ANDROID__)
         GTEST_SKIP();
 #endif
         mFakePolicy = sp<FakeInputReaderPolicy>::make();
-        mFakePointerController = std::make_shared<FakePointerController>();
-        mFakePolicy->setPointerController(mFakePointerController);
 
         setupInputReader();
     }
@@ -1399,15 +1528,15 @@ protected:
                                                             EVENT_DID_NOT_HAPPEN_TIMEOUT);
 
         mReader = std::make_unique<InputReader>(std::make_shared<EventHub>(), mFakePolicy,
-                                                *mTestListener);
+                                                *mTestListener, /*env=*/nullptr,
+                                                /*tracingBackend=*/nullptr);
         ASSERT_EQ(mReader->start(), OK);
 
         // Since this test is run on a real device, all the input devices connected
         // to the test device will show up in mReader. We wait for those input devices to
         // show up before beginning the tests.
-        ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
         ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyInputDevicesChangedWasCalled());
-        ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyConfigurationChangedWasCalled());
+        ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
     }
 };
 
@@ -1427,12 +1556,10 @@ TEST_F(InputReaderIntegrationTest, TestInvalidDevice) {
     // consider it as a valid device.
     std::unique_ptr<UinputDevice> invalidDevice = createUinputDevice<InvalidUinputDevice>();
     ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesNotChanged());
-    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyConfigurationChangedWasNotCalled());
     ASSERT_EQ(numDevices, mFakePolicy->getInputDevices().size());
 
     invalidDevice.reset();
     ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesNotChanged());
-    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyConfigurationChangedWasNotCalled());
     ASSERT_EQ(numDevices, mFakePolicy->getInputDevices().size());
 }
 
@@ -1441,7 +1568,6 @@ TEST_F(InputReaderIntegrationTest, AddNewDevice) {
 
     std::unique_ptr<UinputHomeKey> keyboard = createUinputDevice<UinputHomeKey>();
     ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
-    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyConfigurationChangedWasCalled());
     ASSERT_EQ(initialNumDevices + 1, mFakePolicy->getInputDevices().size());
 
     const auto device = waitForDevice(keyboard->getName());
@@ -1452,7 +1578,6 @@ TEST_F(InputReaderIntegrationTest, AddNewDevice) {
 
     keyboard.reset();
     ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
-    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyConfigurationChangedWasCalled());
     ASSERT_EQ(initialNumDevices, mFakePolicy->getInputDevices().size());
 }
 
@@ -1460,21 +1585,14 @@ TEST_F(InputReaderIntegrationTest, SendsEventsToInputListener) {
     std::unique_ptr<UinputHomeKey> keyboard = createUinputDevice<UinputHomeKey>();
     ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
 
-    NotifyConfigurationChangedArgs configChangedArgs;
-    ASSERT_NO_FATAL_FAILURE(
-            mTestListener->assertNotifyConfigurationChangedWasCalled(&configChangedArgs));
-    int32_t prevId = configChangedArgs.id;
-    nsecs_t prevTimestamp = configChangedArgs.eventTime;
-
     NotifyKeyArgs keyArgs;
     keyboard->pressAndReleaseHomeKey();
     ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyKeyWasCalled(&keyArgs));
     ASSERT_EQ(AKEY_EVENT_ACTION_DOWN, keyArgs.action);
-    ASSERT_NE(prevId, keyArgs.id);
-    prevId = keyArgs.id;
-    ASSERT_LE(prevTimestamp, keyArgs.eventTime);
     ASSERT_LE(keyArgs.eventTime, keyArgs.readTime);
-    prevTimestamp = keyArgs.eventTime;
+
+    int32_t prevId = keyArgs.id;
+    nsecs_t prevTimestamp = keyArgs.eventTime;
 
     ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyKeyWasCalled(&keyArgs));
     ASSERT_EQ(AKEY_EVENT_ACTION_UP, keyArgs.action);
@@ -1584,8 +1702,6 @@ TEST_F(InputReaderIntegrationTest, SendsGearDownAndUpToInputListener) {
 
 class BaseTouchIntegrationTest : public InputReaderIntegrationTest {
 protected:
-    const std::string UNIQUE_ID = "local:0";
-
     void SetUp() override {
 #if !defined(__ANDROID__)
         GTEST_SKIP();
@@ -1597,18 +1713,19 @@ protected:
 
         mDevice = createUinputDevice<UinputTouchScreen>(Rect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT));
         ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
-        ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyConfigurationChangedWasCalled());
         const auto info = waitForDevice(mDevice->getName());
-        ASSERT_TRUE(info);
+        ASSERT_TRUE(info.has_value());
         mDeviceInfo = *info;
     }
 
-    void setDisplayInfoAndReconfigure(int32_t displayId, int32_t width, int32_t height,
+    void setDisplayInfoAndReconfigure(ui::LogicalDisplayId displayId, int32_t width, int32_t height,
                                       ui::Rotation orientation, const std::string& uniqueId,
                                       std::optional<uint8_t> physicalPort,
                                       ViewportType viewportType) {
-        mFakePolicy->addDisplayViewport(displayId, width, height, orientation, /*isActive=*/true,
-                                        uniqueId, physicalPort, viewportType);
+        DisplayViewport viewport =
+                createViewport(displayId, width, height, orientation, /*isActive=*/true, uniqueId,
+                               physicalPort, viewportType);
+        mFakePolicy->addDisplayViewport(viewport);
         mReader->requestRefreshConfiguration(InputReaderConfiguration::Change::DISPLAY_INFO);
     }
 
@@ -1633,7 +1750,6 @@ class TouchIntegrationTest : public BaseTouchIntegrationTest,
                              public testing::WithParamInterface<TouchIntegrationTestDisplays> {
 protected:
     static constexpr std::optional<uint8_t> DISPLAY_PORT = 0;
-    const std::string INPUT_PORT = "uinput_touch/input0";
 
     void SetUp() override {
 #if !defined(__ANDROID__)
@@ -1654,8 +1770,6 @@ protected:
         } else {
             mFakePolicy->addInputUniqueIdAssociation(INPUT_PORT, UNIQUE_ID);
         }
-        mFakePointerController = std::make_shared<FakePointerController>();
-        mFakePolicy->setPointerController(mFakePointerController);
 
         InputReaderIntegrationTest::setupInputReader();
 
@@ -1668,9 +1782,8 @@ protected:
                                      UNIQUE_ID, isInputPortAssociation ? DISPLAY_PORT : NO_PORT,
                                      ViewportType::INTERNAL);
         ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
-        ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyConfigurationChangedWasCalled());
         const auto info = waitForDevice(mDevice->getName());
-        ASSERT_TRUE(info);
+        ASSERT_TRUE(info.has_value());
         mDeviceInfo = *info;
     }
 };
@@ -2001,9 +2114,8 @@ TEST_P(TouchIntegrationTest, ExternalStylusConnectedDuringTouchGesture) {
     // Connecting an external stylus mid-gesture should not interrupt the ongoing gesture stream.
     auto externalStylus = createUinputDevice<UinputExternalStylus>();
     ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
-    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyConfigurationChangedWasCalled());
     const auto stylusInfo = waitForDevice(externalStylus->getName());
-    ASSERT_TRUE(stylusInfo);
+    ASSERT_TRUE(stylusInfo.has_value());
 
     // Move
     mDevice->sendMove(centerPoint + Point(2, 2));
@@ -2014,7 +2126,6 @@ TEST_P(TouchIntegrationTest, ExternalStylusConnectedDuringTouchGesture) {
     // Disconnecting an external stylus mid-gesture should not interrupt the ongoing gesture stream.
     externalStylus.reset();
     ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
-    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyConfigurationChangedWasCalled());
     ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyMotionWasNotCalled());
 
     // Up
@@ -2072,9 +2183,8 @@ private:
         mStylusDeviceLifecycleTracker = createUinputDevice<T>();
         mStylus = mStylusDeviceLifecycleTracker.get();
         ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
-        ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyConfigurationChangedWasCalled());
         const auto info = waitForDevice(mStylus->getName());
-        ASSERT_TRUE(info);
+        ASSERT_TRUE(info.has_value());
         mStylusInfo = *info;
     }
 
@@ -2342,13 +2452,12 @@ TEST_F(ExternalStylusIntegrationTest, ExternalStylusConnectionChangesTouchscreen
     std::unique_ptr<UinputExternalStylusWithPressure> stylus =
             createUinputDevice<UinputExternalStylusWithPressure>();
     ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
-    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyConfigurationChangedWasCalled());
     const auto stylusInfo = waitForDevice(stylus->getName());
     ASSERT_TRUE(stylusInfo);
 
     // Connecting an external stylus changes the source of the touchscreen.
     const auto deviceInfo = waitForDevice(mDevice->getName());
-    ASSERT_TRUE(deviceInfo);
+    ASSERT_TRUE(deviceInfo.has_value());
     ASSERT_TRUE(isFromSource(deviceInfo->getSources(), STYLUS_FUSION_SOURCE));
 }
 
@@ -2360,9 +2469,8 @@ TEST_F(ExternalStylusIntegrationTest, FusedExternalStylusPressureReported) {
     std::unique_ptr<UinputExternalStylusWithPressure> stylus =
             createUinputDevice<UinputExternalStylusWithPressure>();
     ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
-    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyConfigurationChangedWasCalled());
     const auto stylusInfo = waitForDevice(stylus->getName());
-    ASSERT_TRUE(stylusInfo);
+    ASSERT_TRUE(stylusInfo.has_value());
 
     ASSERT_EQ(AINPUT_SOURCE_STYLUS | AINPUT_SOURCE_KEYBOARD, stylusInfo->getSources());
 
@@ -2406,9 +2514,8 @@ TEST_F(ExternalStylusIntegrationTest, FusedExternalStylusPressureNotReported) {
     std::unique_ptr<UinputExternalStylusWithPressure> stylus =
             createUinputDevice<UinputExternalStylusWithPressure>();
     ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
-    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyConfigurationChangedWasCalled());
     const auto stylusInfo = waitForDevice(stylus->getName());
-    ASSERT_TRUE(stylusInfo);
+    ASSERT_TRUE(stylusInfo.has_value());
 
     ASSERT_EQ(AINPUT_SOURCE_STYLUS | AINPUT_SOURCE_KEYBOARD, stylusInfo->getSources());
 
@@ -2430,10 +2537,10 @@ TEST_F(ExternalStylusIntegrationTest, FusedExternalStylusPressureNotReported) {
     const auto syncTime = std::chrono::system_clock::now();
     // After 72 ms, the event *will* be generated. If we wait the full 72 ms to check that NO event
     // is generated in that period, there will be a race condition between the event being generated
-    // and the test's wait timeout expiring. Thus, we wait for a shorter duration in the test, which
-    // will reduce the liklihood of the race condition occurring.
-    const auto waitUntilTimeForNoEvent =
-            syncTime + std::chrono::milliseconds(ns2ms(EXTERNAL_STYLUS_DATA_TIMEOUT / 2));
+    // and the test's wait timeout expiring. Thus, we wait for a shorter duration in the test to
+    // ensure the event is not immediately generated, which should reduce the liklihood of the race
+    // condition occurring.
+    const auto waitUntilTimeForNoEvent = syncTime + std::chrono::milliseconds(1);
     mDevice->sendSync();
     ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyMotionWasNotCalled(waitUntilTimeForNoEvent));
 
@@ -2486,7 +2593,6 @@ TEST_F(ExternalStylusIntegrationTest, UnfusedExternalStylus) {
     // touch pointers.
     std::unique_ptr<UinputExternalStylus> stylus = createUinputDevice<UinputExternalStylus>();
     ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
-    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyConfigurationChangedWasCalled());
     const auto stylusInfo = waitForDevice(stylus->getName());
     ASSERT_TRUE(stylusInfo);
 
@@ -2519,16 +2625,72 @@ TEST_F(ExternalStylusIntegrationTest, UnfusedExternalStylus) {
     ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyKeyWasNotCalled());
 }
 
+// --- TouchNavigationIntegrationTest ---
+
+// Verify the behavior of a touch navigation touchpad.
+using TouchNavigationIntegrationTest = InputReaderIntegrationTest;
+
+TEST_F(TouchNavigationIntegrationTest, DoesNotRequireAssociatedDisplay) {
+    // There are no configured displays.
+    mFakePolicy->addDeviceTypeAssociation(INPUT_PORT, "touchNavigation");
+    mReader->requestRefreshConfiguration(InputReaderConfiguration::Change::DEVICE_TYPE);
+
+    auto device = createUinputDevice<UinputTouchScreen>(Rect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT),
+                                                        INPUT_PORT);
+    ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
+    const auto info = waitForDevice(device->getName());
+    ASSERT_TRUE(info.has_value());
+    ASSERT_TRUE(isFromSource(info->getSources(),
+                             AINPUT_SOURCE_TOUCH_NAVIGATION | AINPUT_SOURCE_TOUCHPAD));
+
+    device->sendTrackingId(FIRST_TRACKING_ID);
+    device->sendDown(Point(1, 1));
+    device->sendSync();
+    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyMotionWasCalled(
+            AllOf(WithMotionAction(AMOTION_EVENT_ACTION_DOWN),
+                  WithDisplayId(ui::LogicalDisplayId::INVALID),
+                  WithSource(AINPUT_SOURCE_TOUCH_NAVIGATION | AINPUT_SOURCE_TOUCHPAD))));
+}
+
+TEST_F(TouchNavigationIntegrationTest, DisplayAssociationChange) {
+    // There are initially no configured displays.
+    mFakePolicy->addDeviceTypeAssociation(INPUT_PORT, "touchNavigation");
+    mReader->requestRefreshConfiguration(InputReaderConfiguration::Change::DEVICE_TYPE);
+
+    auto device = createUinputDevice<UinputTouchScreen>(Rect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT),
+                                                        INPUT_PORT);
+    ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
+    const auto info = waitForDevice(device->getName());
+    ASSERT_TRUE(info.has_value());
+
+    // Add a display association.
+    DisplayViewport viewport =
+            createViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                           /*isActive=*/true, UNIQUE_ID, NO_PORT, ViewportType::INTERNAL);
+    mFakePolicy->addDisplayViewport(viewport);
+    mFakePolicy->addInputUniqueIdAssociation(INPUT_PORT, UNIQUE_ID);
+    mReader->requestRefreshConfiguration(InputReaderConfiguration::Change::DISPLAY_INFO);
+    ASSERT_NO_FATAL_FAILURE(mFakePolicy->assertInputDevicesChanged());
+
+    device->sendTrackingId(FIRST_TRACKING_ID);
+    device->sendDown(Point(1, 1));
+    device->sendSync();
+    ASSERT_NO_FATAL_FAILURE(mTestListener->assertNotifyMotionWasCalled(
+            AllOf(WithMotionAction(AMOTION_EVENT_ACTION_DOWN), WithDisplayId(DISPLAY_ID),
+                  WithSource(AINPUT_SOURCE_TOUCH_NAVIGATION | AINPUT_SOURCE_TOUCHPAD))));
+}
+
 // --- InputDeviceTest ---
 class InputDeviceTest : public testing::Test {
 protected:
     static const char* DEVICE_NAME;
+    static const char* DEVICE_DESCRIPTOR;
     static const char* DEVICE_LOCATION;
-    static const int32_t DEVICE_ID;
+    static const DeviceId DEVICE_ID;
     static const int32_t DEVICE_GENERATION;
     static const int32_t DEVICE_CONTROLLER_NUMBER;
     static const ftl::Flags<InputDeviceClass> DEVICE_CLASSES;
-    static const int32_t EVENTHUB_ID;
+    static const RawDeviceId EVENTHUB_ID;
     static const std::string DEVICE_BLUETOOTH_ADDRESS;
 
     std::shared_ptr<FakeEventHub> mFakeEventHub;
@@ -2545,6 +2707,7 @@ protected:
                                                             *mFakeListener);
         InputDeviceIdentifier identifier;
         identifier.name = DEVICE_NAME;
+        identifier.descriptor = DEVICE_DESCRIPTOR;
         identifier.location = DEVICE_LOCATION;
         identifier.bluetoothAddress = DEVICE_BLUETOOTH_ADDRESS;
         mDevice = std::make_shared<InputDevice>(mReader->getContext(), DEVICE_ID, DEVICE_GENERATION,
@@ -2561,18 +2724,20 @@ protected:
 };
 
 const char* InputDeviceTest::DEVICE_NAME = "device";
+const char* InputDeviceTest::DEVICE_DESCRIPTOR = "device_descriptor";
 const char* InputDeviceTest::DEVICE_LOCATION = "USB1";
-const int32_t InputDeviceTest::DEVICE_ID = END_RESERVED_ID + 1000;
+const DeviceId InputDeviceTest::DEVICE_ID = END_RESERVED_ID + 1000;
 const int32_t InputDeviceTest::DEVICE_GENERATION = 2;
 const int32_t InputDeviceTest::DEVICE_CONTROLLER_NUMBER = 0;
 const ftl::Flags<InputDeviceClass> InputDeviceTest::DEVICE_CLASSES =
         InputDeviceClass::KEYBOARD | InputDeviceClass::TOUCH | InputDeviceClass::JOYSTICK;
-const int32_t InputDeviceTest::EVENTHUB_ID = 1;
+const RawDeviceId InputDeviceTest::EVENTHUB_ID = 1;
 const std::string InputDeviceTest::DEVICE_BLUETOOTH_ADDRESS = "11:AA:22:BB:33:CC";
 
 TEST_F(InputDeviceTest, ImmutableProperties) {
     ASSERT_EQ(DEVICE_ID, mDevice->getId());
     ASSERT_STREQ(DEVICE_NAME, mDevice->getName().c_str());
+    ASSERT_STREQ(DEVICE_DESCRIPTOR, mDevice->getDescriptor().c_str());
     ASSERT_EQ(ftl::Flags<InputDeviceClass>(0), mDevice->getClasses());
 }
 
@@ -2836,9 +3001,10 @@ TEST_F(InputDeviceTest, Configure_AssignsDisplayPort) {
     ASSERT_FALSE(mDevice->isEnabled());
 
     // Prepare displays.
-    mFakePolicy->addDisplayViewport(SECONDARY_DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                                    ui::ROTATION_0, /*isActive=*/true, UNIQUE_ID, hdmi,
-                                    ViewportType::INTERNAL);
+    DisplayViewport viewport =
+            createViewport(SECONDARY_DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                           /*isActive=*/true, UNIQUE_ID, hdmi, ViewportType::INTERNAL);
+    mFakePolicy->addDisplayViewport(viewport);
     unused += mDevice->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
                                  InputReaderConfiguration::Change::DISPLAY_INFO);
     ASSERT_TRUE(mDevice->isEnabled());
@@ -2873,9 +3039,11 @@ TEST_F(InputDeviceTest, Configure_AssignsDisplayUniqueId) {
     ASSERT_FALSE(mDevice->isEnabled());
 
     // Device should be enabled when a display is found.
-    mFakePolicy->addDisplayViewport(SECONDARY_DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                                    ui::ROTATION_0, /* isActive= */ true, DISPLAY_UNIQUE_ID,
-                                    NO_PORT, ViewportType::INTERNAL);
+    DisplayViewport secondViewport =
+            createViewport(SECONDARY_DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                           /* isActive= */ true, DISPLAY_UNIQUE_ID, NO_PORT,
+                           ViewportType::INTERNAL);
+    mFakePolicy->addDisplayViewport(secondViewport);
     unused += mDevice->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
                                  InputReaderConfiguration::Change::DISPLAY_INFO);
     ASSERT_TRUE(mDevice->isEnabled());
@@ -2892,7 +3060,8 @@ TEST_F(InputDeviceTest, Configure_AssignsDisplayUniqueId) {
     ASSERT_FALSE(mDevice->isEnabled());
 }
 
-TEST_F(InputDeviceTest, Configure_UniqueId_CorrectlyMatches) {
+TEST_F(InputDeviceTest, Configure_DeviceLocationAndDisplayUniqueId_CorrectlyMatches) {
+    // First enable device
     mFakePolicy->clearViewports();
     mDevice->addMapper<FakeInputMapper>(EVENTHUB_ID, mFakePolicy->getReaderConfiguration(),
                                         AINPUT_SOURCE_KEYBOARD);
@@ -2900,16 +3069,61 @@ TEST_F(InputDeviceTest, Configure_UniqueId_CorrectlyMatches) {
             mDevice->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
                                /*changes=*/{});
 
+    // Associate the device to a display using the device location and the display unique id.
     mFakePolicy->addInputUniqueIdAssociation(DEVICE_LOCATION, DISPLAY_UNIQUE_ID);
-    mFakePolicy->addDisplayViewport(SECONDARY_DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                                    ui::ROTATION_0, /* isActive= */ true, DISPLAY_UNIQUE_ID,
-                                    NO_PORT, ViewportType::INTERNAL);
+
+    DisplayViewport secondViewport =
+            createViewport(SECONDARY_DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                           /* isActive= */ true, DISPLAY_UNIQUE_ID, NO_PORT,
+                           ViewportType::INTERNAL);
+    mFakePolicy->addDisplayViewport(secondViewport);
     const auto initialGeneration = mDevice->getGeneration();
     unused += mDevice->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
                                  InputReaderConfiguration::Change::DISPLAY_INFO);
-    ASSERT_EQ(DISPLAY_UNIQUE_ID, mDevice->getAssociatedDisplayUniqueId());
+    ASSERT_EQ(DISPLAY_UNIQUE_ID, mDevice->getAssociatedDisplayUniqueIdByPort());
     ASSERT_GT(mDevice->getGeneration(), initialGeneration);
     ASSERT_EQ(mDevice->getDeviceInfo().getAssociatedDisplayId(), SECONDARY_DISPLAY_ID);
+
+    // Verify the device and display unique id association is cleared after applying some new
+    // policy.
+    InputReaderConfiguration config;
+    unused = mDevice->configure(ARBITRARY_TIME, config,
+                                InputReaderConfiguration::Change::DISPLAY_INFO);
+    ASSERT_EQ(std::nullopt, mDevice->getAssociatedDisplayUniqueIdByPort());
+    ASSERT_EQ(mDevice->getDeviceInfo().getAssociatedDisplayId(), INVALID_DISPLAY_ID);
+}
+
+TEST_F(InputDeviceTest, Configure_DeviceDescriptorAndDisplayUniqueId_CorrectlyMatches) {
+    // First enable device
+    mFakePolicy->clearViewports();
+    mDevice->addMapper<FakeInputMapper>(EVENTHUB_ID, mFakePolicy->getReaderConfiguration(),
+                                        AINPUT_SOURCE_KEYBOARD);
+    std::list<NotifyArgs> unused =
+            mDevice->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
+                               /*changes=*/{});
+
+    // Associate the device to a display using the device descriptor and the display unique id.
+    mFakePolicy->addDeviceDescriptorToDisplayUniqueIdAssociation(mDevice->getDescriptor(),
+                                                                 DISPLAY_UNIQUE_ID);
+
+    DisplayViewport secondViewport =
+            createViewport(SECONDARY_DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                           /*isActive=*/true, DISPLAY_UNIQUE_ID, NO_PORT, ViewportType::INTERNAL);
+    mFakePolicy->addDisplayViewport(secondViewport);
+    const auto initialGeneration = mDevice->getGeneration();
+    unused = mDevice->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
+                                InputReaderConfiguration::Change::DISPLAY_INFO);
+    ASSERT_EQ(DISPLAY_UNIQUE_ID, mDevice->getAssociatedDisplayUniqueIdByDescriptor());
+    ASSERT_GT(mDevice->getGeneration(), initialGeneration);
+    ASSERT_EQ(mDevice->getDeviceInfo().getAssociatedDisplayId(), SECONDARY_DISPLAY_ID);
+
+    // Verify the device and display unique id association is cleared after applying some new
+    // policy.
+    InputReaderConfiguration config;
+    unused = mDevice->configure(ARBITRARY_TIME, config,
+                                InputReaderConfiguration::Change::DISPLAY_INFO);
+    ASSERT_EQ(std::nullopt, mDevice->getAssociatedDisplayUniqueIdByDescriptor());
+    ASSERT_EQ(mDevice->getDeviceInfo().getAssociatedDisplayId(), INVALID_DISPLAY_ID);
 }
 
 /**
@@ -2932,6 +3146,12 @@ TEST_F(InputDeviceTest, GetBluetoothAddress) {
     const auto& address = mReader->getBluetoothAddress(DEVICE_ID);
     ASSERT_TRUE(address);
     ASSERT_EQ(DEVICE_BLUETOOTH_ADDRESS, *address);
+}
+
+TEST_F(InputDeviceTest, GetPhysicalLocationPath) {
+    const auto& phys = mReader->getPhysicalLocationPath(DEVICE_ID);
+    ASSERT_TRUE(phys);
+    ASSERT_EQ(DEVICE_LOCATION, *phys);
 }
 
 TEST_F(InputDeviceTest, KernelBufferOverflowResetsMappers) {
@@ -2988,1262 +3208,36 @@ TEST_F(InputDeviceTest, KernelBufferOverflowResetsMappers) {
     mapper.assertProcessWasCalled();
 }
 
-// --- SwitchInputMapperTest ---
-
-class SwitchInputMapperTest : public InputMapperTest {
-protected:
-};
-
-TEST_F(SwitchInputMapperTest, GetSources) {
-    SwitchInputMapper& mapper = constructAndAddMapper<SwitchInputMapper>();
-
-    ASSERT_EQ(uint32_t(AINPUT_SOURCE_SWITCH), mapper.getSources());
-}
-
-TEST_F(SwitchInputMapperTest, GetSwitchState) {
-    SwitchInputMapper& mapper = constructAndAddMapper<SwitchInputMapper>();
-
-    mFakeEventHub->setSwitchState(EVENTHUB_ID, SW_LID, 1);
-    ASSERT_EQ(1, mapper.getSwitchState(AINPUT_SOURCE_ANY, SW_LID));
-
-    mFakeEventHub->setSwitchState(EVENTHUB_ID, SW_LID, 0);
-    ASSERT_EQ(0, mapper.getSwitchState(AINPUT_SOURCE_ANY, SW_LID));
-}
-
-TEST_F(SwitchInputMapperTest, Process) {
-    SwitchInputMapper& mapper = constructAndAddMapper<SwitchInputMapper>();
-    std::list<NotifyArgs> out;
-    out = process(mapper, ARBITRARY_TIME, READ_TIME, EV_SW, SW_LID, 1);
-    ASSERT_TRUE(out.empty());
-    out = process(mapper, ARBITRARY_TIME, READ_TIME, EV_SW, SW_JACK_PHYSICAL_INSERT, 1);
-    ASSERT_TRUE(out.empty());
-    out = process(mapper, ARBITRARY_TIME, READ_TIME, EV_SW, SW_HEADPHONE_INSERT, 0);
-    ASSERT_TRUE(out.empty());
-    out = process(mapper, ARBITRARY_TIME, READ_TIME, EV_SYN, SYN_REPORT, 0);
-
-    ASSERT_EQ(1u, out.size());
-    const NotifySwitchArgs& args = std::get<NotifySwitchArgs>(*out.begin());
-    ASSERT_EQ(ARBITRARY_TIME, args.eventTime);
-    ASSERT_EQ((1U << SW_LID) | (1U << SW_JACK_PHYSICAL_INSERT), args.switchValues);
-    ASSERT_EQ((1U << SW_LID) | (1U << SW_JACK_PHYSICAL_INSERT) | (1 << SW_HEADPHONE_INSERT),
-            args.switchMask);
-    ASSERT_EQ(uint32_t(0), args.policyFlags);
-}
-
-// --- VibratorInputMapperTest ---
-class VibratorInputMapperTest : public InputMapperTest {
-protected:
-    void SetUp() override { InputMapperTest::SetUp(DEVICE_CLASSES | InputDeviceClass::VIBRATOR); }
-};
-
-TEST_F(VibratorInputMapperTest, GetSources) {
-    VibratorInputMapper& mapper = constructAndAddMapper<VibratorInputMapper>();
-
-    ASSERT_EQ(AINPUT_SOURCE_UNKNOWN, mapper.getSources());
-}
-
-TEST_F(VibratorInputMapperTest, GetVibratorIds) {
-    VibratorInputMapper& mapper = constructAndAddMapper<VibratorInputMapper>();
-
-    ASSERT_EQ(mapper.getVibratorIds().size(), 2U);
-}
-
-TEST_F(VibratorInputMapperTest, Vibrate) {
-    constexpr uint8_t DEFAULT_AMPLITUDE = 192;
-    constexpr int32_t VIBRATION_TOKEN = 100;
-    VibratorInputMapper& mapper = constructAndAddMapper<VibratorInputMapper>();
-
-    VibrationElement pattern(2);
-    VibrationSequence sequence(2);
-    pattern.duration = std::chrono::milliseconds(200);
-    pattern.channels = {{/*vibratorId=*/0, DEFAULT_AMPLITUDE / 2},
-                        {/*vibratorId=*/1, DEFAULT_AMPLITUDE}};
-    sequence.addElement(pattern);
-    pattern.duration = std::chrono::milliseconds(500);
-    pattern.channels = {{/*vibratorId=*/0, DEFAULT_AMPLITUDE / 4},
-                        {/*vibratorId=*/1, DEFAULT_AMPLITUDE}};
-    sequence.addElement(pattern);
-
-    std::vector<int64_t> timings = {0, 1};
-    std::vector<uint8_t> amplitudes = {DEFAULT_AMPLITUDE, DEFAULT_AMPLITUDE / 2};
-
-    ASSERT_FALSE(mapper.isVibrating());
-    // Start vibrating
-    std::list<NotifyArgs> out = mapper.vibrate(sequence, /*repeat=*/-1, VIBRATION_TOKEN);
-    ASSERT_TRUE(mapper.isVibrating());
-    // Verify vibrator state listener was notified.
-    mReader->loopOnce();
-    ASSERT_EQ(1u, out.size());
-    const NotifyVibratorStateArgs& vibrateArgs = std::get<NotifyVibratorStateArgs>(*out.begin());
-    ASSERT_EQ(DEVICE_ID, vibrateArgs.deviceId);
-    ASSERT_TRUE(vibrateArgs.isOn);
-    // Stop vibrating
-    out = mapper.cancelVibrate(VIBRATION_TOKEN);
-    ASSERT_FALSE(mapper.isVibrating());
-    // Verify vibrator state listener was notified.
-    mReader->loopOnce();
-    ASSERT_EQ(1u, out.size());
-    const NotifyVibratorStateArgs& cancelArgs = std::get<NotifyVibratorStateArgs>(*out.begin());
-    ASSERT_EQ(DEVICE_ID, cancelArgs.deviceId);
-    ASSERT_FALSE(cancelArgs.isOn);
-}
-
-// --- SensorInputMapperTest ---
-
-class SensorInputMapperTest : public InputMapperTest {
-protected:
-    static const int32_t ACCEL_RAW_MIN;
-    static const int32_t ACCEL_RAW_MAX;
-    static const int32_t ACCEL_RAW_FUZZ;
-    static const int32_t ACCEL_RAW_FLAT;
-    static const int32_t ACCEL_RAW_RESOLUTION;
-
-    static const int32_t GYRO_RAW_MIN;
-    static const int32_t GYRO_RAW_MAX;
-    static const int32_t GYRO_RAW_FUZZ;
-    static const int32_t GYRO_RAW_FLAT;
-    static const int32_t GYRO_RAW_RESOLUTION;
-
-    static const float GRAVITY_MS2_UNIT;
-    static const float DEGREE_RADIAN_UNIT;
-
-    void prepareAccelAxes();
-    void prepareGyroAxes();
-    void setAccelProperties();
-    void setGyroProperties();
-    void SetUp() override { InputMapperTest::SetUp(DEVICE_CLASSES | InputDeviceClass::SENSOR); }
-};
-
-const int32_t SensorInputMapperTest::ACCEL_RAW_MIN = -32768;
-const int32_t SensorInputMapperTest::ACCEL_RAW_MAX = 32768;
-const int32_t SensorInputMapperTest::ACCEL_RAW_FUZZ = 16;
-const int32_t SensorInputMapperTest::ACCEL_RAW_FLAT = 0;
-const int32_t SensorInputMapperTest::ACCEL_RAW_RESOLUTION = 8192;
-
-const int32_t SensorInputMapperTest::GYRO_RAW_MIN = -2097152;
-const int32_t SensorInputMapperTest::GYRO_RAW_MAX = 2097152;
-const int32_t SensorInputMapperTest::GYRO_RAW_FUZZ = 16;
-const int32_t SensorInputMapperTest::GYRO_RAW_FLAT = 0;
-const int32_t SensorInputMapperTest::GYRO_RAW_RESOLUTION = 1024;
-
-const float SensorInputMapperTest::GRAVITY_MS2_UNIT = 9.80665f;
-const float SensorInputMapperTest::DEGREE_RADIAN_UNIT = 0.0174533f;
-
-void SensorInputMapperTest::prepareAccelAxes() {
-    mFakeEventHub->addAbsoluteAxis(EVENTHUB_ID, ABS_X, ACCEL_RAW_MIN, ACCEL_RAW_MAX, ACCEL_RAW_FUZZ,
-                                   ACCEL_RAW_FLAT, ACCEL_RAW_RESOLUTION);
-    mFakeEventHub->addAbsoluteAxis(EVENTHUB_ID, ABS_Y, ACCEL_RAW_MIN, ACCEL_RAW_MAX, ACCEL_RAW_FUZZ,
-                                   ACCEL_RAW_FLAT, ACCEL_RAW_RESOLUTION);
-    mFakeEventHub->addAbsoluteAxis(EVENTHUB_ID, ABS_Z, ACCEL_RAW_MIN, ACCEL_RAW_MAX, ACCEL_RAW_FUZZ,
-                                   ACCEL_RAW_FLAT, ACCEL_RAW_RESOLUTION);
-}
-
-void SensorInputMapperTest::prepareGyroAxes() {
-    mFakeEventHub->addAbsoluteAxis(EVENTHUB_ID, ABS_RX, GYRO_RAW_MIN, GYRO_RAW_MAX, GYRO_RAW_FUZZ,
-                                   GYRO_RAW_FLAT, GYRO_RAW_RESOLUTION);
-    mFakeEventHub->addAbsoluteAxis(EVENTHUB_ID, ABS_RY, GYRO_RAW_MIN, GYRO_RAW_MAX, GYRO_RAW_FUZZ,
-                                   GYRO_RAW_FLAT, GYRO_RAW_RESOLUTION);
-    mFakeEventHub->addAbsoluteAxis(EVENTHUB_ID, ABS_RZ, GYRO_RAW_MIN, GYRO_RAW_MAX, GYRO_RAW_FUZZ,
-                                   GYRO_RAW_FLAT, GYRO_RAW_RESOLUTION);
-}
-
-void SensorInputMapperTest::setAccelProperties() {
-    mFakeEventHub->addSensorAxis(EVENTHUB_ID, /* absCode */ 0, InputDeviceSensorType::ACCELEROMETER,
-                                 /* sensorDataIndex */ 0);
-    mFakeEventHub->addSensorAxis(EVENTHUB_ID, /* absCode */ 1, InputDeviceSensorType::ACCELEROMETER,
-                                 /* sensorDataIndex */ 1);
-    mFakeEventHub->addSensorAxis(EVENTHUB_ID, /* absCode */ 2, InputDeviceSensorType::ACCELEROMETER,
-                                 /* sensorDataIndex */ 2);
-    mFakeEventHub->setMscEvent(EVENTHUB_ID, MSC_TIMESTAMP);
-    addConfigurationProperty("sensor.accelerometer.reportingMode", "0");
-    addConfigurationProperty("sensor.accelerometer.maxDelay", "100000");
-    addConfigurationProperty("sensor.accelerometer.minDelay", "5000");
-    addConfigurationProperty("sensor.accelerometer.power", "1.5");
-}
-
-void SensorInputMapperTest::setGyroProperties() {
-    mFakeEventHub->addSensorAxis(EVENTHUB_ID, /* absCode */ 3, InputDeviceSensorType::GYROSCOPE,
-                                 /* sensorDataIndex */ 0);
-    mFakeEventHub->addSensorAxis(EVENTHUB_ID, /* absCode */ 4, InputDeviceSensorType::GYROSCOPE,
-                                 /* sensorDataIndex */ 1);
-    mFakeEventHub->addSensorAxis(EVENTHUB_ID, /* absCode */ 5, InputDeviceSensorType::GYROSCOPE,
-                                 /* sensorDataIndex */ 2);
-    mFakeEventHub->setMscEvent(EVENTHUB_ID, MSC_TIMESTAMP);
-    addConfigurationProperty("sensor.gyroscope.reportingMode", "0");
-    addConfigurationProperty("sensor.gyroscope.maxDelay", "100000");
-    addConfigurationProperty("sensor.gyroscope.minDelay", "5000");
-    addConfigurationProperty("sensor.gyroscope.power", "0.8");
-}
-
-TEST_F(SensorInputMapperTest, GetSources) {
-    SensorInputMapper& mapper = constructAndAddMapper<SensorInputMapper>();
-
-    ASSERT_EQ(static_cast<uint32_t>(AINPUT_SOURCE_SENSOR), mapper.getSources());
-}
-
-TEST_F(SensorInputMapperTest, ProcessAccelerometerSensor) {
-    setAccelProperties();
-    prepareAccelAxes();
-    SensorInputMapper& mapper = constructAndAddMapper<SensorInputMapper>();
-
-    ASSERT_TRUE(mapper.enableSensor(InputDeviceSensorType::ACCELEROMETER,
-                                    std::chrono::microseconds(10000),
-                                    std::chrono::microseconds(0)));
-    ASSERT_TRUE(mFakeEventHub->isDeviceEnabled(EVENTHUB_ID));
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_X, 20000);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_Y, -20000);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_Z, 40000);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_MSC, MSC_TIMESTAMP, 1000);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_SYN, SYN_REPORT, 0);
-
-    NotifySensorArgs args;
-    std::vector<float> values = {20000.0f / ACCEL_RAW_RESOLUTION * GRAVITY_MS2_UNIT,
-                                 -20000.0f / ACCEL_RAW_RESOLUTION * GRAVITY_MS2_UNIT,
-                                 40000.0f / ACCEL_RAW_RESOLUTION * GRAVITY_MS2_UNIT};
-
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifySensorWasCalled(&args));
-    ASSERT_EQ(args.source, AINPUT_SOURCE_SENSOR);
-    ASSERT_EQ(args.deviceId, DEVICE_ID);
-    ASSERT_EQ(args.sensorType, InputDeviceSensorType::ACCELEROMETER);
-    ASSERT_EQ(args.accuracy, InputDeviceSensorAccuracy::ACCURACY_HIGH);
-    ASSERT_EQ(args.hwTimestamp, ARBITRARY_TIME);
-    ASSERT_EQ(args.values, values);
-    mapper.flushSensor(InputDeviceSensorType::ACCELEROMETER);
-}
-
-TEST_F(SensorInputMapperTest, ProcessGyroscopeSensor) {
-    setGyroProperties();
-    prepareGyroAxes();
-    SensorInputMapper& mapper = constructAndAddMapper<SensorInputMapper>();
-
-    ASSERT_TRUE(mapper.enableSensor(InputDeviceSensorType::GYROSCOPE,
-                                    std::chrono::microseconds(10000),
-                                    std::chrono::microseconds(0)));
-    ASSERT_TRUE(mFakeEventHub->isDeviceEnabled(EVENTHUB_ID));
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_RX, 20000);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_RY, -20000);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_RZ, 40000);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_MSC, MSC_TIMESTAMP, 1000);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_SYN, SYN_REPORT, 0);
-
-    NotifySensorArgs args;
-    std::vector<float> values = {20000.0f / GYRO_RAW_RESOLUTION * DEGREE_RADIAN_UNIT,
-                                 -20000.0f / GYRO_RAW_RESOLUTION * DEGREE_RADIAN_UNIT,
-                                 40000.0f / GYRO_RAW_RESOLUTION * DEGREE_RADIAN_UNIT};
-
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifySensorWasCalled(&args));
-    ASSERT_EQ(args.source, AINPUT_SOURCE_SENSOR);
-    ASSERT_EQ(args.deviceId, DEVICE_ID);
-    ASSERT_EQ(args.sensorType, InputDeviceSensorType::GYROSCOPE);
-    ASSERT_EQ(args.accuracy, InputDeviceSensorAccuracy::ACCURACY_HIGH);
-    ASSERT_EQ(args.hwTimestamp, ARBITRARY_TIME);
-    ASSERT_EQ(args.values, values);
-    mapper.flushSensor(InputDeviceSensorType::GYROSCOPE);
-}
-
-// --- KeyboardInputMapperTest ---
-
-class KeyboardInputMapperTest : public InputMapperTest {
-protected:
-    const std::string UNIQUE_ID = "local:0";
-    const KeyboardLayoutInfo DEVICE_KEYBOARD_LAYOUT_INFO = KeyboardLayoutInfo("en-US", "qwerty");
-    void prepareDisplay(ui::Rotation orientation);
-
-    void testDPadKeyRotation(KeyboardInputMapper& mapper, int32_t originalScanCode,
-                             int32_t originalKeyCode, int32_t rotatedKeyCode,
-                             int32_t displayId = ADISPLAY_ID_NONE);
-};
-
-/* Similar to setDisplayInfoAndReconfigure, but pre-populates all parameters except for the
- * orientation.
- */
-void KeyboardInputMapperTest::prepareDisplay(ui::Rotation orientation) {
-    setDisplayInfoAndReconfigure(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, orientation, UNIQUE_ID,
-                                 NO_PORT, ViewportType::INTERNAL);
-}
-
-void KeyboardInputMapperTest::testDPadKeyRotation(KeyboardInputMapper& mapper,
-                                                  int32_t originalScanCode, int32_t originalKeyCode,
-                                                  int32_t rotatedKeyCode, int32_t displayId) {
-    NotifyKeyArgs args;
-
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, originalScanCode, 1);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(AKEY_EVENT_ACTION_DOWN, args.action);
-    ASSERT_EQ(originalScanCode, args.scanCode);
-    ASSERT_EQ(rotatedKeyCode, args.keyCode);
-    ASSERT_EQ(displayId, args.displayId);
-
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, originalScanCode, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(AKEY_EVENT_ACTION_UP, args.action);
-    ASSERT_EQ(originalScanCode, args.scanCode);
-    ASSERT_EQ(rotatedKeyCode, args.keyCode);
-    ASSERT_EQ(displayId, args.displayId);
-}
-
-TEST_F(KeyboardInputMapperTest, GetSources) {
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-
-    ASSERT_EQ(AINPUT_SOURCE_KEYBOARD, mapper.getSources());
-}
-
-TEST_F(KeyboardInputMapperTest, Process_SimpleKeyPress) {
-    const int32_t USAGE_A = 0x070004;
-    const int32_t USAGE_UNKNOWN = 0x07ffff;
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_HOME, 0, AKEYCODE_HOME, POLICY_FLAG_WAKE);
-    mFakeEventHub->addKey(EVENTHUB_ID, 0, USAGE_A, AKEYCODE_A, POLICY_FLAG_WAKE);
-    mFakeEventHub->addKey(EVENTHUB_ID, 0, KEY_NUMLOCK, AKEYCODE_NUM_LOCK, POLICY_FLAG_WAKE);
-    mFakeEventHub->addKey(EVENTHUB_ID, 0, KEY_CAPSLOCK, AKEYCODE_CAPS_LOCK, POLICY_FLAG_WAKE);
-    mFakeEventHub->addKey(EVENTHUB_ID, 0, KEY_SCROLLLOCK, AKEYCODE_SCROLL_LOCK, POLICY_FLAG_WAKE);
-
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-    // Initial metastate is AMETA_NONE.
-    ASSERT_EQ(AMETA_NONE, mapper.getMetaState());
-
-    // Key down by scan code.
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_HOME, 1);
-    NotifyKeyArgs args;
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(DEVICE_ID, args.deviceId);
-    ASSERT_EQ(AINPUT_SOURCE_KEYBOARD, args.source);
-    ASSERT_EQ(ARBITRARY_TIME, args.eventTime);
-    ASSERT_EQ(AKEY_EVENT_ACTION_DOWN, args.action);
-    ASSERT_EQ(AKEYCODE_HOME, args.keyCode);
-    ASSERT_EQ(KEY_HOME, args.scanCode);
-    ASSERT_EQ(AMETA_NONE, args.metaState);
-    ASSERT_EQ(AKEY_EVENT_FLAG_FROM_SYSTEM, args.flags);
-    ASSERT_EQ(POLICY_FLAG_WAKE, args.policyFlags);
-    ASSERT_EQ(ARBITRARY_TIME, args.downTime);
-
-    // Key up by scan code.
-    process(mapper, ARBITRARY_TIME + 1, READ_TIME, EV_KEY, KEY_HOME, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(DEVICE_ID, args.deviceId);
-    ASSERT_EQ(AINPUT_SOURCE_KEYBOARD, args.source);
-    ASSERT_EQ(ARBITRARY_TIME + 1, args.eventTime);
-    ASSERT_EQ(AKEY_EVENT_ACTION_UP, args.action);
-    ASSERT_EQ(AKEYCODE_HOME, args.keyCode);
-    ASSERT_EQ(KEY_HOME, args.scanCode);
-    ASSERT_EQ(AMETA_NONE, args.metaState);
-    ASSERT_EQ(AKEY_EVENT_FLAG_FROM_SYSTEM, args.flags);
-    ASSERT_EQ(POLICY_FLAG_WAKE, args.policyFlags);
-    ASSERT_EQ(ARBITRARY_TIME, args.downTime);
-
-    // Key down by usage code.
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_MSC, MSC_SCAN, USAGE_A);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, 0, 1);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(DEVICE_ID, args.deviceId);
-    ASSERT_EQ(AINPUT_SOURCE_KEYBOARD, args.source);
-    ASSERT_EQ(ARBITRARY_TIME, args.eventTime);
-    ASSERT_EQ(AKEY_EVENT_ACTION_DOWN, args.action);
-    ASSERT_EQ(AKEYCODE_A, args.keyCode);
-    ASSERT_EQ(0, args.scanCode);
-    ASSERT_EQ(AMETA_NONE, args.metaState);
-    ASSERT_EQ(AKEY_EVENT_FLAG_FROM_SYSTEM, args.flags);
-    ASSERT_EQ(POLICY_FLAG_WAKE, args.policyFlags);
-    ASSERT_EQ(ARBITRARY_TIME, args.downTime);
-
-    // Key up by usage code.
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_MSC, MSC_SCAN, USAGE_A);
-    process(mapper, ARBITRARY_TIME + 1, READ_TIME, EV_KEY, 0, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(DEVICE_ID, args.deviceId);
-    ASSERT_EQ(AINPUT_SOURCE_KEYBOARD, args.source);
-    ASSERT_EQ(ARBITRARY_TIME + 1, args.eventTime);
-    ASSERT_EQ(AKEY_EVENT_ACTION_UP, args.action);
-    ASSERT_EQ(AKEYCODE_A, args.keyCode);
-    ASSERT_EQ(0, args.scanCode);
-    ASSERT_EQ(AMETA_NONE, args.metaState);
-    ASSERT_EQ(AKEY_EVENT_FLAG_FROM_SYSTEM, args.flags);
-    ASSERT_EQ(POLICY_FLAG_WAKE, args.policyFlags);
-    ASSERT_EQ(ARBITRARY_TIME, args.downTime);
-
-    // Key down with unknown scan code or usage code.
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_MSC, MSC_SCAN, USAGE_UNKNOWN);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_UNKNOWN, 1);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(DEVICE_ID, args.deviceId);
-    ASSERT_EQ(AINPUT_SOURCE_KEYBOARD, args.source);
-    ASSERT_EQ(ARBITRARY_TIME, args.eventTime);
-    ASSERT_EQ(AKEY_EVENT_ACTION_DOWN, args.action);
-    ASSERT_EQ(0, args.keyCode);
-    ASSERT_EQ(KEY_UNKNOWN, args.scanCode);
-    ASSERT_EQ(AMETA_NONE, args.metaState);
-    ASSERT_EQ(AKEY_EVENT_FLAG_FROM_SYSTEM, args.flags);
-    ASSERT_EQ(0U, args.policyFlags);
-    ASSERT_EQ(ARBITRARY_TIME, args.downTime);
-
-    // Key up with unknown scan code or usage code.
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_MSC, MSC_SCAN, USAGE_UNKNOWN);
-    process(mapper, ARBITRARY_TIME + 1, READ_TIME, EV_KEY, KEY_UNKNOWN, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(DEVICE_ID, args.deviceId);
-    ASSERT_EQ(AINPUT_SOURCE_KEYBOARD, args.source);
-    ASSERT_EQ(ARBITRARY_TIME + 1, args.eventTime);
-    ASSERT_EQ(AKEY_EVENT_ACTION_UP, args.action);
-    ASSERT_EQ(0, args.keyCode);
-    ASSERT_EQ(KEY_UNKNOWN, args.scanCode);
-    ASSERT_EQ(AMETA_NONE, args.metaState);
-    ASSERT_EQ(AKEY_EVENT_FLAG_FROM_SYSTEM, args.flags);
-    ASSERT_EQ(0U, args.policyFlags);
-    ASSERT_EQ(ARBITRARY_TIME, args.downTime);
-}
-
-TEST_F(KeyboardInputMapperTest, Process_KeyRemapping) {
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_A, 0, AKEYCODE_A, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_B, 0, AKEYCODE_B, 0);
-    mFakeEventHub->addKeyRemapping(EVENTHUB_ID, AKEYCODE_A, AKEYCODE_B);
-
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-
-    // Key down by scan code.
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_A, 1);
-    NotifyKeyArgs args;
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(AKEYCODE_B, args.keyCode);
-
-    // Key up by scan code.
-    process(mapper, ARBITRARY_TIME + 1, READ_TIME, EV_KEY, KEY_A, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(AKEYCODE_B, args.keyCode);
-}
-
-/**
- * Ensure that the readTime is set to the time when the EV_KEY is received.
- */
-TEST_F(KeyboardInputMapperTest, Process_SendsReadTime) {
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_HOME, 0, AKEYCODE_HOME, POLICY_FLAG_WAKE);
-
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-    NotifyKeyArgs args;
-
-    // Key down
-    process(mapper, ARBITRARY_TIME, /*readTime=*/12, EV_KEY, KEY_HOME, 1);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(12, args.readTime);
-
-    // Key up
-    process(mapper, ARBITRARY_TIME, /*readTime=*/15, EV_KEY, KEY_HOME, 1);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(15, args.readTime);
-}
-
-TEST_F(KeyboardInputMapperTest, Process_ShouldUpdateMetaState) {
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_LEFTSHIFT, 0, AKEYCODE_SHIFT_LEFT, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_A, 0, AKEYCODE_A, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, 0, KEY_NUMLOCK, AKEYCODE_NUM_LOCK, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, 0, KEY_CAPSLOCK, AKEYCODE_CAPS_LOCK, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, 0, KEY_SCROLLLOCK, AKEYCODE_SCROLL_LOCK, 0);
-
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-
-    // Initial metastate is AMETA_NONE.
-    ASSERT_EQ(AMETA_NONE, mapper.getMetaState());
-
-    // Metakey down.
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_LEFTSHIFT, 1);
-    NotifyKeyArgs args;
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, args.metaState);
-    ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, mapper.getMetaState());
-    ASSERT_NO_FATAL_FAILURE(mReader->getContext()->assertUpdateGlobalMetaStateWasCalled());
-
-    // Key down.
-    process(mapper, ARBITRARY_TIME + 1, READ_TIME, EV_KEY, KEY_A, 1);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, args.metaState);
-    ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, mapper.getMetaState());
-
-    // Key up.
-    process(mapper, ARBITRARY_TIME + 2, READ_TIME, EV_KEY, KEY_A, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, args.metaState);
-    ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, mapper.getMetaState());
-
-    // Metakey up.
-    process(mapper, ARBITRARY_TIME + 3, READ_TIME, EV_KEY, KEY_LEFTSHIFT, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(AMETA_NONE, args.metaState);
-    ASSERT_EQ(AMETA_NONE, mapper.getMetaState());
-    ASSERT_NO_FATAL_FAILURE(mReader->getContext()->assertUpdateGlobalMetaStateWasCalled());
-}
-
-TEST_F(KeyboardInputMapperTest, Process_WhenNotOrientationAware_ShouldNotRotateDPad) {
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_UP, 0, AKEYCODE_DPAD_UP, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_RIGHT, 0, AKEYCODE_DPAD_RIGHT, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_DOWN, 0, AKEYCODE_DPAD_DOWN, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_LEFT, 0, AKEYCODE_DPAD_LEFT, 0);
-
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-
-    prepareDisplay(ui::ROTATION_90);
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper,
-            KEY_UP, AKEYCODE_DPAD_UP, AKEYCODE_DPAD_UP));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper,
-            KEY_RIGHT, AKEYCODE_DPAD_RIGHT, AKEYCODE_DPAD_RIGHT));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper,
-            KEY_DOWN, AKEYCODE_DPAD_DOWN, AKEYCODE_DPAD_DOWN));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper,
-            KEY_LEFT, AKEYCODE_DPAD_LEFT, AKEYCODE_DPAD_LEFT));
-}
-
-TEST_F(KeyboardInputMapperTest, Process_WhenOrientationAware_ShouldRotateDPad) {
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_UP, 0, AKEYCODE_DPAD_UP, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_RIGHT, 0, AKEYCODE_DPAD_RIGHT, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_DOWN, 0, AKEYCODE_DPAD_DOWN, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_LEFT, 0, AKEYCODE_DPAD_LEFT, 0);
-
-    addConfigurationProperty("keyboard.orientationAware", "1");
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-
-    prepareDisplay(ui::ROTATION_0);
-    ASSERT_NO_FATAL_FAILURE(
-            testDPadKeyRotation(mapper, KEY_UP, AKEYCODE_DPAD_UP, AKEYCODE_DPAD_UP, DISPLAY_ID));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper, KEY_RIGHT, AKEYCODE_DPAD_RIGHT,
-                                                AKEYCODE_DPAD_RIGHT, DISPLAY_ID));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper, KEY_DOWN, AKEYCODE_DPAD_DOWN,
-                                                AKEYCODE_DPAD_DOWN, DISPLAY_ID));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper, KEY_LEFT, AKEYCODE_DPAD_LEFT,
-                                                AKEYCODE_DPAD_LEFT, DISPLAY_ID));
-
-    clearViewports();
-    prepareDisplay(ui::ROTATION_90);
-    ASSERT_NO_FATAL_FAILURE(
-            testDPadKeyRotation(mapper, KEY_UP, AKEYCODE_DPAD_UP, AKEYCODE_DPAD_LEFT, DISPLAY_ID));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper, KEY_RIGHT, AKEYCODE_DPAD_RIGHT,
-                                                AKEYCODE_DPAD_UP, DISPLAY_ID));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper, KEY_DOWN, AKEYCODE_DPAD_DOWN,
-                                                AKEYCODE_DPAD_RIGHT, DISPLAY_ID));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper, KEY_LEFT, AKEYCODE_DPAD_LEFT,
-                                                AKEYCODE_DPAD_DOWN, DISPLAY_ID));
-
-    clearViewports();
-    prepareDisplay(ui::ROTATION_180);
-    ASSERT_NO_FATAL_FAILURE(
-            testDPadKeyRotation(mapper, KEY_UP, AKEYCODE_DPAD_UP, AKEYCODE_DPAD_DOWN, DISPLAY_ID));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper, KEY_RIGHT, AKEYCODE_DPAD_RIGHT,
-                                                AKEYCODE_DPAD_LEFT, DISPLAY_ID));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper, KEY_DOWN, AKEYCODE_DPAD_DOWN,
-                                                AKEYCODE_DPAD_UP, DISPLAY_ID));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper, KEY_LEFT, AKEYCODE_DPAD_LEFT,
-                                                AKEYCODE_DPAD_RIGHT, DISPLAY_ID));
-
-    clearViewports();
-    prepareDisplay(ui::ROTATION_270);
-    ASSERT_NO_FATAL_FAILURE(
-            testDPadKeyRotation(mapper, KEY_UP, AKEYCODE_DPAD_UP, AKEYCODE_DPAD_RIGHT, DISPLAY_ID));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper, KEY_RIGHT, AKEYCODE_DPAD_RIGHT,
-                                                AKEYCODE_DPAD_DOWN, DISPLAY_ID));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper, KEY_DOWN, AKEYCODE_DPAD_DOWN,
-                                                AKEYCODE_DPAD_LEFT, DISPLAY_ID));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper, KEY_LEFT, AKEYCODE_DPAD_LEFT,
-                                                AKEYCODE_DPAD_UP, DISPLAY_ID));
-
-    // Special case: if orientation changes while key is down, we still emit the same keycode
-    // in the key up as we did in the key down.
-    NotifyKeyArgs args;
-    clearViewports();
-    prepareDisplay(ui::ROTATION_270);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_UP, 1);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(AKEY_EVENT_ACTION_DOWN, args.action);
-    ASSERT_EQ(KEY_UP, args.scanCode);
-    ASSERT_EQ(AKEYCODE_DPAD_RIGHT, args.keyCode);
-
-    clearViewports();
-    prepareDisplay(ui::ROTATION_180);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_UP, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(AKEY_EVENT_ACTION_UP, args.action);
-    ASSERT_EQ(KEY_UP, args.scanCode);
-    ASSERT_EQ(AKEYCODE_DPAD_RIGHT, args.keyCode);
-}
-
-TEST_F(KeyboardInputMapperTest, DisplayIdConfigurationChange_NotOrientationAware) {
-    // If the keyboard is not orientation aware,
-    // key events should not be associated with a specific display id
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_UP, 0, AKEYCODE_DPAD_UP, 0);
-
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-    NotifyKeyArgs args;
-
-    // Display id should be ADISPLAY_ID_NONE without any display configuration.
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_UP, 1);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_UP, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(ADISPLAY_ID_NONE, args.displayId);
-
-    prepareDisplay(ui::ROTATION_0);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_UP, 1);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_UP, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(ADISPLAY_ID_NONE, args.displayId);
-}
-
-TEST_F(KeyboardInputMapperTest, DisplayIdConfigurationChange_OrientationAware) {
-    // If the keyboard is orientation aware,
-    // key events should be associated with the internal viewport
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_UP, 0, AKEYCODE_DPAD_UP, 0);
-
-    addConfigurationProperty("keyboard.orientationAware", "1");
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-    NotifyKeyArgs args;
-
-    // Display id should be ADISPLAY_ID_NONE without any display configuration.
-    // ^--- already checked by the previous test
-
-    setDisplayInfoAndReconfigure(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
-                                 UNIQUE_ID, NO_PORT, ViewportType::INTERNAL);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_UP, 1);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_UP, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(DISPLAY_ID, args.displayId);
-
-    constexpr int32_t newDisplayId = 2;
-    clearViewports();
-    setDisplayInfoAndReconfigure(newDisplayId, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
-                                 UNIQUE_ID, NO_PORT, ViewportType::INTERNAL);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_UP, 1);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_UP, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(newDisplayId, args.displayId);
-}
-
-TEST_F(KeyboardInputMapperTest, GetKeyCodeState) {
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-
-    mFakeEventHub->setKeyCodeState(EVENTHUB_ID, AKEYCODE_A, 1);
-    ASSERT_EQ(1, mapper.getKeyCodeState(AINPUT_SOURCE_ANY, AKEYCODE_A));
-
-    mFakeEventHub->setKeyCodeState(EVENTHUB_ID, AKEYCODE_A, 0);
-    ASSERT_EQ(0, mapper.getKeyCodeState(AINPUT_SOURCE_ANY, AKEYCODE_A));
-}
-
-TEST_F(KeyboardInputMapperTest, GetKeyCodeForKeyLocation) {
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-
-    mFakeEventHub->addKeyCodeMapping(EVENTHUB_ID, AKEYCODE_Y, AKEYCODE_Z);
-    ASSERT_EQ(AKEYCODE_Z, mapper.getKeyCodeForKeyLocation(AKEYCODE_Y))
-            << "If a mapping is available, the result is equal to the mapping";
-
-    ASSERT_EQ(AKEYCODE_A, mapper.getKeyCodeForKeyLocation(AKEYCODE_A))
-            << "If no mapping is available, the result is the key location";
-}
-
-TEST_F(KeyboardInputMapperTest, GetScanCodeState) {
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-
-    mFakeEventHub->setScanCodeState(EVENTHUB_ID, KEY_A, 1);
-    ASSERT_EQ(1, mapper.getScanCodeState(AINPUT_SOURCE_ANY, KEY_A));
-
-    mFakeEventHub->setScanCodeState(EVENTHUB_ID, KEY_A, 0);
-    ASSERT_EQ(0, mapper.getScanCodeState(AINPUT_SOURCE_ANY, KEY_A));
-}
-
-TEST_F(KeyboardInputMapperTest, MarkSupportedKeyCodes) {
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_A, 0, AKEYCODE_A, 0);
-
-    uint8_t flags[2] = { 0, 0 };
-    ASSERT_TRUE(mapper.markSupportedKeyCodes(AINPUT_SOURCE_ANY, {AKEYCODE_A, AKEYCODE_B}, flags));
-    ASSERT_TRUE(flags[0]);
-    ASSERT_FALSE(flags[1]);
-}
-
-TEST_F(KeyboardInputMapperTest, Process_LockedKeysShouldToggleMetaStateAndLeds) {
-    mFakeEventHub->addLed(EVENTHUB_ID, LED_CAPSL, true /*initially on*/);
-    mFakeEventHub->addLed(EVENTHUB_ID, LED_NUML, false /*initially off*/);
-    mFakeEventHub->addLed(EVENTHUB_ID, LED_SCROLLL, false /*initially off*/);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_CAPSLOCK, 0, AKEYCODE_CAPS_LOCK, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_NUMLOCK, 0, AKEYCODE_NUM_LOCK, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_SCROLLLOCK, 0, AKEYCODE_SCROLL_LOCK, 0);
-
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-    // Initial metastate is AMETA_NONE.
-    ASSERT_EQ(AMETA_NONE, mapper.getMetaState());
-
-    // Initialization should have turned all of the lights off.
-    ASSERT_FALSE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_CAPSL));
-    ASSERT_FALSE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_NUML));
-    ASSERT_FALSE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_SCROLLL));
-
-    // Toggle caps lock on.
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_CAPSLOCK, 1);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_CAPSLOCK, 0);
-    ASSERT_TRUE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_CAPSL));
-    ASSERT_FALSE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_NUML));
-    ASSERT_FALSE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_SCROLLL));
-    ASSERT_EQ(AMETA_CAPS_LOCK_ON, mapper.getMetaState());
-
-    // Toggle num lock on.
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_NUMLOCK, 1);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_NUMLOCK, 0);
-    ASSERT_TRUE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_CAPSL));
-    ASSERT_TRUE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_NUML));
-    ASSERT_FALSE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_SCROLLL));
-    ASSERT_EQ(AMETA_CAPS_LOCK_ON | AMETA_NUM_LOCK_ON, mapper.getMetaState());
-
-    // Toggle caps lock off.
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_CAPSLOCK, 1);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_CAPSLOCK, 0);
-    ASSERT_FALSE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_CAPSL));
-    ASSERT_TRUE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_NUML));
-    ASSERT_FALSE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_SCROLLL));
-    ASSERT_EQ(AMETA_NUM_LOCK_ON, mapper.getMetaState());
-
-    // Toggle scroll lock on.
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_SCROLLLOCK, 1);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_SCROLLLOCK, 0);
-    ASSERT_FALSE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_CAPSL));
-    ASSERT_TRUE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_NUML));
-    ASSERT_TRUE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_SCROLLL));
-    ASSERT_EQ(AMETA_NUM_LOCK_ON | AMETA_SCROLL_LOCK_ON, mapper.getMetaState());
-
-    // Toggle num lock off.
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_NUMLOCK, 1);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_NUMLOCK, 0);
-    ASSERT_FALSE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_CAPSL));
-    ASSERT_FALSE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_NUML));
-    ASSERT_TRUE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_SCROLLL));
-    ASSERT_EQ(AMETA_SCROLL_LOCK_ON, mapper.getMetaState());
-
-    // Toggle scroll lock off.
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_SCROLLLOCK, 1);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_SCROLLLOCK, 0);
-    ASSERT_FALSE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_CAPSL));
-    ASSERT_FALSE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_NUML));
-    ASSERT_FALSE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_SCROLLL));
-    ASSERT_EQ(AMETA_NONE, mapper.getMetaState());
-}
-
-TEST_F(KeyboardInputMapperTest, NoMetaStateWhenMetaKeysNotPresent) {
-    mFakeEventHub->addKey(EVENTHUB_ID, BTN_A, 0, AKEYCODE_BUTTON_A, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, BTN_B, 0, AKEYCODE_BUTTON_B, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, BTN_X, 0, AKEYCODE_BUTTON_X, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, BTN_Y, 0, AKEYCODE_BUTTON_Y, 0);
-
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_NON_ALPHABETIC);
-
-    // Meta state should be AMETA_NONE after reset
-    std::list<NotifyArgs> unused = mapper.reset(ARBITRARY_TIME);
-    ASSERT_EQ(AMETA_NONE, mapper.getMetaState());
-    // Meta state should be AMETA_NONE with update, as device doesn't have the keys.
-    mapper.updateMetaState(AKEYCODE_NUM_LOCK);
-    ASSERT_EQ(AMETA_NONE, mapper.getMetaState());
-
-    NotifyKeyArgs args;
-    // Press button "A"
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, BTN_A, 1);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(AMETA_NONE, args.metaState);
-    ASSERT_EQ(AMETA_NONE, mapper.getMetaState());
-    ASSERT_EQ(AKEY_EVENT_ACTION_DOWN, args.action);
-    ASSERT_EQ(AKEYCODE_BUTTON_A, args.keyCode);
-
-    // Button up.
-    process(mapper, ARBITRARY_TIME + 2, READ_TIME, EV_KEY, BTN_A, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(AMETA_NONE, args.metaState);
-    ASSERT_EQ(AMETA_NONE, mapper.getMetaState());
-    ASSERT_EQ(AKEY_EVENT_ACTION_UP, args.action);
-    ASSERT_EQ(AKEYCODE_BUTTON_A, args.keyCode);
-}
-
-TEST_F(KeyboardInputMapperTest, Configure_AssignsDisplayPort) {
-    // keyboard 1.
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_UP, 0, AKEYCODE_DPAD_UP, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_RIGHT, 0, AKEYCODE_DPAD_RIGHT, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_DOWN, 0, AKEYCODE_DPAD_DOWN, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_LEFT, 0, AKEYCODE_DPAD_LEFT, 0);
-
-    // keyboard 2.
-    const std::string USB2 = "USB2";
-    const std::string DEVICE_NAME2 = "KEYBOARD2";
-    constexpr int32_t SECOND_DEVICE_ID = DEVICE_ID + 1;
-    constexpr int32_t SECOND_EVENTHUB_ID = EVENTHUB_ID + 1;
-    std::shared_ptr<InputDevice> device2 =
-            newDevice(SECOND_DEVICE_ID, DEVICE_NAME2, USB2, SECOND_EVENTHUB_ID,
-                      ftl::Flags<InputDeviceClass>(0));
-
-    mFakeEventHub->addKey(SECOND_EVENTHUB_ID, KEY_UP, 0, AKEYCODE_DPAD_UP, 0);
-    mFakeEventHub->addKey(SECOND_EVENTHUB_ID, KEY_RIGHT, 0, AKEYCODE_DPAD_RIGHT, 0);
-    mFakeEventHub->addKey(SECOND_EVENTHUB_ID, KEY_DOWN, 0, AKEYCODE_DPAD_DOWN, 0);
-    mFakeEventHub->addKey(SECOND_EVENTHUB_ID, KEY_LEFT, 0, AKEYCODE_DPAD_LEFT, 0);
-
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-
-    device2->addEmptyEventHubDevice(SECOND_EVENTHUB_ID);
-    KeyboardInputMapper& mapper2 =
-            device2->constructAndAddMapper<KeyboardInputMapper>(SECOND_EVENTHUB_ID,
-                                                                mFakePolicy
-                                                                        ->getReaderConfiguration(),
-                                                                AINPUT_SOURCE_KEYBOARD,
-                                                                AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-    std::list<NotifyArgs> unused =
-            device2->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
-                               /*changes=*/{});
-    unused += device2->reset(ARBITRARY_TIME);
-
-    // Prepared displays and associated info.
-    constexpr uint8_t hdmi1 = 0;
-    constexpr uint8_t hdmi2 = 1;
-    const std::string SECONDARY_UNIQUE_ID = "local:1";
-
-    mFakePolicy->addInputPortAssociation(DEVICE_LOCATION, hdmi1);
-    mFakePolicy->addInputPortAssociation(USB2, hdmi2);
-
-    // No associated display viewport found, should disable the device.
-    unused += device2->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
-                                 InputReaderConfiguration::Change::DISPLAY_INFO);
-    ASSERT_FALSE(device2->isEnabled());
-
-    // Prepare second display.
-    constexpr int32_t newDisplayId = 2;
-    setDisplayInfoAndReconfigure(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
-                                 UNIQUE_ID, hdmi1, ViewportType::INTERNAL);
-    setDisplayInfoAndReconfigure(newDisplayId, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
-                                 SECONDARY_UNIQUE_ID, hdmi2, ViewportType::EXTERNAL);
-    // Default device will reconfigure above, need additional reconfiguration for another device.
-    unused += device2->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
-                                 InputReaderConfiguration::Change::DISPLAY_INFO);
-
-    // Device should be enabled after the associated display is found.
-    ASSERT_TRUE(mDevice->isEnabled());
-    ASSERT_TRUE(device2->isEnabled());
-
-    // Test pad key events
-    ASSERT_NO_FATAL_FAILURE(
-            testDPadKeyRotation(mapper, KEY_UP, AKEYCODE_DPAD_UP, AKEYCODE_DPAD_UP, DISPLAY_ID));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper, KEY_RIGHT, AKEYCODE_DPAD_RIGHT,
-                                                AKEYCODE_DPAD_RIGHT, DISPLAY_ID));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper, KEY_DOWN, AKEYCODE_DPAD_DOWN,
-                                                AKEYCODE_DPAD_DOWN, DISPLAY_ID));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper, KEY_LEFT, AKEYCODE_DPAD_LEFT,
-                                                AKEYCODE_DPAD_LEFT, DISPLAY_ID));
-
-    ASSERT_NO_FATAL_FAILURE(
-            testDPadKeyRotation(mapper2, KEY_UP, AKEYCODE_DPAD_UP, AKEYCODE_DPAD_UP, newDisplayId));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper2, KEY_RIGHT, AKEYCODE_DPAD_RIGHT,
-                                                AKEYCODE_DPAD_RIGHT, newDisplayId));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper2, KEY_DOWN, AKEYCODE_DPAD_DOWN,
-                                                AKEYCODE_DPAD_DOWN, newDisplayId));
-    ASSERT_NO_FATAL_FAILURE(testDPadKeyRotation(mapper2, KEY_LEFT, AKEYCODE_DPAD_LEFT,
-                                                AKEYCODE_DPAD_LEFT, newDisplayId));
-}
-
-TEST_F(KeyboardInputMapperTest, Process_LockedKeysShouldToggleAfterReattach) {
-    mFakeEventHub->addLed(EVENTHUB_ID, LED_CAPSL, true /*initially on*/);
-    mFakeEventHub->addLed(EVENTHUB_ID, LED_NUML, false /*initially off*/);
-    mFakeEventHub->addLed(EVENTHUB_ID, LED_SCROLLL, false /*initially off*/);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_CAPSLOCK, 0, AKEYCODE_CAPS_LOCK, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_NUMLOCK, 0, AKEYCODE_NUM_LOCK, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_SCROLLLOCK, 0, AKEYCODE_SCROLL_LOCK, 0);
-
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-    // Initial metastate is AMETA_NONE.
-    ASSERT_EQ(AMETA_NONE, mapper.getMetaState());
-
-    // Initialization should have turned all of the lights off.
-    ASSERT_FALSE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_CAPSL));
-    ASSERT_FALSE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_NUML));
-    ASSERT_FALSE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_SCROLLL));
-
-    // Toggle caps lock on.
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_CAPSLOCK, 1);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_CAPSLOCK, 0);
-    ASSERT_TRUE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_CAPSL));
-    ASSERT_EQ(AMETA_CAPS_LOCK_ON, mapper.getMetaState());
-
-    // Toggle num lock on.
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_NUMLOCK, 1);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_NUMLOCK, 0);
-    ASSERT_TRUE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_NUML));
-    ASSERT_EQ(AMETA_CAPS_LOCK_ON | AMETA_NUM_LOCK_ON, mapper.getMetaState());
-
-    // Toggle scroll lock on.
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_SCROLLLOCK, 1);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_SCROLLLOCK, 0);
-    ASSERT_TRUE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_SCROLLL));
-    ASSERT_EQ(AMETA_CAPS_LOCK_ON | AMETA_NUM_LOCK_ON | AMETA_SCROLL_LOCK_ON, mapper.getMetaState());
-
-    mFakeEventHub->removeDevice(EVENTHUB_ID);
-    mReader->loopOnce();
-
-    // keyboard 2 should default toggle keys.
-    const std::string USB2 = "USB2";
-    const std::string DEVICE_NAME2 = "KEYBOARD2";
-    constexpr int32_t SECOND_DEVICE_ID = DEVICE_ID + 1;
-    constexpr int32_t SECOND_EVENTHUB_ID = EVENTHUB_ID + 1;
-    std::shared_ptr<InputDevice> device2 =
-            newDevice(SECOND_DEVICE_ID, DEVICE_NAME2, USB2, SECOND_EVENTHUB_ID,
-                      ftl::Flags<InputDeviceClass>(0));
-    mFakeEventHub->addLed(SECOND_EVENTHUB_ID, LED_CAPSL, true /*initially on*/);
-    mFakeEventHub->addLed(SECOND_EVENTHUB_ID, LED_NUML, false /*initially off*/);
-    mFakeEventHub->addLed(SECOND_EVENTHUB_ID, LED_SCROLLL, false /*initially off*/);
-    mFakeEventHub->addKey(SECOND_EVENTHUB_ID, KEY_CAPSLOCK, 0, AKEYCODE_CAPS_LOCK, 0);
-    mFakeEventHub->addKey(SECOND_EVENTHUB_ID, KEY_NUMLOCK, 0, AKEYCODE_NUM_LOCK, 0);
-    mFakeEventHub->addKey(SECOND_EVENTHUB_ID, KEY_SCROLLLOCK, 0, AKEYCODE_SCROLL_LOCK, 0);
-
-    device2->addEmptyEventHubDevice(SECOND_EVENTHUB_ID);
-    KeyboardInputMapper& mapper2 =
-            device2->constructAndAddMapper<KeyboardInputMapper>(SECOND_EVENTHUB_ID,
-                                                                mFakePolicy
-                                                                        ->getReaderConfiguration(),
-                                                                AINPUT_SOURCE_KEYBOARD,
-                                                                AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-    std::list<NotifyArgs> unused =
-            device2->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
-                               /*changes=*/{});
-    unused += device2->reset(ARBITRARY_TIME);
-
-    ASSERT_TRUE(mFakeEventHub->getLedState(SECOND_EVENTHUB_ID, LED_CAPSL));
-    ASSERT_TRUE(mFakeEventHub->getLedState(SECOND_EVENTHUB_ID, LED_NUML));
-    ASSERT_TRUE(mFakeEventHub->getLedState(SECOND_EVENTHUB_ID, LED_SCROLLL));
-    ASSERT_EQ(AMETA_CAPS_LOCK_ON | AMETA_NUM_LOCK_ON | AMETA_SCROLL_LOCK_ON,
-              mapper2.getMetaState());
-}
-
-TEST_F(KeyboardInputMapperTest, Process_toggleCapsLockState) {
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_CAPSLOCK, 0, AKEYCODE_CAPS_LOCK, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_NUMLOCK, 0, AKEYCODE_NUM_LOCK, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_SCROLLLOCK, 0, AKEYCODE_SCROLL_LOCK, 0);
-
-    // Suppose we have two mappers. (DPAD + KEYBOARD)
-    constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_DPAD,
-                                               AINPUT_KEYBOARD_TYPE_NON_ALPHABETIC);
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-    // Initial metastate is AMETA_NONE.
-    ASSERT_EQ(AMETA_NONE, mapper.getMetaState());
-
-    mReader->toggleCapsLockState(DEVICE_ID);
-    ASSERT_EQ(AMETA_CAPS_LOCK_ON, mapper.getMetaState());
-}
-
-TEST_F(KeyboardInputMapperTest, Process_LockedKeysShouldToggleInMultiDevices) {
-    // keyboard 1.
-    mFakeEventHub->addLed(EVENTHUB_ID, LED_CAPSL, true /*initially on*/);
-    mFakeEventHub->addLed(EVENTHUB_ID, LED_NUML, false /*initially off*/);
-    mFakeEventHub->addLed(EVENTHUB_ID, LED_SCROLLL, false /*initially off*/);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_CAPSLOCK, 0, AKEYCODE_CAPS_LOCK, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_NUMLOCK, 0, AKEYCODE_NUM_LOCK, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_SCROLLLOCK, 0, AKEYCODE_SCROLL_LOCK, 0);
-
-    KeyboardInputMapper& mapper1 =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-
-    // keyboard 2.
-    const std::string USB2 = "USB2";
-    const std::string DEVICE_NAME2 = "KEYBOARD2";
-    constexpr int32_t SECOND_DEVICE_ID = DEVICE_ID + 1;
-    constexpr int32_t SECOND_EVENTHUB_ID = EVENTHUB_ID + 1;
-    std::shared_ptr<InputDevice> device2 =
-            newDevice(SECOND_DEVICE_ID, DEVICE_NAME2, USB2, SECOND_EVENTHUB_ID,
-                      ftl::Flags<InputDeviceClass>(0));
-    mFakeEventHub->addLed(SECOND_EVENTHUB_ID, LED_CAPSL, true /*initially on*/);
-    mFakeEventHub->addLed(SECOND_EVENTHUB_ID, LED_NUML, false /*initially off*/);
-    mFakeEventHub->addLed(SECOND_EVENTHUB_ID, LED_SCROLLL, false /*initially off*/);
-    mFakeEventHub->addKey(SECOND_EVENTHUB_ID, KEY_CAPSLOCK, 0, AKEYCODE_CAPS_LOCK, 0);
-    mFakeEventHub->addKey(SECOND_EVENTHUB_ID, KEY_NUMLOCK, 0, AKEYCODE_NUM_LOCK, 0);
-    mFakeEventHub->addKey(SECOND_EVENTHUB_ID, KEY_SCROLLLOCK, 0, AKEYCODE_SCROLL_LOCK, 0);
-
-    device2->addEmptyEventHubDevice(SECOND_EVENTHUB_ID);
-    KeyboardInputMapper& mapper2 =
-            device2->constructAndAddMapper<KeyboardInputMapper>(SECOND_EVENTHUB_ID,
-                                                                mFakePolicy
-                                                                        ->getReaderConfiguration(),
-                                                                AINPUT_SOURCE_KEYBOARD,
-                                                                AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-    std::list<NotifyArgs> unused =
-            device2->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
-                               /*changes=*/{});
-    unused += device2->reset(ARBITRARY_TIME);
-
-    // Initial metastate is AMETA_NONE.
-    ASSERT_EQ(AMETA_NONE, mapper1.getMetaState());
-    ASSERT_EQ(AMETA_NONE, mapper2.getMetaState());
-
-    // Toggle num lock on and off.
-    process(mapper1, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_NUMLOCK, 1);
-    process(mapper1, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_NUMLOCK, 0);
-    ASSERT_TRUE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_NUML));
-    ASSERT_EQ(AMETA_NUM_LOCK_ON, mapper1.getMetaState());
-    ASSERT_EQ(AMETA_NUM_LOCK_ON, mapper2.getMetaState());
-
-    process(mapper1, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_NUMLOCK, 1);
-    process(mapper1, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_NUMLOCK, 0);
-    ASSERT_FALSE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_NUML));
-    ASSERT_EQ(AMETA_NONE, mapper1.getMetaState());
-    ASSERT_EQ(AMETA_NONE, mapper2.getMetaState());
-
-    // Toggle caps lock on and off.
-    process(mapper1, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_CAPSLOCK, 1);
-    process(mapper1, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_CAPSLOCK, 0);
-    ASSERT_TRUE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_CAPSL));
-    ASSERT_EQ(AMETA_CAPS_LOCK_ON, mapper1.getMetaState());
-    ASSERT_EQ(AMETA_CAPS_LOCK_ON, mapper2.getMetaState());
-
-    process(mapper1, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_CAPSLOCK, 1);
-    process(mapper1, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_CAPSLOCK, 0);
-    ASSERT_FALSE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_CAPSL));
-    ASSERT_EQ(AMETA_NONE, mapper1.getMetaState());
-    ASSERT_EQ(AMETA_NONE, mapper2.getMetaState());
-
-    // Toggle scroll lock on and off.
-    process(mapper1, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_SCROLLLOCK, 1);
-    process(mapper1, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_SCROLLLOCK, 0);
-    ASSERT_TRUE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_SCROLLL));
-    ASSERT_EQ(AMETA_SCROLL_LOCK_ON, mapper1.getMetaState());
-    ASSERT_EQ(AMETA_SCROLL_LOCK_ON, mapper2.getMetaState());
-
-    process(mapper1, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_SCROLLLOCK, 1);
-    process(mapper1, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_SCROLLLOCK, 0);
-    ASSERT_FALSE(mFakeEventHub->getLedState(EVENTHUB_ID, LED_SCROLLL));
-    ASSERT_EQ(AMETA_NONE, mapper1.getMetaState());
-    ASSERT_EQ(AMETA_NONE, mapper2.getMetaState());
-}
-
-TEST_F(KeyboardInputMapperTest, Process_DisabledDevice) {
-    const int32_t USAGE_A = 0x070004;
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_HOME, 0, AKEYCODE_HOME, POLICY_FLAG_WAKE);
-    mFakeEventHub->addKey(EVENTHUB_ID, 0, USAGE_A, AKEYCODE_A, POLICY_FLAG_WAKE);
-
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-    // Key down by scan code.
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_HOME, 1);
-    NotifyKeyArgs args;
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(DEVICE_ID, args.deviceId);
-    ASSERT_EQ(AINPUT_SOURCE_KEYBOARD, args.source);
-    ASSERT_EQ(ARBITRARY_TIME, args.eventTime);
-    ASSERT_EQ(AKEY_EVENT_ACTION_DOWN, args.action);
-    ASSERT_EQ(AKEYCODE_HOME, args.keyCode);
-    ASSERT_EQ(KEY_HOME, args.scanCode);
-    ASSERT_EQ(AKEY_EVENT_FLAG_FROM_SYSTEM, args.flags);
-
-    // Disable device, it should synthesize cancellation events for down events.
-    mFakePolicy->addDisabledDevice(DEVICE_ID);
-    configureDevice(InputReaderConfiguration::Change::ENABLED_STATE);
-
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(AKEY_EVENT_ACTION_UP, args.action);
-    ASSERT_EQ(AKEYCODE_HOME, args.keyCode);
-    ASSERT_EQ(KEY_HOME, args.scanCode);
-    ASSERT_EQ(AKEY_EVENT_FLAG_FROM_SYSTEM | AKEY_EVENT_FLAG_CANCELED, args.flags);
-}
-
-TEST_F(KeyboardInputMapperTest, Configure_AssignKeyboardLayoutInfo) {
-    constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                               AINPUT_KEYBOARD_TYPE_ALPHABETIC);
+TEST_F(InputDeviceTest, Configure_AssignsVirtualDevice) {
+    mDevice->addMapper<FakeInputMapper>(EVENTHUB_ID, mFakePolicy->getReaderConfiguration(),
+                                        AINPUT_SOURCE_KEYBOARD);
+    mFakePolicy->addVirtualDevice(DEVICE_LOCATION);
     std::list<NotifyArgs> unused =
             mDevice->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
                                /*changes=*/{});
+    ASSERT_TRUE(mDevice->isVirtualDevice());
 
-    uint32_t generation = mReader->getContext()->getGeneration();
-    mFakePolicy->addKeyboardLayoutAssociation(DEVICE_LOCATION, DEVICE_KEYBOARD_LAYOUT_INFO);
-
+    mFakePolicy->removeVirtualDevice(DEVICE_LOCATION);
     unused += mDevice->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
-                                 InputReaderConfiguration::Change::KEYBOARD_LAYOUT_ASSOCIATION);
-
-    InputDeviceInfo deviceInfo = mDevice->getDeviceInfo();
-    ASSERT_EQ(DEVICE_KEYBOARD_LAYOUT_INFO.languageTag,
-              deviceInfo.getKeyboardLayoutInfo()->languageTag);
-    ASSERT_EQ(DEVICE_KEYBOARD_LAYOUT_INFO.layoutType,
-              deviceInfo.getKeyboardLayoutInfo()->layoutType);
-    ASSERT_TRUE(mReader->getContext()->getGeneration() != generation);
-
-    // Call change layout association with the same values: Generation shouldn't change
-    generation = mReader->getContext()->getGeneration();
-    mFakePolicy->addKeyboardLayoutAssociation(DEVICE_LOCATION, DEVICE_KEYBOARD_LAYOUT_INFO);
-    unused += mDevice->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
-                                 InputReaderConfiguration::Change::KEYBOARD_LAYOUT_ASSOCIATION);
-    ASSERT_TRUE(mReader->getContext()->getGeneration() == generation);
+                                 InputReaderConfiguration::Change::VIRTUAL_DEVICES);
+    ASSERT_FALSE(mDevice->isVirtualDevice());
 }
 
-TEST_F(KeyboardInputMapperTest, LayoutInfoCorrectlyMapped) {
-    mFakeEventHub->setRawLayoutInfo(EVENTHUB_ID,
-                                    RawLayoutInfo{.languageTag = "en", .layoutType = "extended"});
+TEST_F(InputDeviceTest, TouchpadDoesNotResetWhenChangingDisplays) {
+    FakeInputMapper& mapper =
+            mDevice->addMapper<FakeInputMapper>(EVENTHUB_ID, mFakePolicy->getReaderConfiguration(),
+                                                AINPUT_SOURCE_TOUCHPAD | AINPUT_SOURCE_MOUSE);
 
-    // Configuration
-    constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                               AINPUT_KEYBOARD_TYPE_ALPHABETIC);
     InputReaderConfiguration config;
-    std::list<NotifyArgs> unused = mDevice->configure(ARBITRARY_TIME, config, /*changes=*/{});
-
-    ASSERT_EQ("en", mDevice->getDeviceInfo().getKeyboardLayoutInfo()->languageTag);
-    ASSERT_EQ("extended", mDevice->getDeviceInfo().getKeyboardLayoutInfo()->layoutType);
-}
-
-TEST_F(KeyboardInputMapperTest, Process_GesureEventToSetFlagKeepTouchMode) {
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_LEFT, 0, AKEYCODE_DPAD_LEFT, POLICY_FLAG_GESTURE);
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-    NotifyKeyArgs args;
-
-    // Key down
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_LEFT, 1);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(AKEY_EVENT_FLAG_FROM_SYSTEM | AKEY_EVENT_FLAG_KEEP_TOUCH_MODE, args.flags);
-}
-
-// --- KeyboardInputMapperTest_ExternalDevice ---
-
-class KeyboardInputMapperTest_ExternalDevice : public InputMapperTest {
-protected:
-    void SetUp() override { InputMapperTest::SetUp(DEVICE_CLASSES | InputDeviceClass::EXTERNAL); }
-};
-
-TEST_F(KeyboardInputMapperTest_ExternalDevice, WakeBehavior_AlphabeticKeyboard) {
-    // For external devices, keys will trigger wake on key down. Media keys should also trigger
-    // wake if triggered from external devices.
-
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_HOME, 0, AKEYCODE_HOME, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_PLAY, 0, AKEYCODE_MEDIA_PLAY, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_PLAYPAUSE, 0, AKEYCODE_MEDIA_PLAY_PAUSE,
-                          POLICY_FLAG_WAKE);
-
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_HOME, 1);
-    NotifyKeyArgs args;
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(POLICY_FLAG_WAKE, args.policyFlags);
-
-    process(mapper, ARBITRARY_TIME + 1, READ_TIME, EV_KEY, KEY_HOME, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(uint32_t(0), args.policyFlags);
-
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_PLAY, 1);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(POLICY_FLAG_WAKE, args.policyFlags);
-
-    process(mapper, ARBITRARY_TIME + 1, READ_TIME, EV_KEY, KEY_PLAY, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(uint32_t(0), args.policyFlags);
-
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_PLAYPAUSE, 1);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(POLICY_FLAG_WAKE, args.policyFlags);
-
-    process(mapper, ARBITRARY_TIME + 1, READ_TIME, EV_KEY, KEY_PLAYPAUSE, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(POLICY_FLAG_WAKE, args.policyFlags);
-}
-
-TEST_F(KeyboardInputMapperTest_ExternalDevice, WakeBehavior_NoneAlphabeticKeyboard) {
-    // For external devices, keys will trigger wake on key down. Media keys should not trigger
-    // wake if triggered from external non-alphaebtic keyboard (e.g. headsets).
-
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_PLAY, 0, AKEYCODE_MEDIA_PLAY, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_PLAYPAUSE, 0, AKEYCODE_MEDIA_PLAY_PAUSE,
-                          POLICY_FLAG_WAKE);
-
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_NON_ALPHABETIC);
-
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_PLAY, 1);
-    NotifyKeyArgs args;
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(uint32_t(0), args.policyFlags);
-
-    process(mapper, ARBITRARY_TIME + 1, READ_TIME, EV_KEY, KEY_PLAY, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(uint32_t(0), args.policyFlags);
-
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_PLAYPAUSE, 1);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(POLICY_FLAG_WAKE, args.policyFlags);
-
-    process(mapper, ARBITRARY_TIME + 1, READ_TIME, EV_KEY, KEY_PLAYPAUSE, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(POLICY_FLAG_WAKE, args.policyFlags);
-}
-
-TEST_F(KeyboardInputMapperTest_ExternalDevice, DoNotWakeByDefaultBehavior) {
-    // Tv Remote key's wake behavior is prescribed by the keylayout file.
-
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_HOME, 0, AKEYCODE_HOME, POLICY_FLAG_WAKE);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_DOWN, 0, AKEYCODE_DPAD_DOWN, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, KEY_PLAY, 0, AKEYCODE_MEDIA_PLAY, POLICY_FLAG_WAKE);
-
-    addConfigurationProperty("keyboard.doNotWakeByDefault", "1");
-    KeyboardInputMapper& mapper =
-            constructAndAddMapper<KeyboardInputMapper>(AINPUT_SOURCE_KEYBOARD,
-                                                       AINPUT_KEYBOARD_TYPE_ALPHABETIC);
-
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_HOME, 1);
-    NotifyKeyArgs args;
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(POLICY_FLAG_WAKE, args.policyFlags);
-
-    process(mapper, ARBITRARY_TIME + 1, READ_TIME, EV_KEY, KEY_HOME, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(POLICY_FLAG_WAKE, args.policyFlags);
-
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_DOWN, 1);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(uint32_t(0), args.policyFlags);
-
-    process(mapper, ARBITRARY_TIME + 1, READ_TIME, EV_KEY, KEY_DOWN, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(uint32_t(0), args.policyFlags);
-
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, KEY_PLAY, 1);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(POLICY_FLAG_WAKE, args.policyFlags);
-
-    process(mapper, ARBITRARY_TIME + 1, READ_TIME, EV_KEY, KEY_PLAY, 0);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyKeyWasCalled(&args));
-    ASSERT_EQ(POLICY_FLAG_WAKE, args.policyFlags);
+    // Send display info change. This simulates the cursor moving to another screen.
+    std::list<NotifyArgs> unused =
+            mDevice->configure(ARBITRARY_TIME, config,
+                               InputReaderConfiguration::Change::DISPLAY_INFO);
+    // The device should still be enabled, and its configuration should be updated.
+    // But its state should not be reset because it was already enabled.
+    ASSERT_NO_FATAL_FAILURE(mapper.assertConfigureWasCalled());
+    ASSERT_NO_FATAL_FAILURE(mapper.assertResetWasNotCalled());
+    ASSERT_TRUE(mDevice->isEnabled());
 }
 
 // --- TouchInputMapperTest ---
@@ -4430,15 +3424,15 @@ protected:
     void prepareButtons();
     void prepareAxes(int axes);
 
-    void processDown(SingleTouchInputMapper& mapper, int32_t x, int32_t y);
-    void processMove(SingleTouchInputMapper& mapper, int32_t x, int32_t y);
-    void processUp(SingleTouchInputMapper& mappery);
-    void processPressure(SingleTouchInputMapper& mapper, int32_t pressure);
-    void processToolMajor(SingleTouchInputMapper& mapper, int32_t toolMajor);
-    void processDistance(SingleTouchInputMapper& mapper, int32_t distance);
-    void processTilt(SingleTouchInputMapper& mapper, int32_t tiltX, int32_t tiltY);
-    void processKey(SingleTouchInputMapper& mapper, int32_t code, int32_t value);
-    void processSync(SingleTouchInputMapper& mapper);
+    std::list<NotifyArgs> processDown(SingleTouchInputMapper& mapper, int32_t x, int32_t y);
+    std::list<NotifyArgs> processMove(SingleTouchInputMapper& mapper, int32_t x, int32_t y);
+    std::list<NotifyArgs> processUp(SingleTouchInputMapper& mappery);
+    std::list<NotifyArgs> processPressure(SingleTouchInputMapper& mapper, int32_t pressure);
+    std::list<NotifyArgs> processToolMajor(SingleTouchInputMapper& mapper, int32_t toolMajor);
+    std::list<NotifyArgs> processDistance(SingleTouchInputMapper& mapper, int32_t distance);
+    std::list<NotifyArgs> processTilt(SingleTouchInputMapper& mapper, int32_t tiltX, int32_t tiltY);
+    std::list<NotifyArgs> processKey(SingleTouchInputMapper& mapper, int32_t code, int32_t value);
+    std::list<NotifyArgs> processSync(SingleTouchInputMapper& mapper);
 };
 
 void SingleTouchInputMapperTest::prepareButtons() {
@@ -4468,47 +3462,57 @@ void SingleTouchInputMapperTest::prepareAxes(int axes) {
     }
 }
 
-void SingleTouchInputMapperTest::processDown(SingleTouchInputMapper& mapper, int32_t x, int32_t y) {
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, BTN_TOUCH, 1);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_X, x);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_Y, y);
+std::list<NotifyArgs> SingleTouchInputMapperTest::processDown(SingleTouchInputMapper& mapper,
+                                                              int32_t x, int32_t y) {
+    std::list<NotifyArgs> args;
+    args += process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, BTN_TOUCH, 1);
+    args += process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_X, x);
+    args += process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_Y, y);
+    return args;
 }
 
-void SingleTouchInputMapperTest::processMove(SingleTouchInputMapper& mapper, int32_t x, int32_t y) {
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_X, x);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_Y, y);
+std::list<NotifyArgs> SingleTouchInputMapperTest::processMove(SingleTouchInputMapper& mapper,
+                                                              int32_t x, int32_t y) {
+    std::list<NotifyArgs> args;
+    args += process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_X, x);
+    args += process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_Y, y);
+    return args;
 }
 
-void SingleTouchInputMapperTest::processUp(SingleTouchInputMapper& mapper) {
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, BTN_TOUCH, 0);
+std::list<NotifyArgs> SingleTouchInputMapperTest::processUp(SingleTouchInputMapper& mapper) {
+    return process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, BTN_TOUCH, 0);
 }
 
-void SingleTouchInputMapperTest::processPressure(SingleTouchInputMapper& mapper, int32_t pressure) {
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_PRESSURE, pressure);
+std::list<NotifyArgs> SingleTouchInputMapperTest::processPressure(SingleTouchInputMapper& mapper,
+                                                                  int32_t pressure) {
+    return process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_PRESSURE, pressure);
 }
 
-void SingleTouchInputMapperTest::processToolMajor(SingleTouchInputMapper& mapper,
-                                                  int32_t toolMajor) {
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_TOOL_WIDTH, toolMajor);
+std::list<NotifyArgs> SingleTouchInputMapperTest::processToolMajor(SingleTouchInputMapper& mapper,
+                                                                   int32_t toolMajor) {
+    return process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_TOOL_WIDTH, toolMajor);
 }
 
-void SingleTouchInputMapperTest::processDistance(SingleTouchInputMapper& mapper, int32_t distance) {
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_DISTANCE, distance);
+std::list<NotifyArgs> SingleTouchInputMapperTest::processDistance(SingleTouchInputMapper& mapper,
+                                                                  int32_t distance) {
+    return process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_DISTANCE, distance);
 }
 
-void SingleTouchInputMapperTest::processTilt(SingleTouchInputMapper& mapper, int32_t tiltX,
-                                             int32_t tiltY) {
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_TILT_X, tiltX);
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_TILT_Y, tiltY);
+std::list<NotifyArgs> SingleTouchInputMapperTest::processTilt(SingleTouchInputMapper& mapper,
+                                                              int32_t tiltX, int32_t tiltY) {
+    std::list<NotifyArgs> args;
+    args += process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_TILT_X, tiltX);
+    args += process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, ABS_TILT_Y, tiltY);
+    return args;
 }
 
-void SingleTouchInputMapperTest::processKey(SingleTouchInputMapper& mapper, int32_t code,
-                                            int32_t value) {
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, code, value);
+std::list<NotifyArgs> SingleTouchInputMapperTest::processKey(SingleTouchInputMapper& mapper,
+                                                             int32_t code, int32_t value) {
+    return process(mapper, ARBITRARY_TIME, READ_TIME, EV_KEY, code, value);
 }
 
-void SingleTouchInputMapperTest::processSync(SingleTouchInputMapper& mapper) {
-    process(mapper, ARBITRARY_TIME, READ_TIME, EV_SYN, SYN_REPORT, 0);
+std::list<NotifyArgs> SingleTouchInputMapperTest::processSync(SingleTouchInputMapper& mapper) {
+    return process(mapper, ARBITRARY_TIME, READ_TIME, EV_SYN, SYN_REPORT, 0);
 }
 
 TEST_F(SingleTouchInputMapperTest, GetSources_WhenDeviceTypeIsNotSpecifiedAndNotACursor_ReturnsPointer) {
@@ -4597,6 +3601,42 @@ TEST_F(SingleTouchInputMapperTest, MarkSupportedKeyCodes) {
             mapper.markSupportedKeyCodes(AINPUT_SOURCE_ANY, {AKEYCODE_HOME, AKEYCODE_A}, flags));
     ASSERT_TRUE(flags[0]);
     ASSERT_FALSE(flags[1]);
+}
+
+TEST_F(SingleTouchInputMapperTest, DeviceTypeChange_RecalculatesRawToDisplayTransform) {
+    prepareDisplay(ui::ROTATION_0);
+    prepareAxes(POSITION);
+    addConfigurationProperty("touch.deviceType", "touchScreen");
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
+
+    const int32_t x = 900;
+    const int32_t y = 75;
+    std::list<NotifyArgs> args;
+    args += processDown(mapper, x, y);
+    args += processSync(mapper);
+
+    // Assert that motion event is received in display coordinate space for deviceType touchScreen.
+    ASSERT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                        AllOf(WithMotionAction(AMOTION_EVENT_ACTION_DOWN),
+                              WithCoords(toDisplayX(x), toDisplayY(y))))));
+
+    // Add device type association after the device was created.
+    mFakePolicy->addDeviceTypeAssociation(DEVICE_LOCATION, "touchNavigation");
+    // Send update to the mapper.
+    std::list<NotifyArgs> unused =
+            mDevice->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
+                               InputReaderConfiguration::Change::DEVICE_TYPE /*changes*/);
+
+    args.clear();
+    args += processDown(mapper, x, y);
+    args += processSync(mapper);
+
+    // Assert that motion event is received in raw coordinate space for deviceType touchNavigation.
+    ASSERT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                        AllOf(WithMotionAction(AMOTION_EVENT_ACTION_DOWN),
+                              WithCoords(x - RAW_X_MIN, y - RAW_Y_MIN)))));
 }
 
 TEST_F(SingleTouchInputMapperTest, Process_WhenVirtualKeyIsPressedAndReleasedNormally_SendsKeyDownAndKeyUp) {
@@ -4708,7 +3748,6 @@ TEST_F(SingleTouchInputMapperTest, Process_WhenVirtualKeyIsPressedAndMovedOutOfB
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(1), motionArgs.getPointerCount());
     ASSERT_EQ(0, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -4732,7 +3771,6 @@ TEST_F(SingleTouchInputMapperTest, Process_WhenVirtualKeyIsPressedAndMovedOutOfB
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(1), motionArgs.getPointerCount());
     ASSERT_EQ(0, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -4755,7 +3793,6 @@ TEST_F(SingleTouchInputMapperTest, Process_WhenVirtualKeyIsPressedAndMovedOutOfB
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(1), motionArgs.getPointerCount());
     ASSERT_EQ(0, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -4805,7 +3842,6 @@ TEST_F(SingleTouchInputMapperTest, Process_WhenTouchStartsOutsideDisplayAndMoves
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(1), motionArgs.getPointerCount());
     ASSERT_EQ(0, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -4828,7 +3864,6 @@ TEST_F(SingleTouchInputMapperTest, Process_WhenTouchStartsOutsideDisplayAndMoves
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(1), motionArgs.getPointerCount());
     ASSERT_EQ(0, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -4873,7 +3908,6 @@ TEST_F(SingleTouchInputMapperTest, Process_NormalSingleTouchGesture_VirtualDispl
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(1), motionArgs.getPointerCount());
     ASSERT_EQ(0, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -4900,7 +3934,6 @@ TEST_F(SingleTouchInputMapperTest, Process_NormalSingleTouchGesture_VirtualDispl
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(1), motionArgs.getPointerCount());
     ASSERT_EQ(0, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -4925,7 +3958,6 @@ TEST_F(SingleTouchInputMapperTest, Process_NormalSingleTouchGesture_VirtualDispl
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(1), motionArgs.getPointerCount());
     ASSERT_EQ(0, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -4968,7 +4000,6 @@ TEST_F(SingleTouchInputMapperTest, Process_NormalSingleTouchGesture) {
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(1), motionArgs.getPointerCount());
     ASSERT_EQ(0, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -4993,7 +4024,6 @@ TEST_F(SingleTouchInputMapperTest, Process_NormalSingleTouchGesture) {
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(1), motionArgs.getPointerCount());
     ASSERT_EQ(0, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -5016,7 +4046,6 @@ TEST_F(SingleTouchInputMapperTest, Process_NormalSingleTouchGesture) {
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(1), motionArgs.getPointerCount());
     ASSERT_EQ(0, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -5344,10 +4373,6 @@ TEST_F(SingleTouchInputMapperTest, Process_IgnoresTouchesOutsidePhysicalFrame) {
 }
 
 TEST_F(SingleTouchInputMapperTest, Process_DoesntCheckPhysicalFrameForTouchpads) {
-    std::shared_ptr<FakePointerController> fakePointerController =
-            std::make_shared<FakePointerController>();
-    mFakePolicy->setPointerController(fakePointerController);
-
     addConfigurationProperty("touch.deviceType", "pointer");
     prepareAxes(POSITION);
     prepareDisplay(ui::ROTATION_0);
@@ -5419,6 +4444,9 @@ TEST_F(SingleTouchInputMapperTest, Process_AllAxes_DefaultCalibration) {
     ASSERT_NO_FATAL_FAILURE(assertPointerCoords(args.pointerCoords[0],
             x, y, pressure, size, tool, tool, tool, tool, orientation, distance));
     ASSERT_EQ(tilt, args.pointerCoords[0].getAxisValue(AMOTION_EVENT_AXIS_TILT));
+    ASSERT_EQ(args.flags,
+              AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_ORIENTATION |
+                      AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_DIRECTIONAL_ORIENTATION);
 }
 
 TEST_F(SingleTouchInputMapperTest, Process_XYAxes_AffineCalibration) {
@@ -5696,12 +4724,19 @@ TEST_F(SingleTouchInputMapperTest, Process_ShouldHandleAllToolTypes) {
 
     NotifyMotionArgs motionArgs;
 
+    // Hold down the mouse button for the duration of the test, since the mouse tools require
+    // the button to be pressed to make sure they are not hovering.
+    processKey(mapper, BTN_MOUSE, 1);
+
     // default tool type is finger
     processDown(mapper, 100, 200);
     processSync(mapper);
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
     ASSERT_EQ(AMOTION_EVENT_ACTION_DOWN, motionArgs.action);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
+
+    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(
+            WithMotionAction(AMOTION_EVENT_ACTION_BUTTON_PRESS)));
 
     // eraser
     processKey(mapper, BTN_TOOL_RUBBER, 1);
@@ -6049,7 +5084,6 @@ TEST_F(SingleTouchInputMapperTest,
     prepareButtons();
     prepareAxes(POSITION);
     SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled());
     NotifyMotionArgs motionArgs;
 
     // Start a new gesture.
@@ -6109,7 +5143,6 @@ TEST_F(SingleTouchInputMapperTest, ButtonIsReleasedOnTouchUp) {
     prepareButtons();
     prepareAxes(POSITION);
     SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled());
 
     // Press a stylus button.
     processKey(mapper, BTN_STYLUS, 1);
@@ -6150,7 +5183,6 @@ TEST_F(SingleTouchInputMapperTest, StylusButtonMotionEventsDisabled) {
     mFakePolicy->setStylusButtonMotionEventsEnabled(false);
 
     SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled());
 
     // Press a stylus button.
     processKey(mapper, BTN_STYLUS, 1);
@@ -6187,55 +5219,8 @@ TEST_F(SingleTouchInputMapperTest, WhenDeviceTypeIsSetToTouchNavigation_setsCorr
     prepareButtons();
     prepareAxes(POSITION);
     SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled());
 
-    ASSERT_EQ(AINPUT_SOURCE_TOUCH_NAVIGATION, mapper.getSources());
-}
-
-TEST_F(SingleTouchInputMapperTest, Process_WhenConfigEnabled_ShouldShowDirectStylusPointer) {
-    std::shared_ptr<FakePointerController> fakePointerController =
-            std::make_shared<FakePointerController>();
-    addConfigurationProperty("touch.deviceType", "touchScreen");
-    prepareDisplay(ui::ROTATION_0);
-    prepareButtons();
-    prepareAxes(POSITION);
-    mFakeEventHub->addKey(EVENTHUB_ID, BTN_TOOL_PEN, 0, AKEYCODE_UNKNOWN, 0);
-    mFakePolicy->setPointerController(fakePointerController);
-    mFakePolicy->setStylusPointerIconEnabled(true);
-    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
-
-    processKey(mapper, BTN_TOOL_PEN, 1);
-    processMove(mapper, 100, 200);
-    processSync(mapper);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(
-            AllOf(WithMotionAction(AMOTION_EVENT_ACTION_HOVER_ENTER),
-                  WithToolType(ToolType::STYLUS),
-                  WithPointerCoords(0, toDisplayX(100), toDisplayY(200)))));
-    ASSERT_TRUE(fakePointerController->isPointerShown());
-    ASSERT_NO_FATAL_FAILURE(
-            fakePointerController->assertPosition(toDisplayX(100), toDisplayY(200)));
-}
-
-TEST_F(SingleTouchInputMapperTest, Process_WhenConfigDisabled_ShouldNotShowDirectStylusPointer) {
-    std::shared_ptr<FakePointerController> fakePointerController =
-            std::make_shared<FakePointerController>();
-    addConfigurationProperty("touch.deviceType", "touchScreen");
-    prepareDisplay(ui::ROTATION_0);
-    prepareButtons();
-    prepareAxes(POSITION);
-    mFakeEventHub->addKey(EVENTHUB_ID, BTN_TOOL_PEN, 0, AKEYCODE_UNKNOWN, 0);
-    mFakePolicy->setPointerController(fakePointerController);
-    mFakePolicy->setStylusPointerIconEnabled(false);
-    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
-
-    processKey(mapper, BTN_TOOL_PEN, 1);
-    processMove(mapper, 100, 200);
-    processSync(mapper);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(
-            AllOf(WithMotionAction(AMOTION_EVENT_ACTION_HOVER_ENTER),
-                  WithToolType(ToolType::STYLUS),
-                  WithPointerCoords(0, toDisplayX(100), toDisplayY(200)))));
-    ASSERT_FALSE(fakePointerController->isPointerShown());
+    ASSERT_EQ(AINPUT_SOURCE_TOUCH_NAVIGATION | AINPUT_SOURCE_TOUCHPAD, mapper.getSources());
 }
 
 TEST_F(SingleTouchInputMapperTest, WhenDeviceTypeIsChangedToTouchNavigation_updatesDeviceType) {
@@ -6258,7 +5243,43 @@ TEST_F(SingleTouchInputMapperTest, WhenDeviceTypeIsChangedToTouchNavigation_upda
                                InputReaderConfiguration::Change::DEVICE_TYPE /*changes*/);
 
     // Check whether device type update was successful.
-    ASSERT_EQ(AINPUT_SOURCE_TOUCH_NAVIGATION, mDevice->getSources());
+    ASSERT_EQ(AINPUT_SOURCE_TOUCH_NAVIGATION | AINPUT_SOURCE_TOUCHPAD, mDevice->getSources());
+}
+
+TEST_F(SingleTouchInputMapperTest,
+       WhenDeviceTypeIsChangedToTouchNavigation_displayViewportIsNotRequired) {
+    // Initialize the device without setting device source to touch navigation and without a
+    // display.
+    addConfigurationProperty("touch.deviceType", "touchScreen");
+    prepareButtons();
+    prepareAxes(POSITION);
+    SingleTouchInputMapper& mapper = constructAndAddMapper<SingleTouchInputMapper>();
+
+    // Ensure that the device is created as a touchscreen, not touch navigation.
+    ASSERT_EQ(AINPUT_SOURCE_TOUCHSCREEN, mapper.getSources());
+
+    // Add device type association after the device was created.
+    mFakePolicy->addDeviceTypeAssociation(DEVICE_LOCATION, "touchNavigation");
+
+    // Send update to the mapper.
+    std::list<NotifyArgs> unused2 =
+            mDevice->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
+                               InputReaderConfiguration::Change::DEVICE_TYPE);
+
+    // Check whether device type update was successful.
+    ASSERT_EQ(AINPUT_SOURCE_TOUCH_NAVIGATION | AINPUT_SOURCE_TOUCHPAD, mDevice->getSources());
+
+    const int32_t x = 900;
+    const int32_t y = 75;
+    std::list<NotifyArgs> args;
+    args += processDown(mapper, x, y);
+    args += processSync(mapper);
+
+    ASSERT_THAT(args,
+                ElementsAre(VariantWith<NotifyMotionArgs>(
+                        AllOf(WithMotionAction(AMOTION_EVENT_ACTION_DOWN),
+                              WithCoords(x - RAW_X_MIN, y - RAW_Y_MIN),
+                              WithDisplayId(ui::LogicalDisplayId::INVALID)))));
 }
 
 TEST_F(SingleTouchInputMapperTest, HoverEventsOutsidePhysicalFrameAreIgnored) {
@@ -6714,15 +5735,27 @@ INSTANTIATE_TEST_SUITE_P(TouchscreenPrecisionTests, TouchscreenPrecisionTestsFix
 
 class ExternalStylusFusionTest : public SingleTouchInputMapperTest {
 public:
-    SingleTouchInputMapper& initializeInputMapperWithExternalStylus() {
+    void SetUp() override {
+        SingleTouchInputMapperTest::SetUp();
+        mExternalStylusDeviceInfo = {};
+        mStylusState = {};
+    }
+
+    SingleTouchInputMapper& initializeInputMapperWithExternalStylus(bool supportsPressure = true) {
         addConfigurationProperty("touch.deviceType", "touchScreen");
         prepareDisplay(ui::ROTATION_0);
         prepareButtons();
         prepareAxes(POSITION);
         auto& mapper = constructAndAddMapper<SingleTouchInputMapper>();
 
+        if (supportsPressure) {
+            mExternalStylusDeviceInfo.addMotionRange(AMOTION_EVENT_AXIS_PRESSURE,
+                                                     AINPUT_SOURCE_STYLUS, 0.0f, 1.0f, 0.0f, 0.0f,
+                                                     0.0f);
+            mStylusState.pressure = 0.f;
+        }
+
         mStylusState.when = ARBITRARY_TIME;
-        mStylusState.pressure = 0.f;
         mStylusState.toolType = ToolType::STYLUS;
         mReader->getContext()->setExternalStylusDevices({mExternalStylusDeviceInfo});
         configureDevice(InputReaderConfiguration::Change::EXTERNAL_STYLUS_PRESENCE);
@@ -6830,9 +5863,15 @@ private:
     InputDeviceInfo mExternalStylusDeviceInfo{};
 };
 
-TEST_F(ExternalStylusFusionTest, UsesBluetoothStylusSource) {
+TEST_F(ExternalStylusFusionTest, UsesBluetoothStylusSourceWithPressure) {
     SingleTouchInputMapper& mapper = initializeInputMapperWithExternalStylus();
     ASSERT_EQ(STYLUS_FUSION_SOURCE, mapper.getSources());
+}
+
+TEST_F(ExternalStylusFusionTest, DoesNotUseBluetoothStylusSourceWithoutPressure) {
+    SingleTouchInputMapper& mapper =
+            initializeInputMapperWithExternalStylus(/*supportsPressure=*/false);
+    ASSERT_EQ(AINPUT_SOURCE_TOUCHSCREEN, mapper.getSources());
 }
 
 TEST_F(ExternalStylusFusionTest, UnsuccessfulFusion) {
@@ -7228,7 +6267,6 @@ TEST_F(MultiTouchInputMapperTest, Process_NormalMultiTouchGesture_WithoutTrackin
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(1), motionArgs.getPointerCount());
     ASSERT_EQ(0, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -7247,7 +6285,6 @@ TEST_F(MultiTouchInputMapperTest, Process_NormalMultiTouchGesture_WithoutTrackin
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(2), motionArgs.getPointerCount());
     ASSERT_EQ(0, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -7278,7 +6315,6 @@ TEST_F(MultiTouchInputMapperTest, Process_NormalMultiTouchGesture_WithoutTrackin
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(2), motionArgs.getPointerCount());
     ASSERT_EQ(0, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -7307,7 +6343,6 @@ TEST_F(MultiTouchInputMapperTest, Process_NormalMultiTouchGesture_WithoutTrackin
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(2), motionArgs.getPointerCount());
     ASSERT_EQ(0, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -7330,7 +6365,6 @@ TEST_F(MultiTouchInputMapperTest, Process_NormalMultiTouchGesture_WithoutTrackin
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(1), motionArgs.getPointerCount());
     ASSERT_EQ(1, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -7355,7 +6389,6 @@ TEST_F(MultiTouchInputMapperTest, Process_NormalMultiTouchGesture_WithoutTrackin
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(1), motionArgs.getPointerCount());
     ASSERT_EQ(1, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -7382,7 +6415,6 @@ TEST_F(MultiTouchInputMapperTest, Process_NormalMultiTouchGesture_WithoutTrackin
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(2), motionArgs.getPointerCount());
     ASSERT_EQ(0, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -7411,7 +6443,6 @@ TEST_F(MultiTouchInputMapperTest, Process_NormalMultiTouchGesture_WithoutTrackin
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(2), motionArgs.getPointerCount());
     ASSERT_EQ(0, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -7434,7 +6465,6 @@ TEST_F(MultiTouchInputMapperTest, Process_NormalMultiTouchGesture_WithoutTrackin
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(1), motionArgs.getPointerCount());
     ASSERT_EQ(0, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -7457,7 +6487,6 @@ TEST_F(MultiTouchInputMapperTest, Process_NormalMultiTouchGesture_WithoutTrackin
     ASSERT_EQ(0, motionArgs.flags);
     ASSERT_EQ(AMETA_SHIFT_LEFT_ON | AMETA_SHIFT_ON, motionArgs.metaState);
     ASSERT_EQ(0, motionArgs.buttonState);
-    ASSERT_EQ(0, motionArgs.edgeFlags);
     ASSERT_EQ(size_t(1), motionArgs.getPointerCount());
     ASSERT_EQ(0, motionArgs.pointerProperties[0].id);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
@@ -7907,6 +6936,7 @@ TEST_F(MultiTouchInputMapperTest, Process_AllAxes_WithDefaultCalibration) {
     ASSERT_NO_FATAL_FAILURE(assertPointerCoords(args.pointerCoords[0],
             x, y, pressure, size, touchMajor, touchMinor, toolMajor, toolMinor,
             orientation, distance));
+    ASSERT_EQ(args.flags, AMOTION_EVENT_PRIVATE_FLAG_SUPPORTS_ORIENTATION);
 }
 
 TEST_F(MultiTouchInputMapperTest, Process_TouchAndToolAxes_GeometricCalibration) {
@@ -8372,6 +7402,10 @@ TEST_F(MultiTouchInputMapperTest, Process_ShouldHandleAllToolTypes) {
 
     NotifyMotionArgs motionArgs;
 
+    // Hold down the mouse button for the duration of the test, since the mouse tools require
+    // the button to be pressed to make sure they are not hovering.
+    processKey(mapper, BTN_MOUSE, 1);
+
     // default tool type is finger
     processId(mapper, 1);
     processPosition(mapper, 100, 200);
@@ -8379,6 +7413,9 @@ TEST_F(MultiTouchInputMapperTest, Process_ShouldHandleAllToolTypes) {
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
     ASSERT_EQ(AMOTION_EVENT_ACTION_DOWN, motionArgs.action);
     ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
+
+    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(
+            WithMotionAction(AMOTION_EVENT_ACTION_BUTTON_PRESS)));
 
     // eraser
     processKey(mapper, BTN_TOOL_RUBBER, 1);
@@ -8546,35 +7583,39 @@ TEST_F(MultiTouchInputMapperTest, Process_WhenBtnTouchPresent_HoversIfItsValueIs
             toDisplayX(150), toDisplayY(250), 0, 0, 0, 0, 0, 0, 0, 0));
 
     // down when BTN_TOUCH is pressed, pressure defaults to 1
+    processPosition(mapper, 151, 251);
     processKey(mapper, BTN_TOUCH, 1);
     processSync(mapper);
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
     ASSERT_EQ(AMOTION_EVENT_ACTION_HOVER_EXIT, motionArgs.action);
+    // HOVER_EXIT should have the same coordinates as the previous HOVER_MOVE
     ASSERT_NO_FATAL_FAILURE(assertPointerCoords(motionArgs.pointerCoords[0],
             toDisplayX(150), toDisplayY(250), 0, 0, 0, 0, 0, 0, 0, 0));
-
+    // down at the new position
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
     ASSERT_EQ(AMOTION_EVENT_ACTION_DOWN, motionArgs.action);
     ASSERT_NO_FATAL_FAILURE(assertPointerCoords(motionArgs.pointerCoords[0],
-            toDisplayX(150), toDisplayY(250), 1, 0, 0, 0, 0, 0, 0, 0));
+            toDisplayX(151), toDisplayY(251), 1, 0, 0, 0, 0, 0, 0, 0));
 
     // up when BTN_TOUCH is released, hover restored
+    processPosition(mapper, 152, 252);
     processKey(mapper, BTN_TOUCH, 0);
     processSync(mapper);
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
     ASSERT_EQ(AMOTION_EVENT_ACTION_UP, motionArgs.action);
+    // UP should have the same coordinates as the previous event
     ASSERT_NO_FATAL_FAILURE(assertPointerCoords(motionArgs.pointerCoords[0],
-            toDisplayX(150), toDisplayY(250), 1, 0, 0, 0, 0, 0, 0, 0));
-
+            toDisplayX(151), toDisplayY(251), 1, 0, 0, 0, 0, 0, 0, 0));
+    // HOVER_ENTER at the new position
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
     ASSERT_EQ(AMOTION_EVENT_ACTION_HOVER_ENTER, motionArgs.action);
     ASSERT_NO_FATAL_FAILURE(assertPointerCoords(motionArgs.pointerCoords[0],
-            toDisplayX(150), toDisplayY(250), 0, 0, 0, 0, 0, 0, 0, 0));
+            toDisplayX(152), toDisplayY(252), 0, 0, 0, 0, 0, 0, 0, 0));
 
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
     ASSERT_EQ(AMOTION_EVENT_ACTION_HOVER_MOVE, motionArgs.action);
     ASSERT_NO_FATAL_FAILURE(assertPointerCoords(motionArgs.pointerCoords[0],
-            toDisplayX(150), toDisplayY(250), 0, 0, 0, 0, 0, 0, 0, 0));
+            toDisplayX(152), toDisplayY(252), 0, 0, 0, 0, 0, 0, 0, 0));
 
     // exit hover when pointer goes away
     processId(mapper, -1);
@@ -8582,7 +7623,7 @@ TEST_F(MultiTouchInputMapperTest, Process_WhenBtnTouchPresent_HoversIfItsValueIs
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
     ASSERT_EQ(AMOTION_EVENT_ACTION_HOVER_EXIT, motionArgs.action);
     ASSERT_NO_FATAL_FAILURE(assertPointerCoords(motionArgs.pointerCoords[0],
-            toDisplayX(150), toDisplayY(250), 0, 0, 0, 0, 0, 0, 0, 0));
+            toDisplayX(152), toDisplayY(252), 0, 0, 0, 0, 0, 0, 0, 0));
 }
 
 TEST_F(MultiTouchInputMapperTest, Process_WhenAbsMTPressureIsPresent_HoversIfItsValueIsZero) {
@@ -8617,35 +7658,39 @@ TEST_F(MultiTouchInputMapperTest, Process_WhenAbsMTPressureIsPresent_HoversIfIts
             toDisplayX(150), toDisplayY(250), 0, 0, 0, 0, 0, 0, 0, 0));
 
     // down when pressure becomes non-zero
+    processPosition(mapper, 151, 251);
     processPressure(mapper, RAW_PRESSURE_MAX);
     processSync(mapper);
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
     ASSERT_EQ(AMOTION_EVENT_ACTION_HOVER_EXIT, motionArgs.action);
+    // HOVER_EXIT should have the same coordinates as the previous HOVER_MOVE
     ASSERT_NO_FATAL_FAILURE(assertPointerCoords(motionArgs.pointerCoords[0],
             toDisplayX(150), toDisplayY(250), 0, 0, 0, 0, 0, 0, 0, 0));
-
+    // down at the new position
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
     ASSERT_EQ(AMOTION_EVENT_ACTION_DOWN, motionArgs.action);
     ASSERT_NO_FATAL_FAILURE(assertPointerCoords(motionArgs.pointerCoords[0],
-            toDisplayX(150), toDisplayY(250), 1, 0, 0, 0, 0, 0, 0, 0));
+            toDisplayX(151), toDisplayY(251), 1, 0, 0, 0, 0, 0, 0, 0));
 
     // up when pressure becomes 0, hover restored
+    processPosition(mapper, 152, 252);
     processPressure(mapper, 0);
     processSync(mapper);
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
     ASSERT_EQ(AMOTION_EVENT_ACTION_UP, motionArgs.action);
+    // UP should have the same coordinates as the previous event
     ASSERT_NO_FATAL_FAILURE(assertPointerCoords(motionArgs.pointerCoords[0],
-            toDisplayX(150), toDisplayY(250), 1, 0, 0, 0, 0, 0, 0, 0));
-
+            toDisplayX(151), toDisplayY(251), 1, 0, 0, 0, 0, 0, 0, 0));
+    // HOVER_ENTER at the new position
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
     ASSERT_EQ(AMOTION_EVENT_ACTION_HOVER_ENTER, motionArgs.action);
     ASSERT_NO_FATAL_FAILURE(assertPointerCoords(motionArgs.pointerCoords[0],
-            toDisplayX(150), toDisplayY(250), 0, 0, 0, 0, 0, 0, 0, 0));
+            toDisplayX(152), toDisplayY(252), 0, 0, 0, 0, 0, 0, 0, 0));
 
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
     ASSERT_EQ(AMOTION_EVENT_ACTION_HOVER_MOVE, motionArgs.action);
     ASSERT_NO_FATAL_FAILURE(assertPointerCoords(motionArgs.pointerCoords[0],
-            toDisplayX(150), toDisplayY(250), 0, 0, 0, 0, 0, 0, 0, 0));
+            toDisplayX(152), toDisplayY(252), 0, 0, 0, 0, 0, 0, 0, 0));
 
     // exit hover when pointer goes away
     processId(mapper, -1);
@@ -8653,7 +7698,7 @@ TEST_F(MultiTouchInputMapperTest, Process_WhenAbsMTPressureIsPresent_HoversIfIts
     ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
     ASSERT_EQ(AMOTION_EVENT_ACTION_HOVER_EXIT, motionArgs.action);
     ASSERT_NO_FATAL_FAILURE(assertPointerCoords(motionArgs.pointerCoords[0],
-            toDisplayX(150), toDisplayY(250), 0, 0, 0, 0, 0, 0, 0, 0));
+            toDisplayX(152), toDisplayY(252), 0, 0, 0, 0, 0, 0, 0, 0));
 }
 
 /**
@@ -8717,30 +7762,21 @@ TEST_F(MultiTouchInputMapperTest, Configure_AssignsDisplayUniqueId) {
 }
 
 TEST_F(MultiTouchInputMapperTest, Process_Pointer_ShouldHandleDisplayId) {
-    // Setup for second display.
-    std::shared_ptr<FakePointerController> fakePointerController =
-            std::make_shared<FakePointerController>();
-    fakePointerController->setBounds(0, 0, DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1);
-    fakePointerController->setPosition(100, 200);
-    mFakePolicy->setPointerController(fakePointerController);
-
-    mFakePolicy->setDefaultPointerDisplayId(SECONDARY_DISPLAY_ID);
     prepareSecondaryDisplay(ViewportType::EXTERNAL);
 
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION);
     MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
 
-    // Check source is mouse that would obtain the PointerController.
     ASSERT_EQ(AINPUT_SOURCE_MOUSE, mapper.getSources());
 
     NotifyMotionArgs motionArgs;
     processPosition(mapper, 100, 100);
     processSync(mapper);
 
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
-    ASSERT_EQ(AMOTION_EVENT_ACTION_HOVER_MOVE, motionArgs.action);
-    ASSERT_EQ(SECONDARY_DISPLAY_ID, motionArgs.displayId);
+    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(
+            AllOf(WithMotionAction(AMOTION_EVENT_ACTION_DOWN), WithDisplayId(DISPLAY_ID),
+                  WithSource(AINPUT_SOURCE_MOUSE), WithToolType(ToolType::FINGER))));
 }
 
 /**
@@ -8776,8 +7812,10 @@ TEST_F(MultiTouchInputMapperTest, Process_SendsReadTime) {
 TEST_F(MultiTouchInputMapperTest, WhenViewportIsNotActive_TouchesAreDropped) {
     addConfigurationProperty("touch.deviceType", "touchScreen");
     // Don't set touch.enableForInactiveViewport to verify the default behavior.
-    mFakePolicy->addDisplayViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
-                                    /*isActive=*/false, UNIQUE_ID, NO_PORT, ViewportType::INTERNAL);
+    DisplayViewport viewport =
+            createViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                           /*isActive=*/false, UNIQUE_ID, NO_PORT, ViewportType::INTERNAL);
+    mFakePolicy->addDisplayViewport(viewport);
     configureDevice(InputReaderConfiguration::Change::DISPLAY_INFO);
     prepareAxes(POSITION);
     MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
@@ -8796,8 +7834,10 @@ TEST_F(MultiTouchInputMapperTest, WhenViewportIsNotActive_TouchesAreDropped) {
 TEST_F(MultiTouchInputMapperTest, WhenViewportIsNotActive_TouchesAreProcessed) {
     addConfigurationProperty("touch.deviceType", "touchScreen");
     addConfigurationProperty("touch.enableForInactiveViewport", "1");
-    mFakePolicy->addDisplayViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
-                                    /*isActive=*/false, UNIQUE_ID, NO_PORT, ViewportType::INTERNAL);
+    DisplayViewport viewport =
+            createViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                           /*isActive=*/false, UNIQUE_ID, NO_PORT, ViewportType::INTERNAL);
+    mFakePolicy->addDisplayViewport(viewport);
     configureDevice(InputReaderConfiguration::Change::DISPLAY_INFO);
     prepareAxes(POSITION);
     MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
@@ -8818,8 +7858,10 @@ TEST_F(MultiTouchInputMapperTest, WhenViewportIsNotActive_TouchesAreProcessed) {
 TEST_F(MultiTouchInputMapperTest, Process_DeactivateViewport_AbortTouches) {
     addConfigurationProperty("touch.deviceType", "touchScreen");
     addConfigurationProperty("touch.enableForInactiveViewport", "0");
-    mFakePolicy->addDisplayViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
-                                    /*isActive=*/true, UNIQUE_ID, NO_PORT, ViewportType::INTERNAL);
+    DisplayViewport viewport =
+            createViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                           /*isActive=*/true, UNIQUE_ID, NO_PORT, ViewportType::INTERNAL);
+    mFakePolicy->addDisplayViewport(viewport);
     std::optional<DisplayViewport> optionalDisplayViewport =
             mFakePolicy->getDisplayViewportByUniqueId(UNIQUE_ID);
     ASSERT_TRUE(optionalDisplayViewport.has_value());
@@ -8874,12 +7916,10 @@ TEST_F(MultiTouchInputMapperTest, Process_DeactivateViewport_AbortTouches) {
 TEST_F(MultiTouchInputMapperTest, Process_DeactivateViewport_TouchesNotAborted) {
     addConfigurationProperty("touch.deviceType", "touchScreen");
     addConfigurationProperty("touch.enableForInactiveViewport", "1");
-    mFakePolicy->addDisplayViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
-                                    /*isActive=*/true, UNIQUE_ID, NO_PORT, ViewportType::INTERNAL);
-    std::optional<DisplayViewport> optionalDisplayViewport =
-            mFakePolicy->getDisplayViewportByUniqueId(UNIQUE_ID);
-    ASSERT_TRUE(optionalDisplayViewport.has_value());
-    DisplayViewport displayViewport = *optionalDisplayViewport;
+    DisplayViewport displayViewport =
+            createViewport(DISPLAY_ID, DISPLAY_WIDTH, DISPLAY_HEIGHT, ui::ROTATION_0,
+                           /*isActive=*/true, UNIQUE_ID, NO_PORT, ViewportType::INTERNAL);
+    mFakePolicy->addDisplayViewport(displayViewport);
 
     configureDevice(InputReaderConfiguration::Change::DISPLAY_INFO);
     prepareAxes(POSITION);
@@ -8920,97 +7960,6 @@ TEST_F(MultiTouchInputMapperTest, Process_DeactivateViewport_TouchesNotAborted) 
             WithMotionAction(AMOTION_EVENT_ACTION_MOVE)));
 }
 
-TEST_F(MultiTouchInputMapperTest, Process_Pointer_ShowTouches) {
-    // Setup the first touch screen device.
-    prepareAxes(POSITION | ID | SLOT);
-    addConfigurationProperty("touch.deviceType", "touchScreen");
-    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
-
-    // Create the second touch screen device, and enable multi fingers.
-    const std::string USB2 = "USB2";
-    const std::string DEVICE_NAME2 = "TOUCHSCREEN2";
-    constexpr int32_t SECOND_DEVICE_ID = DEVICE_ID + 1;
-    constexpr int32_t SECOND_EVENTHUB_ID = EVENTHUB_ID + 1;
-    std::shared_ptr<InputDevice> device2 =
-            newDevice(SECOND_DEVICE_ID, DEVICE_NAME2, USB2, SECOND_EVENTHUB_ID,
-                      ftl::Flags<InputDeviceClass>(0));
-
-    mFakeEventHub->addAbsoluteAxis(SECOND_EVENTHUB_ID, ABS_MT_POSITION_X, RAW_X_MIN, RAW_X_MAX,
-                                   /*flat=*/0, /*fuzz=*/0);
-    mFakeEventHub->addAbsoluteAxis(SECOND_EVENTHUB_ID, ABS_MT_POSITION_Y, RAW_Y_MIN, RAW_Y_MAX,
-                                   /*flat=*/0, /*fuzz=*/0);
-    mFakeEventHub->addAbsoluteAxis(SECOND_EVENTHUB_ID, ABS_MT_TRACKING_ID, RAW_ID_MIN, RAW_ID_MAX,
-                                   /*flat=*/0, /*fuzz=*/0);
-    mFakeEventHub->addAbsoluteAxis(SECOND_EVENTHUB_ID, ABS_MT_SLOT, RAW_SLOT_MIN, RAW_SLOT_MAX,
-                                   /*flat=*/0, /*fuzz=*/0);
-    mFakeEventHub->setAbsoluteAxisValue(SECOND_EVENTHUB_ID, ABS_MT_SLOT, /*value=*/0);
-    mFakeEventHub->addConfigurationProperty(SECOND_EVENTHUB_ID, String8("touch.deviceType"),
-                                            String8("touchScreen"));
-
-    // Setup the second touch screen device.
-    device2->addEmptyEventHubDevice(SECOND_EVENTHUB_ID);
-    MultiTouchInputMapper& mapper2 = device2->constructAndAddMapper<
-            MultiTouchInputMapper>(SECOND_EVENTHUB_ID, mFakePolicy->getReaderConfiguration());
-    std::list<NotifyArgs> unused =
-            device2->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
-                               /*changes=*/{});
-    unused += device2->reset(ARBITRARY_TIME);
-
-    // Setup PointerController.
-    std::shared_ptr<FakePointerController> fakePointerController =
-            std::make_shared<FakePointerController>();
-    mFakePolicy->setPointerController(fakePointerController);
-
-    // Setup policy for associated displays and show touches.
-    const uint8_t hdmi1 = 0;
-    const uint8_t hdmi2 = 1;
-    mFakePolicy->addInputPortAssociation(DEVICE_LOCATION, hdmi1);
-    mFakePolicy->addInputPortAssociation(USB2, hdmi2);
-    mFakePolicy->setShowTouches(true);
-
-    // Create displays.
-    prepareDisplay(ui::ROTATION_0, hdmi1);
-    prepareSecondaryDisplay(ViewportType::EXTERNAL, hdmi2);
-
-    // Default device will reconfigure above, need additional reconfiguration for another device.
-    unused += device2->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
-                                 InputReaderConfiguration::Change::DISPLAY_INFO |
-                                         InputReaderConfiguration::Change::SHOW_TOUCHES);
-
-    // Two fingers down at default display.
-    int32_t x1 = 100, y1 = 125, x2 = 300, y2 = 500;
-    processPosition(mapper, x1, y1);
-    processId(mapper, 1);
-    processSlot(mapper, 1);
-    processPosition(mapper, x2, y2);
-    processId(mapper, 2);
-    processSync(mapper);
-
-    std::map<int32_t, std::vector<int32_t>>::const_iterator iter =
-            fakePointerController->getSpots().find(DISPLAY_ID);
-    ASSERT_TRUE(iter != fakePointerController->getSpots().end());
-    ASSERT_EQ(size_t(2), iter->second.size());
-
-    // Two fingers down at second display.
-    processPosition(mapper2, x1, y1);
-    processId(mapper2, 1);
-    processSlot(mapper2, 1);
-    processPosition(mapper2, x2, y2);
-    processId(mapper2, 2);
-    processSync(mapper2);
-
-    iter = fakePointerController->getSpots().find(SECONDARY_DISPLAY_ID);
-    ASSERT_TRUE(iter != fakePointerController->getSpots().end());
-    ASSERT_EQ(size_t(2), iter->second.size());
-
-    // Disable the show touches configuration and ensure the spots are cleared.
-    mFakePolicy->setShowTouches(false);
-    unused += device2->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
-                                 InputReaderConfiguration::Change::SHOW_TOUCHES);
-
-    ASSERT_TRUE(fakePointerController->getSpots().empty());
-}
-
 TEST_F(MultiTouchInputMapperTest, VideoFrames_ReceivedByListener) {
     prepareAxes(POSITION);
     addConfigurationProperty("touch.deviceType", "touchScreen");
@@ -9046,7 +7995,7 @@ TEST_F(MultiTouchInputMapperTest, VideoFrames_AreNotRotated) {
 
     // Test all 4 orientations
     for (ui::Rotation orientation : ftl::enum_range<ui::Rotation>()) {
-        SCOPED_TRACE("Orientation " + StringPrintf("%i", orientation));
+        SCOPED_TRACE(StringPrintf("Orientation %s", ftl::enum_string(orientation).c_str()));
         clearViewports();
         prepareDisplay(orientation);
         std::vector<TouchVideoFrame> frames{frame};
@@ -9071,7 +8020,7 @@ TEST_F(MultiTouchInputMapperTest, VideoFrames_WhenNotOrientationAware_AreRotated
 
     // Test all 4 orientations
     for (ui::Rotation orientation : ftl::enum_range<ui::Rotation>()) {
-        SCOPED_TRACE("Orientation " + StringPrintf("%i", orientation));
+        SCOPED_TRACE(StringPrintf("Orientation %s", ftl::enum_string(orientation).c_str()));
         clearViewports();
         prepareDisplay(orientation);
         std::vector<TouchVideoFrame> frames{frame};
@@ -9660,7 +8609,6 @@ TEST_F(MultiTouchInputMapperTest, StylusSourceIsAddedDynamicallyFromToolType) {
     prepareDisplay(ui::ROTATION_0);
     prepareAxes(POSITION | ID | SLOT | PRESSURE | TOOL_TYPE);
     MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled());
 
     // Even if the device supports reporting the ABS_MT_TOOL_TYPE axis, which could give it the
     // ability to report MT_TOOL_PEN, we do not report the device as coming from a stylus source.
@@ -9701,327 +8649,6 @@ TEST_F(MultiTouchInputMapperTest, StylusSourceIsAddedDynamicallyFromToolType) {
             AllOf(WithMotionAction(AMOTION_EVENT_ACTION_UP),
                   WithSource(AINPUT_SOURCE_TOUCHSCREEN | AINPUT_SOURCE_STYLUS),
                   WithToolType(ToolType::STYLUS))));
-}
-
-TEST_F(MultiTouchInputMapperTest, Process_WhenConfigEnabled_ShouldShowDirectStylusPointer) {
-    addConfigurationProperty("touch.deviceType", "touchScreen");
-    prepareDisplay(ui::ROTATION_0);
-    prepareAxes(POSITION | ID | SLOT | TOOL_TYPE | PRESSURE);
-    // Add BTN_TOOL_PEN to statically show stylus support, since using ABS_MT_TOOL_TYPE can only
-    // indicate stylus presence dynamically.
-    mFakeEventHub->addKey(EVENTHUB_ID, BTN_TOOL_PEN, 0, AKEYCODE_UNKNOWN, 0);
-    std::shared_ptr<FakePointerController> fakePointerController =
-            std::make_shared<FakePointerController>();
-    mFakePolicy->setPointerController(fakePointerController);
-    mFakePolicy->setStylusPointerIconEnabled(true);
-    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
-
-    processId(mapper, FIRST_TRACKING_ID);
-    processPressure(mapper, RAW_PRESSURE_MIN);
-    processPosition(mapper, 100, 200);
-    processToolType(mapper, MT_TOOL_PEN);
-    processSync(mapper);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(
-            AllOf(WithMotionAction(AMOTION_EVENT_ACTION_HOVER_ENTER),
-                  WithToolType(ToolType::STYLUS),
-                  WithPointerCoords(0, toDisplayX(100), toDisplayY(200)))));
-    ASSERT_TRUE(fakePointerController->isPointerShown());
-    ASSERT_NO_FATAL_FAILURE(
-            fakePointerController->assertPosition(toDisplayX(100), toDisplayY(200)));
-}
-
-TEST_F(MultiTouchInputMapperTest, Process_WhenConfigDisabled_ShouldNotShowDirectStylusPointer) {
-    addConfigurationProperty("touch.deviceType", "touchScreen");
-    prepareDisplay(ui::ROTATION_0);
-    prepareAxes(POSITION | ID | SLOT | TOOL_TYPE | PRESSURE);
-    // Add BTN_TOOL_PEN to statically show stylus support, since using ABS_MT_TOOL_TYPE can only
-    // indicate stylus presence dynamically.
-    mFakeEventHub->addKey(EVENTHUB_ID, BTN_TOOL_PEN, 0, AKEYCODE_UNKNOWN, 0);
-    std::shared_ptr<FakePointerController> fakePointerController =
-            std::make_shared<FakePointerController>();
-    mFakePolicy->setPointerController(fakePointerController);
-    mFakePolicy->setStylusPointerIconEnabled(false);
-    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
-
-    processId(mapper, FIRST_TRACKING_ID);
-    processPressure(mapper, RAW_PRESSURE_MIN);
-    processPosition(mapper, 100, 200);
-    processToolType(mapper, MT_TOOL_PEN);
-    processSync(mapper);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(
-            AllOf(WithMotionAction(AMOTION_EVENT_ACTION_HOVER_ENTER),
-                  WithToolType(ToolType::STYLUS),
-                  WithPointerCoords(0, toDisplayX(100), toDisplayY(200)))));
-    ASSERT_FALSE(fakePointerController->isPointerShown());
-}
-
-// --- MultiTouchInputMapperTest_ExternalDevice ---
-
-class MultiTouchInputMapperTest_ExternalDevice : public MultiTouchInputMapperTest {
-protected:
-    void SetUp() override { InputMapperTest::SetUp(DEVICE_CLASSES | InputDeviceClass::EXTERNAL); }
-};
-
-/**
- * Expect fallback to internal viewport if device is external and external viewport is not present.
- */
-TEST_F(MultiTouchInputMapperTest_ExternalDevice, Viewports_Fallback) {
-    prepareAxes(POSITION);
-    addConfigurationProperty("touch.deviceType", "touchScreen");
-    prepareDisplay(ui::ROTATION_0);
-    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
-
-    ASSERT_EQ(AINPUT_SOURCE_TOUCHSCREEN, mapper.getSources());
-
-    NotifyMotionArgs motionArgs;
-
-    // Expect the event to be sent to the internal viewport,
-    // because an external viewport is not present.
-    processPosition(mapper, 100, 100);
-    processSync(mapper);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
-    ASSERT_EQ(ADISPLAY_ID_DEFAULT, motionArgs.displayId);
-
-    // Expect the event to be sent to the external viewport if it is present.
-    prepareSecondaryDisplay(ViewportType::EXTERNAL);
-    processPosition(mapper, 100, 100);
-    processSync(mapper);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
-    ASSERT_EQ(SECONDARY_DISPLAY_ID, motionArgs.displayId);
-}
-
-TEST_F(MultiTouchInputMapperTest, Process_TouchpadCapture) {
-    // we need a pointer controller for mouse mode of touchpad (start pointer at 0,0)
-    std::shared_ptr<FakePointerController> fakePointerController =
-            std::make_shared<FakePointerController>();
-    fakePointerController->setBounds(0, 0, DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1);
-    fakePointerController->setPosition(0, 0);
-
-    // prepare device and capture
-    prepareDisplay(ui::ROTATION_0);
-    prepareAxes(POSITION | ID | SLOT);
-    mFakeEventHub->addKey(EVENTHUB_ID, BTN_LEFT, 0, AKEYCODE_UNKNOWN, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, BTN_TOUCH, 0, AKEYCODE_UNKNOWN, 0);
-    mFakePolicy->setPointerCapture(true);
-    mFakePolicy->setPointerController(fakePointerController);
-    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
-
-    // captured touchpad should be a touchpad source
-    NotifyDeviceResetArgs resetArgs;
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled(&resetArgs));
-    ASSERT_EQ(AINPUT_SOURCE_TOUCHPAD, mapper.getSources());
-
-    InputDeviceInfo deviceInfo = mDevice->getDeviceInfo();
-
-    const InputDeviceInfo::MotionRange* relRangeX =
-            deviceInfo.getMotionRange(AMOTION_EVENT_AXIS_RELATIVE_X, AINPUT_SOURCE_TOUCHPAD);
-    ASSERT_NE(relRangeX, nullptr);
-    ASSERT_EQ(relRangeX->min, -(RAW_X_MAX - RAW_X_MIN));
-    ASSERT_EQ(relRangeX->max, RAW_X_MAX - RAW_X_MIN);
-    const InputDeviceInfo::MotionRange* relRangeY =
-            deviceInfo.getMotionRange(AMOTION_EVENT_AXIS_RELATIVE_Y, AINPUT_SOURCE_TOUCHPAD);
-    ASSERT_NE(relRangeY, nullptr);
-    ASSERT_EQ(relRangeY->min, -(RAW_Y_MAX - RAW_Y_MIN));
-    ASSERT_EQ(relRangeY->max, RAW_Y_MAX - RAW_Y_MIN);
-
-    // run captured pointer tests - note that this is unscaled, so input listener events should be
-    //                              identical to what the hardware sends (accounting for any
-    //                              calibration).
-    // FINGER 0 DOWN
-    processSlot(mapper, 0);
-    processId(mapper, 1);
-    processPosition(mapper, 100 + RAW_X_MIN, 100 + RAW_Y_MIN);
-    processKey(mapper, BTN_TOUCH, 1);
-    processSync(mapper);
-
-    // expect coord[0] to contain initial location of touch 0
-    NotifyMotionArgs args;
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(AMOTION_EVENT_ACTION_DOWN, args.action);
-    ASSERT_EQ(1U, args.getPointerCount());
-    ASSERT_EQ(0, args.pointerProperties[0].id);
-    ASSERT_EQ(AINPUT_SOURCE_TOUCHPAD, args.source);
-    ASSERT_NO_FATAL_FAILURE(
-            assertPointerCoords(args.pointerCoords[0], 100, 100, 1, 0, 0, 0, 0, 0, 0, 0));
-
-    // FINGER 1 DOWN
-    processSlot(mapper, 1);
-    processId(mapper, 2);
-    processPosition(mapper, 560 + RAW_X_MIN, 154 + RAW_Y_MIN);
-    processSync(mapper);
-
-    // expect coord[0] to contain previous location, coord[1] to contain new touch 1 location
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(ACTION_POINTER_1_DOWN, args.action);
-    ASSERT_EQ(2U, args.getPointerCount());
-    ASSERT_EQ(0, args.pointerProperties[0].id);
-    ASSERT_EQ(1, args.pointerProperties[1].id);
-    ASSERT_NO_FATAL_FAILURE(
-            assertPointerCoords(args.pointerCoords[0], 100, 100, 1, 0, 0, 0, 0, 0, 0, 0));
-    ASSERT_NO_FATAL_FAILURE(
-            assertPointerCoords(args.pointerCoords[1], 560, 154, 1, 0, 0, 0, 0, 0, 0, 0));
-
-    // FINGER 1 MOVE
-    processPosition(mapper, 540 + RAW_X_MIN, 690 + RAW_Y_MIN);
-    processSync(mapper);
-
-    // expect coord[0] to contain previous location, coord[1] to contain new touch 1 location
-    // from move
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(AMOTION_EVENT_ACTION_MOVE, args.action);
-    ASSERT_NO_FATAL_FAILURE(
-            assertPointerCoords(args.pointerCoords[0], 100, 100, 1, 0, 0, 0, 0, 0, 0, 0));
-    ASSERT_NO_FATAL_FAILURE(
-            assertPointerCoords(args.pointerCoords[1], 540, 690, 1, 0, 0, 0, 0, 0, 0, 0));
-
-    // FINGER 0 MOVE
-    processSlot(mapper, 0);
-    processPosition(mapper, 50 + RAW_X_MIN, 800 + RAW_Y_MIN);
-    processSync(mapper);
-
-    // expect coord[0] to contain new touch 0 location, coord[1] to contain previous location
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(AMOTION_EVENT_ACTION_MOVE, args.action);
-    ASSERT_NO_FATAL_FAILURE(
-            assertPointerCoords(args.pointerCoords[0], 50, 800, 1, 0, 0, 0, 0, 0, 0, 0));
-    ASSERT_NO_FATAL_FAILURE(
-            assertPointerCoords(args.pointerCoords[1], 540, 690, 1, 0, 0, 0, 0, 0, 0, 0));
-
-    // BUTTON DOWN
-    processKey(mapper, BTN_LEFT, 1);
-    processSync(mapper);
-
-    // touchinputmapper design sends a move before button press
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(AMOTION_EVENT_ACTION_MOVE, args.action);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(AMOTION_EVENT_ACTION_BUTTON_PRESS, args.action);
-
-    // BUTTON UP
-    processKey(mapper, BTN_LEFT, 0);
-    processSync(mapper);
-
-    // touchinputmapper design sends a move after button release
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(AMOTION_EVENT_ACTION_BUTTON_RELEASE, args.action);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(AMOTION_EVENT_ACTION_MOVE, args.action);
-
-    // FINGER 0 UP
-    processId(mapper, -1);
-    processSync(mapper);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(AMOTION_EVENT_ACTION_POINTER_UP | 0x0000, args.action);
-
-    // FINGER 1 MOVE
-    processSlot(mapper, 1);
-    processPosition(mapper, 320 + RAW_X_MIN, 900 + RAW_Y_MIN);
-    processSync(mapper);
-
-    // expect coord[0] to contain new location of touch 1, and properties[0].id to contain 1
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(AMOTION_EVENT_ACTION_MOVE, args.action);
-    ASSERT_EQ(1U, args.getPointerCount());
-    ASSERT_EQ(1, args.pointerProperties[0].id);
-    ASSERT_NO_FATAL_FAILURE(
-            assertPointerCoords(args.pointerCoords[0], 320, 900, 1, 0, 0, 0, 0, 0, 0, 0));
-
-    // FINGER 1 UP
-    processId(mapper, -1);
-    processKey(mapper, BTN_TOUCH, 0);
-    processSync(mapper);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(AMOTION_EVENT_ACTION_UP, args.action);
-
-    // non captured touchpad should be a mouse source
-    mFakePolicy->setPointerCapture(false);
-    configureDevice(InputReaderConfiguration::Change::POINTER_CAPTURE);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled(&resetArgs));
-    ASSERT_EQ(AINPUT_SOURCE_MOUSE, mapper.getSources());
-}
-
-TEST_F(MultiTouchInputMapperTest, Process_UnCapturedTouchpadPointer) {
-    std::shared_ptr<FakePointerController> fakePointerController =
-            std::make_shared<FakePointerController>();
-    fakePointerController->setBounds(0, 0, DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1);
-    fakePointerController->setPosition(0, 0);
-
-    // prepare device and capture
-    prepareDisplay(ui::ROTATION_0);
-    prepareAxes(POSITION | ID | SLOT);
-    mFakeEventHub->addKey(EVENTHUB_ID, BTN_LEFT, 0, AKEYCODE_UNKNOWN, 0);
-    mFakeEventHub->addKey(EVENTHUB_ID, BTN_TOUCH, 0, AKEYCODE_UNKNOWN, 0);
-    mFakePolicy->setPointerController(fakePointerController);
-    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
-    // run uncaptured pointer tests - pushes out generic events
-    // FINGER 0 DOWN
-    processId(mapper, 3);
-    processPosition(mapper, 100, 100);
-    processKey(mapper, BTN_TOUCH, 1);
-    processSync(mapper);
-
-    // start at (100,100), cursor should be at (0,0) * scale
-    NotifyMotionArgs args;
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(AMOTION_EVENT_ACTION_HOVER_MOVE, args.action);
-    ASSERT_NO_FATAL_FAILURE(
-            assertPointerCoords(args.pointerCoords[0], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
-
-    // FINGER 0 MOVE
-    processPosition(mapper, 200, 200);
-    processSync(mapper);
-
-    // compute scaling to help with touch position checking
-    float rawDiagonal = hypotf(RAW_X_MAX - RAW_X_MIN, RAW_Y_MAX - RAW_Y_MIN);
-    float displayDiagonal = hypotf(DISPLAY_WIDTH, DISPLAY_HEIGHT);
-    float scale =
-            mFakePolicy->getPointerGestureMovementSpeedRatio() * displayDiagonal / rawDiagonal;
-
-    // translate from (100,100) -> (200,200), cursor should have changed to (100,100) * scale)
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(AMOTION_EVENT_ACTION_HOVER_MOVE, args.action);
-    ASSERT_NO_FATAL_FAILURE(assertPointerCoords(args.pointerCoords[0], 100 * scale, 100 * scale, 0,
-                                                0, 0, 0, 0, 0, 0, 0));
-
-    // BUTTON DOWN
-    processKey(mapper, BTN_LEFT, 1);
-    processSync(mapper);
-
-    // touchinputmapper design sends a move before button press
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(AMOTION_EVENT_ACTION_DOWN, args.action);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(AMOTION_EVENT_ACTION_BUTTON_PRESS, args.action);
-
-    // BUTTON UP
-    processKey(mapper, BTN_LEFT, 0);
-    processSync(mapper);
-
-    // touchinputmapper design sends a move after button release
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(AMOTION_EVENT_ACTION_BUTTON_RELEASE, args.action);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(AMOTION_EVENT_ACTION_UP, args.action);
-}
-
-TEST_F(MultiTouchInputMapperTest, WhenCapturedAndNotCaptured_GetSources) {
-    std::shared_ptr<FakePointerController> fakePointerController =
-            std::make_shared<FakePointerController>();
-
-    prepareDisplay(ui::ROTATION_0);
-    prepareAxes(POSITION | ID | SLOT);
-    mFakeEventHub->addKey(EVENTHUB_ID, BTN_LEFT, 0, AKEYCODE_UNKNOWN, 0);
-    mFakePolicy->setPointerController(fakePointerController);
-    mFakePolicy->setPointerCapture(false);
-    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
-
-    // uncaptured touchpad should be a pointer device
-    ASSERT_EQ(AINPUT_SOURCE_MOUSE, mapper.getSources());
-
-    // captured touchpad should be a touchpad device
-    mFakePolicy->setPointerCapture(true);
-    configureDevice(InputReaderConfiguration::Change::POINTER_CAPTURE);
-    ASSERT_EQ(AINPUT_SOURCE_TOUCHPAD, mapper.getSources());
 }
 
 // --- BluetoothMultiTouchInputMapperTest ---
@@ -10072,414 +8699,6 @@ TEST_F(BluetoothMultiTouchInputMapperTest, TimestampSmoothening) {
                   WithEventTime(ARBITRARY_TIME + ms2ns(50)))));
 }
 
-// --- MultiTouchPointerModeTest ---
-
-class MultiTouchPointerModeTest : public MultiTouchInputMapperTest {
-protected:
-    float mPointerMovementScale;
-    float mPointerXZoomScale;
-    void preparePointerMode(int xAxisResolution, int yAxisResolution) {
-        addConfigurationProperty("touch.deviceType", "pointer");
-        std::shared_ptr<FakePointerController> fakePointerController =
-                std::make_shared<FakePointerController>();
-        fakePointerController->setBounds(0, 0, DISPLAY_WIDTH - 1, DISPLAY_HEIGHT - 1);
-        fakePointerController->setPosition(0, 0);
-        prepareDisplay(ui::ROTATION_0);
-
-        prepareAxes(POSITION);
-        prepareAbsoluteAxisResolution(xAxisResolution, yAxisResolution);
-        // In order to enable swipe and freeform gesture in pointer mode, pointer capture
-        // needs to be disabled, and the pointer gesture needs to be enabled.
-        mFakePolicy->setPointerCapture(false);
-        mFakePolicy->setPointerGestureEnabled(true);
-        mFakePolicy->setPointerController(fakePointerController);
-
-        float rawDiagonal = hypotf(RAW_X_MAX - RAW_X_MIN, RAW_Y_MAX - RAW_Y_MIN);
-        float displayDiagonal = hypotf(DISPLAY_WIDTH, DISPLAY_HEIGHT);
-        mPointerMovementScale =
-                mFakePolicy->getPointerGestureMovementSpeedRatio() * displayDiagonal / rawDiagonal;
-        mPointerXZoomScale =
-                mFakePolicy->getPointerGestureZoomSpeedRatio() * displayDiagonal / rawDiagonal;
-    }
-
-    void prepareAbsoluteAxisResolution(int xAxisResolution, int yAxisResolution) {
-        mFakeEventHub->addAbsoluteAxis(EVENTHUB_ID, ABS_MT_POSITION_X, RAW_X_MIN, RAW_X_MAX,
-                                       /*flat*/ 0,
-                                       /*fuzz*/ 0, /*resolution*/ xAxisResolution);
-        mFakeEventHub->addAbsoluteAxis(EVENTHUB_ID, ABS_MT_POSITION_Y, RAW_Y_MIN, RAW_Y_MAX,
-                                       /*flat*/ 0,
-                                       /*fuzz*/ 0, /*resolution*/ yAxisResolution);
-    }
-};
-
-/**
- * Two fingers down on a pointer mode touch pad. The width
- * of the two finger is larger than 1/4 of the touch pack diagnal length. However, it
- * is smaller than the fixed min physical length 30mm. Two fingers' distance must
- * be greater than the both value to be freeform gesture, so that after two
- * fingers start to move downwards, the gesture should be swipe.
- */
-TEST_F(MultiTouchPointerModeTest, PointerGestureMaxSwipeWidthSwipe) {
-    // The min freeform gesture width is 25units/mm x 30mm = 750
-    // which is greater than fraction of the diagnal length of the touchpad (349).
-    // Thus, MaxSwipWidth is 750.
-    preparePointerMode(/*xResolution=*/25, /*yResolution=*/25);
-    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
-    NotifyMotionArgs motionArgs;
-
-    // Two fingers down at once.
-    // The two fingers are 450 units apart, expects the current gesture to be PRESS
-    // Pointer's initial position is used the [0,0] coordinate.
-    int32_t x1 = 100, y1 = 125, x2 = 550, y2 = 125;
-
-    processId(mapper, FIRST_TRACKING_ID);
-    processPosition(mapper, x1, y1);
-    processMTSync(mapper);
-    processId(mapper, SECOND_TRACKING_ID);
-    processPosition(mapper, x2, y2);
-    processMTSync(mapper);
-    processSync(mapper);
-
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
-    ASSERT_EQ(1U, motionArgs.getPointerCount());
-    ASSERT_EQ(AMOTION_EVENT_ACTION_DOWN, motionArgs.action);
-    ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
-    ASSERT_EQ(MotionClassification::NONE, motionArgs.classification);
-    ASSERT_NO_FATAL_FAILURE(
-            assertPointerCoords(motionArgs.pointerCoords[0], 0, 0, 1, 0, 0, 0, 0, 0, 0, 0));
-
-    // It should be recognized as a SWIPE gesture when two fingers start to move down,
-    // that there should be 1 pointer.
-    int32_t movingDistance = 200;
-    y1 += movingDistance;
-    y2 += movingDistance;
-
-    processId(mapper, FIRST_TRACKING_ID);
-    processPosition(mapper, x1, y1);
-    processMTSync(mapper);
-    processId(mapper, SECOND_TRACKING_ID);
-    processPosition(mapper, x2, y2);
-    processMTSync(mapper);
-    processSync(mapper);
-
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
-    ASSERT_EQ(1U, motionArgs.getPointerCount());
-    ASSERT_EQ(AMOTION_EVENT_ACTION_MOVE, motionArgs.action);
-    ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
-    ASSERT_EQ(MotionClassification::TWO_FINGER_SWIPE, motionArgs.classification);
-    ASSERT_NO_FATAL_FAILURE(assertPointerCoords(motionArgs.pointerCoords[0], 0,
-                                                movingDistance * mPointerMovementScale, 1, 0, 0, 0,
-                                                0, 0, 0, 0));
-}
-
-/**
- * Two fingers down on a pointer mode touch pad. The width of the two finger is larger
- * than the minimum freeform gesture width, 30mm. However, it is smaller than 1/4 of
- * the touch pack diagnal length. Two fingers' distance must be greater than the both
- * value to be freeform gesture, so that after two fingers start to move downwards,
- * the gesture should be swipe.
- */
-TEST_F(MultiTouchPointerModeTest, PointerGestureMaxSwipeWidthLowResolutionSwipe) {
-    // The min freeform gesture width is 5units/mm x 30mm = 150
-    // which is greater than fraction of the diagnal length of the touchpad (349).
-    // Thus, MaxSwipWidth is the fraction of the diagnal length, 349.
-    preparePointerMode(/*xResolution=*/5, /*yResolution=*/5);
-    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
-    NotifyMotionArgs motionArgs;
-
-    // Two fingers down at once.
-    // The two fingers are 250 units apart, expects the current gesture to be PRESS
-    // Pointer's initial position is used the [0,0] coordinate.
-    int32_t x1 = 100, y1 = 125, x2 = 350, y2 = 125;
-
-    processId(mapper, FIRST_TRACKING_ID);
-    processPosition(mapper, x1, y1);
-    processMTSync(mapper);
-    processId(mapper, SECOND_TRACKING_ID);
-    processPosition(mapper, x2, y2);
-    processMTSync(mapper);
-    processSync(mapper);
-
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
-    ASSERT_EQ(1U, motionArgs.getPointerCount());
-    ASSERT_EQ(AMOTION_EVENT_ACTION_DOWN, motionArgs.action);
-    ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
-    ASSERT_EQ(MotionClassification::NONE, motionArgs.classification);
-    ASSERT_NO_FATAL_FAILURE(
-            assertPointerCoords(motionArgs.pointerCoords[0], 0, 0, 1, 0, 0, 0, 0, 0, 0, 0));
-
-    // It should be recognized as a SWIPE gesture when two fingers start to move down,
-    // and there should be 1 pointer.
-    int32_t movingDistance = 200;
-    y1 += movingDistance;
-    y2 += movingDistance;
-
-    processId(mapper, FIRST_TRACKING_ID);
-    processPosition(mapper, x1, y1);
-    processMTSync(mapper);
-    processId(mapper, SECOND_TRACKING_ID);
-    processPosition(mapper, x2, y2);
-    processMTSync(mapper);
-    processSync(mapper);
-
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
-    ASSERT_EQ(1U, motionArgs.getPointerCount());
-    ASSERT_EQ(AMOTION_EVENT_ACTION_MOVE, motionArgs.action);
-    ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
-    ASSERT_EQ(MotionClassification::TWO_FINGER_SWIPE, motionArgs.classification);
-    // New coordinate is the scaled relative coordinate from the initial coordinate.
-    ASSERT_NO_FATAL_FAILURE(assertPointerCoords(motionArgs.pointerCoords[0], 0,
-                                                movingDistance * mPointerMovementScale, 1, 0, 0, 0,
-                                                0, 0, 0, 0));
-}
-
-/**
- * Touch the touch pad with two fingers with a distance wider than the minimum freeform
- * gesture width and 1/4 of the diagnal length of the touchpad. Expect to receive
- * freeform gestures after two fingers start to move downwards.
- */
-TEST_F(MultiTouchPointerModeTest, PointerGestureMaxSwipeWidthFreeform) {
-    preparePointerMode(/*xResolution=*/25, /*yResolution=*/25);
-    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
-
-    NotifyMotionArgs motionArgs;
-
-    // Two fingers down at once. Wider than the max swipe width.
-    // The gesture is expected to be PRESS, then transformed to FREEFORM
-    int32_t x1 = 100, y1 = 125, x2 = 900, y2 = 125;
-
-    processId(mapper, FIRST_TRACKING_ID);
-    processPosition(mapper, x1, y1);
-    processMTSync(mapper);
-    processId(mapper, SECOND_TRACKING_ID);
-    processPosition(mapper, x2, y2);
-    processMTSync(mapper);
-    processSync(mapper);
-
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
-    ASSERT_EQ(1U, motionArgs.getPointerCount());
-    ASSERT_EQ(AMOTION_EVENT_ACTION_DOWN, motionArgs.action);
-    ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
-    ASSERT_EQ(MotionClassification::NONE, motionArgs.classification);
-    // One pointer for PRESS, and its coordinate is used as the origin for pointer coordinates.
-    ASSERT_NO_FATAL_FAILURE(
-            assertPointerCoords(motionArgs.pointerCoords[0], 0, 0, 1, 0, 0, 0, 0, 0, 0, 0));
-
-    int32_t movingDistance = 200;
-
-    // Move two fingers down, expect a cancel event because gesture is changing to freeform,
-    // then two down events for two pointers.
-    y1 += movingDistance;
-    y2 += movingDistance;
-
-    processId(mapper, FIRST_TRACKING_ID);
-    processPosition(mapper, x1, y1);
-    processMTSync(mapper);
-    processId(mapper, SECOND_TRACKING_ID);
-    processPosition(mapper, x2, y2);
-    processMTSync(mapper);
-    processSync(mapper);
-
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
-    // The previous PRESS gesture is cancelled, because it is transformed to freeform
-    ASSERT_EQ(1U, motionArgs.getPointerCount());
-    ASSERT_EQ(AMOTION_EVENT_ACTION_CANCEL, motionArgs.action);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
-    ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
-    ASSERT_EQ(1U, motionArgs.getPointerCount());
-    ASSERT_EQ(AMOTION_EVENT_ACTION_DOWN, motionArgs.action);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
-    ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
-    ASSERT_EQ(MotionClassification::NONE, motionArgs.classification);
-    ASSERT_EQ(2U, motionArgs.getPointerCount());
-    ASSERT_EQ(AMOTION_EVENT_ACTION_POINTER_DOWN, motionArgs.action & AMOTION_EVENT_ACTION_MASK);
-    ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
-    ASSERT_EQ(MotionClassification::NONE, motionArgs.classification);
-    // Two pointers' scaled relative coordinates from their initial centroid.
-    // Initial y coordinates are 0 as y1 and y2 have the same value.
-    float cookedX1 = (x1 - x2) / 2 * mPointerXZoomScale;
-    float cookedX2 = (x2 - x1) / 2 * mPointerXZoomScale;
-    // When pointers move,  the new coordinates equal to the initial coordinates plus
-    // scaled moving distance.
-    ASSERT_NO_FATAL_FAILURE(assertPointerCoords(motionArgs.pointerCoords[0], cookedX1,
-                                                movingDistance * mPointerMovementScale, 1, 0, 0, 0,
-                                                0, 0, 0, 0));
-    ASSERT_NO_FATAL_FAILURE(assertPointerCoords(motionArgs.pointerCoords[1], cookedX2,
-                                                movingDistance * mPointerMovementScale, 1, 0, 0, 0,
-                                                0, 0, 0, 0));
-
-    // Move two fingers down again, expect one MOVE motion event.
-    y1 += movingDistance;
-    y2 += movingDistance;
-
-    processId(mapper, FIRST_TRACKING_ID);
-    processPosition(mapper, x1, y1);
-    processMTSync(mapper);
-    processId(mapper, SECOND_TRACKING_ID);
-    processPosition(mapper, x2, y2);
-    processMTSync(mapper);
-    processSync(mapper);
-
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
-    ASSERT_EQ(2U, motionArgs.getPointerCount());
-    ASSERT_EQ(AMOTION_EVENT_ACTION_MOVE, motionArgs.action);
-    ASSERT_EQ(ToolType::FINGER, motionArgs.pointerProperties[0].toolType);
-    ASSERT_EQ(MotionClassification::NONE, motionArgs.classification);
-    ASSERT_NO_FATAL_FAILURE(assertPointerCoords(motionArgs.pointerCoords[0], cookedX1,
-                                                movingDistance * 2 * mPointerMovementScale, 1, 0, 0,
-                                                0, 0, 0, 0, 0));
-    ASSERT_NO_FATAL_FAILURE(assertPointerCoords(motionArgs.pointerCoords[1], cookedX2,
-                                                movingDistance * 2 * mPointerMovementScale, 1, 0, 0,
-                                                0, 0, 0, 0, 0));
-}
-
-TEST_F(MultiTouchPointerModeTest, TwoFingerSwipeOffsets) {
-    preparePointerMode(/*xResolution=*/25, /*yResolution=*/25);
-    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
-    NotifyMotionArgs motionArgs;
-
-    // Place two fingers down.
-    int32_t x1 = 100, y1 = 125, x2 = 550, y2 = 125;
-
-    processId(mapper, FIRST_TRACKING_ID);
-    processPosition(mapper, x1, y1);
-    processMTSync(mapper);
-    processId(mapper, SECOND_TRACKING_ID);
-    processPosition(mapper, x2, y2);
-    processMTSync(mapper);
-    processSync(mapper);
-
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
-    ASSERT_EQ(1U, motionArgs.getPointerCount());
-    ASSERT_EQ(AMOTION_EVENT_ACTION_DOWN, motionArgs.action);
-    ASSERT_EQ(MotionClassification::NONE, motionArgs.classification);
-    ASSERT_EQ(0, motionArgs.pointerCoords[0].getAxisValue(AMOTION_EVENT_AXIS_GESTURE_X_OFFSET));
-    ASSERT_EQ(0, motionArgs.pointerCoords[0].getAxisValue(AMOTION_EVENT_AXIS_GESTURE_Y_OFFSET));
-
-    // Move the two fingers down and to the left.
-    int32_t movingDistance = 200;
-    x1 -= movingDistance;
-    y1 += movingDistance;
-    x2 -= movingDistance;
-    y2 += movingDistance;
-
-    processId(mapper, FIRST_TRACKING_ID);
-    processPosition(mapper, x1, y1);
-    processMTSync(mapper);
-    processId(mapper, SECOND_TRACKING_ID);
-    processPosition(mapper, x2, y2);
-    processMTSync(mapper);
-    processSync(mapper);
-
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&motionArgs));
-    ASSERT_EQ(1U, motionArgs.getPointerCount());
-    ASSERT_EQ(AMOTION_EVENT_ACTION_MOVE, motionArgs.action);
-    ASSERT_EQ(MotionClassification::TWO_FINGER_SWIPE, motionArgs.classification);
-    ASSERT_LT(motionArgs.pointerCoords[0].getAxisValue(AMOTION_EVENT_AXIS_GESTURE_X_OFFSET), 0);
-    ASSERT_GT(motionArgs.pointerCoords[0].getAxisValue(AMOTION_EVENT_AXIS_GESTURE_Y_OFFSET), 0);
-}
-
-TEST_F(MultiTouchPointerModeTest, WhenViewportActiveStatusChanged_PointerGestureIsReset) {
-    preparePointerMode(/*xResolution=*/25, /*yResolution=*/25);
-    mFakeEventHub->addKey(EVENTHUB_ID, BTN_TOOL_PEN, 0, AKEYCODE_UNKNOWN, 0);
-    MultiTouchInputMapper& mapper = constructAndAddMapper<MultiTouchInputMapper>();
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyDeviceResetWasCalled());
-
-    // Start a stylus gesture.
-    processKey(mapper, BTN_TOOL_PEN, 1);
-    processId(mapper, FIRST_TRACKING_ID);
-    processPosition(mapper, 100, 200);
-    processSync(mapper);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(
-            AllOf(WithMotionAction(AMOTION_EVENT_ACTION_DOWN),
-                  WithSource(AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_STYLUS),
-                  WithToolType(ToolType::STYLUS))));
-    // TODO(b/257078296): Pointer mode generates extra event.
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(
-            AllOf(WithMotionAction(AMOTION_EVENT_ACTION_MOVE),
-                  WithSource(AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_STYLUS),
-                  WithToolType(ToolType::STYLUS))));
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasNotCalled());
-
-    // Make the viewport inactive. This will put the device in disabled mode, and the ongoing stylus
-    // gesture should be disabled.
-    auto viewport = mFakePolicy->getDisplayViewportByType(ViewportType::INTERNAL);
-    viewport->isActive = false;
-    mFakePolicy->updateViewport(*viewport);
-    configureDevice(InputReaderConfiguration::Change::DISPLAY_INFO);
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(
-            AllOf(WithMotionAction(AMOTION_EVENT_ACTION_CANCEL),
-                  WithSource(AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_STYLUS),
-                  WithToolType(ToolType::STYLUS))));
-    // TODO(b/257078296): Pointer mode generates extra event.
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(
-            AllOf(WithMotionAction(AMOTION_EVENT_ACTION_CANCEL),
-                  WithSource(AINPUT_SOURCE_MOUSE | AINPUT_SOURCE_STYLUS),
-                  WithToolType(ToolType::STYLUS))));
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasNotCalled());
-}
-
-// --- JoystickInputMapperTest ---
-
-class JoystickInputMapperTest : public InputMapperTest {
-protected:
-    static const int32_t RAW_X_MIN;
-    static const int32_t RAW_X_MAX;
-    static const int32_t RAW_Y_MIN;
-    static const int32_t RAW_Y_MAX;
-
-    void SetUp() override {
-        InputMapperTest::SetUp(InputDeviceClass::JOYSTICK | InputDeviceClass::EXTERNAL);
-    }
-    void prepareAxes() {
-        mFakeEventHub->addAbsoluteAxis(EVENTHUB_ID, ABS_X, RAW_X_MIN, RAW_X_MAX, 0, 0);
-        mFakeEventHub->addAbsoluteAxis(EVENTHUB_ID, ABS_Y, RAW_Y_MIN, RAW_Y_MAX, 0, 0);
-    }
-
-    void processAxis(JoystickInputMapper& mapper, int32_t axis, int32_t value) {
-        process(mapper, ARBITRARY_TIME, READ_TIME, EV_ABS, axis, value);
-    }
-
-    void processSync(JoystickInputMapper& mapper) {
-        process(mapper, ARBITRARY_TIME, READ_TIME, EV_SYN, SYN_REPORT, 0);
-    }
-
-    void prepareVirtualDisplay(ui::Rotation orientation) {
-        setDisplayInfoAndReconfigure(VIRTUAL_DISPLAY_ID, VIRTUAL_DISPLAY_WIDTH,
-                                     VIRTUAL_DISPLAY_HEIGHT, orientation, VIRTUAL_DISPLAY_UNIQUE_ID,
-                                     NO_PORT, ViewportType::VIRTUAL);
-    }
-};
-
-const int32_t JoystickInputMapperTest::RAW_X_MIN = -32767;
-const int32_t JoystickInputMapperTest::RAW_X_MAX = 32767;
-const int32_t JoystickInputMapperTest::RAW_Y_MIN = -32767;
-const int32_t JoystickInputMapperTest::RAW_Y_MAX = 32767;
-
-TEST_F(JoystickInputMapperTest, Configure_AssignsDisplayUniqueId) {
-    prepareAxes();
-    JoystickInputMapper& mapper = constructAndAddMapper<JoystickInputMapper>();
-
-    mFakePolicy->addInputUniqueIdAssociation(DEVICE_LOCATION, VIRTUAL_DISPLAY_UNIQUE_ID);
-
-    prepareVirtualDisplay(ui::ROTATION_0);
-
-    // Send an axis event
-    processAxis(mapper, ABS_X, 100);
-    processSync(mapper);
-
-    NotifyMotionArgs args;
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(VIRTUAL_DISPLAY_ID, args.displayId);
-
-    // Send another axis event
-    processAxis(mapper, ABS_Y, 100);
-    processSync(mapper);
-
-    ASSERT_NO_FATAL_FAILURE(mFakeListener->assertNotifyMotionWasCalled(&args));
-    ASSERT_EQ(VIRTUAL_DISPLAY_ID, args.displayId);
-}
-
 // --- PeripheralControllerTest ---
 
 class PeripheralControllerTest : public testing::Test {
@@ -10490,7 +8709,7 @@ protected:
     static const int32_t DEVICE_GENERATION;
     static const int32_t DEVICE_CONTROLLER_NUMBER;
     static const ftl::Flags<InputDeviceClass> DEVICE_CLASSES;
-    static const int32_t EVENTHUB_ID;
+    static const RawDeviceId EVENTHUB_ID;
 
     std::shared_ptr<FakeEventHub> mFakeEventHub;
     sp<FakeInputReaderPolicy> mFakePolicy;
@@ -10544,7 +8763,7 @@ const int32_t PeripheralControllerTest::DEVICE_GENERATION = 2;
 const int32_t PeripheralControllerTest::DEVICE_CONTROLLER_NUMBER = 0;
 const ftl::Flags<InputDeviceClass> PeripheralControllerTest::DEVICE_CLASSES =
         ftl::Flags<InputDeviceClass>(0); // not needed for current tests
-const int32_t PeripheralControllerTest::EVENTHUB_ID = 1;
+const RawDeviceId PeripheralControllerTest::EVENTHUB_ID = 1;
 
 // --- BatteryControllerTest ---
 class BatteryControllerTest : public PeripheralControllerTest {
@@ -10596,6 +8815,28 @@ TEST_F(LightControllerTest, MonoLight) {
 
     ASSERT_TRUE(controller.setLightColor(lights[0].id, LIGHT_BRIGHTNESS));
     ASSERT_EQ(controller.getLightColor(lights[0].id).value_or(-1), LIGHT_BRIGHTNESS);
+}
+
+TEST_F(LightControllerTest, MonoKeyboardMuteLight) {
+    RawLightInfo infoMono = {.id = 1,
+                             .name = "mono_keyboard_mute",
+                             .maxBrightness = 255,
+                             .flags = InputLightClass::BRIGHTNESS |
+                                     InputLightClass::KEYBOARD_MIC_MUTE,
+                             .path = ""};
+    mFakeEventHub->addRawLightInfo(infoMono.id, std::move(infoMono));
+
+    PeripheralController& controller = addControllerAndConfigure<PeripheralController>();
+    std::list<NotifyArgs> unused =
+            mDevice->configure(ARBITRARY_TIME, mFakePolicy->getReaderConfiguration(),
+                               /*changes=*/{});
+
+    InputDeviceInfo info;
+    controller.populateDeviceInfo(&info);
+    std::vector<InputDeviceLightInfo> lights = info.getLights();
+    ASSERT_EQ(1U, lights.size());
+    ASSERT_EQ(InputDeviceLightType::KEYBOARD_MIC_MUTE, lights[0].type);
+    ASSERT_EQ(0U, lights[0].preferredBrightnessLevels.size());
 }
 
 TEST_F(LightControllerTest, MonoKeyboardBacklight) {
@@ -10872,24 +9113,24 @@ TEST_F(LightControllerTest, MultiColorRGBKeyboardBacklight) {
     ASSERT_EQ(controller.getLightColor(lights[0].id).value_or(-1), LIGHT_COLOR);
 }
 
-TEST_F(LightControllerTest, PlayerIdLight) {
+TEST_F(LightControllerTest, SonyPlayerIdLight) {
     RawLightInfo info1 = {.id = 1,
-                          .name = "player1",
+                          .name = "sony1",
                           .maxBrightness = 255,
                           .flags = InputLightClass::BRIGHTNESS,
                           .path = ""};
     RawLightInfo info2 = {.id = 2,
-                          .name = "player2",
+                          .name = "sony2",
                           .maxBrightness = 255,
                           .flags = InputLightClass::BRIGHTNESS,
                           .path = ""};
     RawLightInfo info3 = {.id = 3,
-                          .name = "player3",
+                          .name = "sony3",
                           .maxBrightness = 255,
                           .flags = InputLightClass::BRIGHTNESS,
                           .path = ""};
     RawLightInfo info4 = {.id = 4,
-                          .name = "player4",
+                          .name = "sony4",
                           .maxBrightness = 255,
                           .flags = InputLightClass::BRIGHTNESS,
                           .path = ""};
@@ -10903,6 +9144,49 @@ TEST_F(LightControllerTest, PlayerIdLight) {
     controller.populateDeviceInfo(&info);
     std::vector<InputDeviceLightInfo> lights = info.getLights();
     ASSERT_EQ(1U, lights.size());
+    ASSERT_STREQ("sony", lights[0].name.c_str());
+    ASSERT_EQ(InputDeviceLightType::PLAYER_ID, lights[0].type);
+    ASSERT_FALSE(lights[0].capabilityFlags.test(InputDeviceLightCapability::BRIGHTNESS));
+    ASSERT_FALSE(lights[0].capabilityFlags.test(InputDeviceLightCapability::RGB));
+
+    ASSERT_FALSE(controller.setLightColor(lights[0].id, LIGHT_COLOR));
+    ASSERT_TRUE(controller.setLightPlayerId(lights[0].id, LIGHT_PLAYER_ID));
+    ASSERT_EQ(controller.getLightPlayerId(lights[0].id).value_or(-1), LIGHT_PLAYER_ID);
+    ASSERT_STREQ("sony", lights[0].name.c_str());
+}
+
+TEST_F(LightControllerTest, PlayerIdLight) {
+    RawLightInfo info1 = {.id = 1,
+                          .name = "player-1",
+                          .maxBrightness = 255,
+                          .flags = InputLightClass::BRIGHTNESS,
+                          .path = ""};
+    RawLightInfo info2 = {.id = 2,
+                          .name = "player-2",
+                          .maxBrightness = 255,
+                          .flags = InputLightClass::BRIGHTNESS,
+                          .path = ""};
+    RawLightInfo info3 = {.id = 3,
+                          .name = "player-3",
+                          .maxBrightness = 255,
+                          .flags = InputLightClass::BRIGHTNESS,
+                          .path = ""};
+    RawLightInfo info4 = {.id = 4,
+                          .name = "player-4",
+                          .maxBrightness = 255,
+                          .flags = InputLightClass::BRIGHTNESS,
+                          .path = ""};
+    mFakeEventHub->addRawLightInfo(info1.id, std::move(info1));
+    mFakeEventHub->addRawLightInfo(info2.id, std::move(info2));
+    mFakeEventHub->addRawLightInfo(info3.id, std::move(info3));
+    mFakeEventHub->addRawLightInfo(info4.id, std::move(info4));
+
+    PeripheralController& controller = addControllerAndConfigure<PeripheralController>();
+    InputDeviceInfo info;
+    controller.populateDeviceInfo(&info);
+    std::vector<InputDeviceLightInfo> lights = info.getLights();
+    ASSERT_EQ(1U, lights.size());
+    ASSERT_STREQ("player", lights[0].name.c_str());
     ASSERT_EQ(InputDeviceLightType::PLAYER_ID, lights[0].type);
     ASSERT_FALSE(lights[0].capabilityFlags.test(InputDeviceLightCapability::BRIGHTNESS));
     ASSERT_FALSE(lights[0].capabilityFlags.test(InputDeviceLightCapability::RGB));

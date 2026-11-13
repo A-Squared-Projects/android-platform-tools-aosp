@@ -18,10 +18,10 @@ phony {
         "awk",
         "bc",
         "bzip2",
+        "cpu-target-features",
         "fsck.exfat",
         "ldd",
         "logwrapper",
-        "mini-keyctl",
         "mkfs.exfat",
         "mkshrc",
         "newfs_msdos",
@@ -42,9 +42,10 @@ phony {
     required: [
         "sh.recovery",
         "toolbox.recovery",
-        "toybox.recovery",
+        "toybox_recovery",
         "ziptool.recovery",
     ],
+    recovery: true,
 }
 
 phony {
@@ -57,6 +58,7 @@ phony {
         "toolbox_vendor",
         "toybox_vendor",
     ],
+    vendor: true,
 }
 
 // shell and utilities for first stage console. The list of binaries are

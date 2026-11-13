@@ -30,6 +30,7 @@ using android::createUinputDevice;
 using android::EventHub;
 using android::EventHubInterface;
 using android::InputDeviceIdentifier;
+using android::RawDeviceId;
 using android::RawEvent;
 using android::sp;
 using android::UinputHomeKey;
@@ -48,9 +49,6 @@ static void dumpEvents(const std::vector<RawEvent>& events) {
                 case EventHubInterface::DEVICE_REMOVED:
                     ALOGI("Device removed: %i", event.deviceId);
                     break;
-                case EventHubInterface::FINISHED_DEVICE_SCAN:
-                    ALOGI("Finished device scan.");
-                    break;
             }
         } else {
             ALOGI("Device %" PRId32 " : time = %" PRId64 ", type %i, code %i, value %i",
@@ -65,7 +63,7 @@ protected:
     std::unique_ptr<EventHubInterface> mEventHub;
     // We are only going to emulate a single input device currently.
     std::unique_ptr<UinputHomeKey> mKeyboard;
-    int32_t mDeviceId;
+    RawDeviceId mDeviceId;
 
     virtual void SetUp() override {
 #if !defined(__ANDROID__)
@@ -88,8 +86,8 @@ protected:
     /**
      * Return the device id of the created device.
      */
-    int32_t waitForDeviceCreation();
-    void waitForDeviceClose(int32_t deviceId);
+    RawDeviceId waitForDeviceCreation();
+    void waitForDeviceClose(RawDeviceId deviceId);
     void consumeInitialDeviceAddedEvents();
     void assertNoMoreEvents();
     /**
@@ -135,7 +133,7 @@ std::vector<RawEvent> EventHubTest::getEvents(std::optional<size_t> expectedEven
  */
 void EventHubTest::consumeInitialDeviceAddedEvents() {
     std::vector<RawEvent> events = getEvents();
-    std::set<int32_t /*deviceId*/> existingDevices;
+    std::set<RawDeviceId> existingDevices;
     // All of the events should be DEVICE_ADDED type, except the last one.
     for (size_t i = 0; i < events.size() - 1; i++) {
         const RawEvent& event = events[i];
@@ -145,37 +143,29 @@ void EventHubTest::consumeInitialDeviceAddedEvents() {
     // None of the existing system devices should be changing while this test is run.
     // Check that the returned device ids are unique for all of the existing devices.
     EXPECT_EQ(existingDevices.size(), events.size() - 1);
-    // The last event should be "finished device scan"
-    EXPECT_EQ(EventHubInterface::FINISHED_DEVICE_SCAN, events[events.size() - 1].type);
 }
 
-int32_t EventHubTest::waitForDeviceCreation() {
+RawDeviceId EventHubTest::waitForDeviceCreation() {
     // Wait a little longer than usual, to ensure input device has time to be created
     std::vector<RawEvent> events = getEvents(2);
-    if (events.size() != 2) {
-        ADD_FAILURE() << "Instead of 2 events, received " << events.size();
+    if (events.size() != 1) {
+        ADD_FAILURE() << "Instead of 1 event, received " << events.size();
         return 0; // this value is unused
     }
     const RawEvent& deviceAddedEvent = events[0];
     EXPECT_EQ(static_cast<int32_t>(EventHubInterface::DEVICE_ADDED), deviceAddedEvent.type);
     InputDeviceIdentifier identifier = mEventHub->getDeviceIdentifier(deviceAddedEvent.deviceId);
-    const int32_t deviceId = deviceAddedEvent.deviceId;
+    const RawDeviceId deviceId = deviceAddedEvent.deviceId;
     EXPECT_EQ(identifier.name, mKeyboard->getName());
-    const RawEvent& finishedDeviceScanEvent = events[1];
-    EXPECT_EQ(static_cast<int32_t>(EventHubInterface::FINISHED_DEVICE_SCAN),
-              finishedDeviceScanEvent.type);
     return deviceId;
 }
 
-void EventHubTest::waitForDeviceClose(int32_t deviceId) {
+void EventHubTest::waitForDeviceClose(RawDeviceId deviceId) {
     std::vector<RawEvent> events = getEvents(2);
-    ASSERT_EQ(2U, events.size());
+    ASSERT_EQ(1U, events.size());
     const RawEvent& deviceRemovedEvent = events[0];
     EXPECT_EQ(static_cast<int32_t>(EventHubInterface::DEVICE_REMOVED), deviceRemovedEvent.type);
     EXPECT_EQ(deviceId, deviceRemovedEvent.deviceId);
-    const RawEvent& finishedDeviceScanEvent = events[1];
-    EXPECT_EQ(static_cast<int32_t>(EventHubInterface::FINISHED_DEVICE_SCAN),
-              finishedDeviceScanEvent.type);
 }
 
 void EventHubTest::assertNoMoreEvents() {
@@ -188,7 +178,7 @@ void EventHubTest::assertNoMoreEvents() {
  */
 TEST_F(EventHubTest, DevicesWithMatchingUniqueIdsAreUnique) {
     std::unique_ptr<UinputHomeKey> keyboard2 = createUinputDevice<UinputHomeKey>();
-    int32_t deviceId2;
+    RawDeviceId deviceId2;
     ASSERT_NO_FATAL_FAILURE(deviceId2 = waitForDeviceCreation());
 
     ASSERT_NE(mEventHub->getDeviceIdentifier(mDeviceId).descriptor,
