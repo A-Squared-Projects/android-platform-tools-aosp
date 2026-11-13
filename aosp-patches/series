@@ -25,5 +25,3 @@ debian/adbd/adbd-allow-usb-on-linux.patch
 debian/adbd/adbd-allow-notifying-systemd.patch
 debian/adbd/adbd-usb-drop-property-monitor.patch
 debian/adbd/adbd-don-t-require-authorization-on-Linux.patch
-
-# Yocto

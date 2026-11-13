@@ -1,0 +1,72 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Kiernan <alex.kiernan@gmail.com>
+Date: Fri, 6 Nov 2026 09:38:18 +0000
+Subject: [PATCH] libadbd_auth: optionally take the trusted-key paths at build
+ time
+
+libadbd_auth reads trusted host keys from /adb_keys and
+/data/misc/adb/adb_keys, which are Android's locations and rarely exist
+on a Linux system - so a Linux adbd that requires authorization has
+nowhere to be given a key.
+
+When ADBD_AUTH_KEY_PATHS is passed to make - a colon-separated list -
+read keys from those files instead. They are still read on every attempt, so a key
+file that appears after adbd started is picked up.
+
+Without the define nothing changes.
+
+Upstream-Status: Pending
+
+AI-Generated: Claude Opus 5.5 (Claude Code)
+Signed-off-by: Alex Kiernan <alex.kiernan@gmail.com>
+---
+ debian/system/adbd.mk                         |  4 ++++
+ .../native/libs/adbd_auth/adbd_auth.cpp       | 19 ++++++++++++++++---
+ 2 files changed, 20 insertions(+), 3 deletions(-)
+
+diff --git a/debian/system/adbd.mk b/debian/system/adbd.mk
+index 5e2c5ccaea30..dc82b998e77a 100644
+--- a/debian/system/adbd.mk
++++ b/debian/system/adbd.mk
+@@ -113,6 +113,10 @@ ifeq ($(ADBD_AUTH_UNLESS_DEBUGGABLE),1)
+ CPPFLAGS += -DADBD_AUTH_UNLESS_DEBUGGABLE
+ endif
+ 
++ifneq ($(ADBD_AUTH_KEY_PATHS),)
++CPPFLAGS += -DADBD_AUTH_KEY_PATHS='"$(ADBD_AUTH_KEY_PATHS)"'
++endif
++
+ STATIC_LIBS = \
+   debian/out/system/libadb.a \
+   debian/out/system/libcrypto_utils.a \
+diff --git a/frameworks/native/libs/adbd_auth/adbd_auth.cpp b/frameworks/native/libs/adbd_auth/adbd_auth.cpp
+index 78896ed553c4..9b76c17b1b39 100644
+--- a/frameworks/native/libs/adbd_auth/adbd_auth.cpp
++++ b/frameworks/native/libs/adbd_auth/adbd_auth.cpp
+@@ -390,10 +390,23 @@ public:
+         }
+     }
+ 
+-    static constexpr const char* key_paths[] = {"/adb_keys", "/data/misc/adb/adb_keys"};
++#if defined(ADBD_AUTH_KEY_PATHS)
++    // A colon-separated list, for systems where AOSP's locations mean nothing.
++    // Read on every attempt, so a file that appears after adbd started counts.
++    static std::vector<std::string> KeyPaths() {
++        return android::base::Split(ADBD_AUTH_KEY_PATHS, ":");
++    }
++#else
++    static std::vector<std::string> KeyPaths() {
++        return {"/adb_keys", "/data/misc/adb/adb_keys"};
++    }
++#endif
+     void IteratePublicKeys(bool (*callback)(void*, const char*, size_t), void* opaque) {
+-        for (const auto& path : key_paths) {
+-            if (access(path, R_OK) == 0) {
++        for (const auto& path : KeyPaths()) {
++            if (path.empty()) {
++                continue;
++            }
++            if (access(path.c_str(), R_OK) == 0) {
+                 LOG(INFO) << "adbd_auth: loading keys from " << path;
+                 std::string content;
+                 if (!android::base::ReadFileToString(path, &content)) {

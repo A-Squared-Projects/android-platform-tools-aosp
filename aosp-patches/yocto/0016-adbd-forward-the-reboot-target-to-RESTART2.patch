@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Kiernan <alex.kiernan@gmail.com>
+Date: Mon, 15 Jun 2026 00:00:00 +0000
+Subject: [PATCH] adbd: forward the reboot target to RESTART2
+
+On non-Android Linux builds reboot_device() hard-codes the RESTART2
+reboot reason to "adb" and throws away the requested target, so
+"adb reboot recovery", "adb reboot bootloader", etc. all collapse to a
+plain reboot.
+
+On Rockchip the reboot reason string is consumed by the kernel
+reboot-mode driver (drivers/power/reset/reboot-mode.c), which strcmp()s
+it against the device-tree "mode-*" entries (mode-recovery,
+mode-bootloader, mode-loader, ...) to pick the boot-mode magic written
+to the PMU syscon register that U-Boot reads on the next boot. With the
+reason fixed to "adb" nothing matches and it falls back to a normal
+boot.
+
+Pass the real target through instead. An empty target (bare
+"adb reboot") becomes "", which the kernel treats as "normal", matching
+the previous behaviour for that case.
+
+Upstream-Status: Pending
+
+Signed-off-by: Alex Kiernan <alex.kiernan@gmail.com>
+---
+ packages/modules/adb/daemon/services.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/packages/modules/adb/daemon/services.cpp b/packages/modules/adb/daemon/services.cpp
+index 1b2731442a2a..968e9e74ffa4 100644
+--- a/packages/modules/adb/daemon/services.cpp
++++ b/packages/modules/adb/daemon/services.cpp
+@@ -219,7 +219,7 @@ static void remount_service(unique_fd fd) {
+     auto reboot_service = [name](unique_fd fd) {
+         sync();
+         if (syscall(SYS_reboot, LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2,
+-                    LINUX_REBOOT_CMD_RESTART2, "adb") != 0) {
++                    LINUX_REBOOT_CMD_RESTART2, name.c_str()) != 0) {
+             WriteFdFmt(fd.get(), "reboot (%s) failed: %s\n", name.c_str(), strerror(errno));
+             return;
+         }

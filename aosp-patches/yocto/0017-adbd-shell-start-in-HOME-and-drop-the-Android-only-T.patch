@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Kiernan <alex.kiernan@gmail.com>
+Date: Fri, 17 Jul 2026 18:20:41 +0100
+Subject: [PATCH] adbd: shell - start in $HOME and drop the Android-only TMPDIR
+
+adbd execs the login shell directly (no login(1)), so it never chdir()s and the
+shell lands in adbd's cwd (/) instead of the user's home. chdir() to the passwd
+home before exec, best-effort. Also drop the hardcoded TMPDIR=/data/local/tmp:
+that path only exists on Android and is wrong on a normal Linux rootfs, where an
+unset TMPDIR correctly falls back to /tmp.
+
+Upstream-Status: Pending
+
+AI-Generated: Claude Opus 4.8 (claude-opus-4-8)
+Signed-off-by: Alex Kiernan <alex.kiernan@gmail.com>
+---
+ packages/modules/adb/daemon/shell_service.cpp | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/packages/modules/adb/daemon/shell_service.cpp b/packages/modules/adb/daemon/shell_service.cpp
+index dbca4adb61e2..4e9e50edf271 100644
+--- a/packages/modules/adb/daemon/shell_service.cpp
++++ b/packages/modules/adb/daemon/shell_service.cpp
+@@ -274,7 +274,6 @@ bool Subprocess::ForkAndExec(std::string* error) {
+         env["HOSTNAME"] = GetHostName();
+         env["LOGNAME"] = pw->pw_name;
+         env["SHELL"] = pw->pw_shell;
+-        env["TMPDIR"] = "/data/local/tmp";
+         env["USER"] = pw->pw_name;
+     }
+ 
+@@ -386,6 +385,13 @@ bool Subprocess::ForkAndExec(std::string* error) {
+         }
+ #endif
+ 
++        // Start the shell in the user's home dir, like login(1) would - adbd
++        // execs the shell directly (no login), so without this it inherits
++        // adbd's cwd (/). Best-effort: if HOME is missing/unset, stay put.
++        if (pw != nullptr && pw->pw_dir && pw->pw_dir[0]) {
++            (void)chdir(pw->pw_dir);
++        }
++
+         if (command_.empty()) {
+             // Spawn a login shell if we don't have a command.
+             execle(_PATH_BSHELL, "-" _PATH_BSHELL, nullptr, cenv.data());

@@ -1,0 +1,117 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Kiernan <alex.kiernan@gmail.com>
+Date: Fri, 6 Nov 2026 10:03:09 +0000
+Subject: [PATCH] adbd: signal readiness once functionfs is serviced
+
+The gadget's UDC must not be bound until adbd is servicing functionfs:
+bind earlier and the bind is silently dropped, and the host never
+reaches CONFIGURED. adbd_main() sends sd_notify(READY=1) after
+usb_init(), but usb_init() only starts usb_ffs_open_thread, detached, so
+READY=1 races open_functionfs() - and a unit that binds the UDC on
+READY=1 (ExecStartPost with no delay) loses the race.
+
+Signal readiness from the USB thread instead, once the descriptors are
+written and the transport is registered. Built without systemd, the
+same point writes a byte to the FIFO named in $ADBD_READY_FIFO instead,
+if set, for other init systems. The FIFO is opened non-blocking, so
+adbd never waits on a reader that has given up. Readiness is signalled
+once; an adbd that is not on USB still signals it from adbd_main().
+
+Upstream-Status: Pending
+
+AI-Generated: Claude Opus 5.5 (Claude Code)
+Signed-off-by: Alex Kiernan <alex.kiernan@gmail.com>
+---
+ packages/modules/adb/adb.h           |  6 ++++++
+ packages/modules/adb/daemon/main.cpp | 31 +++++++++++++++++++++++++---
+ packages/modules/adb/daemon/usb.cpp  |  7 +++++++
+ 3 files changed, 41 insertions(+), 3 deletions(-)
+
+diff --git a/packages/modules/adb/adb.h b/packages/modules/adb/adb.h
+index b43bb42ec736..20c002051937 100644
+--- a/packages/modules/adb/adb.h
++++ b/packages/modules/adb/adb.h
+@@ -263,3 +263,9 @@ void adb_set_reject_kill_server(bool reject);
+ #endif
+ 
+ void usb_init();
++#if !ADB_HOST
++// Tell whoever started adbd that it is ready: sd_notify(READY=1) with systemd,
++// otherwise a byte to the FIFO named in $ADBD_READY_FIFO if set. Only the first
++// call does anything.
++void adbd_notify_ready();
++#endif
+diff --git a/packages/modules/adb/daemon/main.cpp b/packages/modules/adb/daemon/main.cpp
+index ac37461f21dc..a5b1d6b3e0eb 100644
+--- a/packages/modules/adb/daemon/main.cpp
++++ b/packages/modules/adb/daemon/main.cpp
+@@ -53,6 +53,8 @@
+ #include <systemd/sd-daemon.h>
+ #endif
+ 
++#include <mutex>
++
+ #include "adb.h"
+ #include "adb_auth.h"
+ #include "adb_listeners.h"
+@@ -244,6 +246,27 @@ static void drop_privileges(int) {
+ }
+ #endif
+ 
++void adbd_notify_ready() {
++    static std::once_flag once;
++    std::call_once(once, [] {
++#if defined(HAVE_SYSTEMD)
++        sd_notify(1, "READY=1");
++#else
++        const char* ready_fifo = getenv("ADBD_READY_FIFO");
++        if (ready_fifo != nullptr && *ready_fifo != '\0') {
++            // O_NONBLOCK: with no reader, open() fails with ENXIO rather than
++            // blocking this thread for ever; the reader has given up and
++            // gone ahead without the signal.
++            int fd = adb_open(ready_fifo, O_WRONLY | O_NONBLOCK | O_CLOEXEC);
++            if (fd >= 0) {
++                TEMP_FAILURE_RETRY(adb_write(fd, "1\n", 2));
++                adb_close(fd);
++            }
++        }
++#endif
++    });
++}
++
+ static void setup_adb(const std::vector<std::string>& addrs) {
+ #if defined(__ANDROID__)
+     // Get the first valid port from addrs and setup mDNS.
+@@ -368,9 +391,11 @@ int adbd_main(int server_port) {
+     init_jdwp();
+     D("adbd_main(): post init_jdwp()");
+ 
+-#if defined(HAVE_SYSTEMD)
+-    sd_notify(1, "READY=1");
+-#endif
++    // On USB, readiness is signalled from the USB thread once functionfs is
++    // serviced; usb_init() has only started that thread.
++    if (!is_usb) {
++        adbd_notify_ready();
++    }
+ 
+     D("Event loop starting");
+     fdevent_loop();
+diff --git a/packages/modules/adb/daemon/usb.cpp b/packages/modules/adb/daemon/usb.cpp
+index e44c7b788587..a970c4e1fd28 100644
+--- a/packages/modules/adb/daemon/usb.cpp
++++ b/packages/modules/adb/daemon/usb.cpp
+@@ -805,6 +805,13 @@ static void usb_ffs_open_thread() {
+                 std::move(control), std::move(bulk_out), std::move(bulk_in),
+                 std::move(destruction_notifier)));
+         register_transport(transport);
++
++        // functionfs descriptors are written and ep0 is being serviced, so the
++        // gadget will now handle FUNCTIONFS_BIND: this is the moment the UDC
++        // may be bound. Binding earlier races this setup, and the bind is
++        // silently dropped.
++        adbd_notify_ready();
++
+         future.wait();
+     }
+ }
