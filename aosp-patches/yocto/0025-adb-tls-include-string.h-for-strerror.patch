@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Kiernan <alex.kiernan@gmail.com>
+Date: Fri, 13 Nov 2026 12:00:00 +0000
+Subject: [PATCH] adb: tls: include <string.h> for strerror()
+
+tls_connection.cpp calls strerror() without including <string.h>; it builds
+on Android because bionic/libc++ headers pull it in transitively, but not
+with GCC and libstdc++:
+
+  tls/tls_connection.cpp:334:46: error: 'strerror' was not declared in this scope
+
+Upstream-Status: Pending
+
+AI-Generated: Claude Opus 5.5 (Claude Code)
+Signed-off-by: Alex Kiernan <alex.kiernan@gmail.com>
+---
+--- a/packages/modules/adb/tls/tls_connection.cpp
++++ b/packages/modules/adb/tls/tls_connection.cpp
+@@ -17,6 +17,7 @@
+ #include "adb/tls/tls_connection.h"
+ 
+ #include <limits.h>
++#include <string.h>
+ 
+ #include <algorithm>
+ #include <vector>

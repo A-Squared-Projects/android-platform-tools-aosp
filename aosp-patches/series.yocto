@@ -41,3 +41,4 @@ yocto/0021-liblog-optionally-read-ro.debuggable-from-build.prop.patch
 yocto/0022-adbd-optionally-require-authorization-unless-the-bui.patch
 yocto/0023-libadbd_auth-optionally-take-the-trusted-key-paths-a.patch
 yocto/0024-adbd-keep-root-on-Linux-only-while-the-build-is-debu.patch
+yocto/0025-adb-tls-include-string.h-for-strerror.patch
