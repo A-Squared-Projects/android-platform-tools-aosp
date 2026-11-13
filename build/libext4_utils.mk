@@ -8,13 +8,7 @@ ext4_utils_SOURCES = \
 
 ext4_utils_SOURCES := $(foreach source, $(ext4_utils_SOURCES), system/extras/ext4_utils/$(source))
 
-# system/extras/squashfs_utils/Android.bp
-squashfs_utils_SOURCES = \
-  squashfs_utils.c \
-
-squashfs_utils_SOURCES := $(foreach source, $(squashfs_utils_SOURCES), system/extras/squashfs_utils/$(source))
-
-SOURCES = $(ext4_utils_SOURCES) $(squashfs_utils_SOURCES)
+SOURCES = $(ext4_utils_SOURCES)
 
 SOURCES_C = $(filter %.c,$(SOURCES))
 OBJECTS_C = $(SOURCES_C:.c=.o)
@@ -25,14 +19,11 @@ CPPFLAGS += \
   -D_GNU_SOURCE \
   -D_LARGEFILE64_SOURCE \
   -DFEC_NO_KLOG \
-  -DSQUASHFS_NO_KLOG \
   -I$(SYSROOT)/usr/include/android \
-  -I$(SYSROOT)/usr/include/squashfuse \
   -Isystem/core/libcutils/include \
   -Isystem/core/libsparse/include \
   -Isystem/extras/ext4_utils/include \
   -Isystem/extras/libfec/include \
-  -Isystem/extras/squashfs_utils \
   -Isystem/libbase/include \
 
 out/extras/libext4_utils.a: $(OBJECTS_C) $(OBJECTS_CXX)
