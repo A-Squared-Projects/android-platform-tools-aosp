@@ -131,15 +131,16 @@ $(OBJECTS_CPP): %.o: %.cpp
 $(OBJECTS_CC): %.o: %.cc
 	$(CXX) -c -o $@ $< $(CXXFLAGS) $(CPPFLAGS)
 
+# mDNS is not built (client/transport_mdns.cpp needs openscreen or the Rust
+# libadbmdns), so stub out what the rest of adb calls.
 debian/out/system/dummy.cpp:
 	rm -f $@
-	echo '#include <adb_wifi.h>' >> $@
-	echo '#include <adb_mdns.h>' >> $@
-	echo 'void init_mdns_transport_discovery(void) {}' >> $@
-	echo 'std::string mdns_check() {return std::string("");}' >> $@
-	echo 'void mdns_cleanup() {}' >> $@
-	echo 'std::string mdns_list_discovered_services() {return std::string("");}' >> $@
-	echo 'std::optional<MdnsInfo> mdns_get_connect_service_info(const std::string& name) {return std::nullopt;}' >> $@
-	echo 'std::optional<MdnsInfo> mdns_get_pairing_service_info(const std::string& name) {return std::nullopt;}' >> $@
-	echo 'bool adb_secure_connect_by_service_name(const std::string& instance_name) {return false;}' >> $@
-	echo 'bool using_bonjour(void) {return true;}' >> $@
+	echo '#include "adb_mdns.h"' >> $@
+	echo '#include "transport.h"' >> $@
+	echo '#include "client/transport_mdns.h"' >> $@
+	echo 'void init_mdns_transport_discovery() {}' >> $@
+	echo 'std::string mdns_check() { return std::string(); }' >> $@
+	echo 'std::string mdns_list_discovered_services() { return std::string(); }' >> $@
+	echo 'std::optional<ServiceInfo> mdns_get_connect_service_info(const std::string&) { return std::nullopt; }' >> $@
+	echo 'std::optional<ServiceInfo> mdns_get_pairing_service_info(const std::string&) { return std::nullopt; }' >> $@
+	echo 'bool adb_secure_connect_by_service_name(const std::string&) { return false; }' >> $@

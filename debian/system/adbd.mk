@@ -16,6 +16,7 @@ ADBD_SRC_FILES = \
   types.cpp \
   daemon/adb_wifi.cpp \
   daemon/auth.cpp \
+  daemon/mdns.cpp \
   daemon/jdwp_service.cpp \
   daemon/logging.cpp \
   daemon/main.cpp \
