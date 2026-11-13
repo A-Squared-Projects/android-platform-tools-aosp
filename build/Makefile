@@ -11,7 +11,7 @@
 PROTOC ?= protoc
 
 ADBD_LIBS := liblog libbase libcutils libcrypto_utils libadb
-ADBD_TOOLS := adbd
+ADBD_TOOLS := adbd adbd-reboot
 
 HOST_LIBS := liblog libbase libcutils libziparchive libsparse libcrypto_utils libadb libext4_utils
 HOST_TOOLS := adb fastboot img2simg simg2img

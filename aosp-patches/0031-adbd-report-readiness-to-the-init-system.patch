@@ -1,32 +1,25 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alex Kiernan <alex.kiernan@gmail.com>
-Date: Fri, 6 Nov 2026 10:03:09 +0000
-Subject: [PATCH] adbd: signal readiness once functionfs is serviced
+Date: Fri, 13 Nov 2026 12:00:00 +0000
+Subject: [PATCH] adbd: report readiness to the init system
 
-The gadget's UDC must not be bound until adbd is servicing functionfs:
-bind earlier and the bind is silently dropped, and the host never
-reaches CONFIGURED. adbd_main() sends sd_notify(READY=1) after
-usb_init(), but usb_init() only starts usb_ffs_open_thread, detached, so
-READY=1 races open_functionfs() - and a unit that binds the UDC on
-READY=1 (ExecStartPost with no delay) loses the race.
+Tell the init system when adbd is ready: sd_notify(READY=1) when built
+with HAVE_SYSTEMD, otherwise a byte written to the FIFO named in
+$ADBD_READY_FIFO, if set (opened non-blocking, so adbd never waits on a
+reader that has given up). Only the first call does anything.
 
-Signal readiness from the USB thread instead, once the descriptors are
-written and the transport is registered. Built without systemd, the
-same point writes a byte to the FIFO named in $ADBD_READY_FIFO instead,
-if set, for other init systems. The FIFO is opened non-blocking, so
-adbd never waits on a reader that has given up. Readiness is signalled
-once; an adbd that is not on USB still signals it from adbd_main().
+On USB, the right moment is once the USB thread has written the
+functionfs descriptors and registered the transport: the gadget's UDC
+must not be bound before then, or the bind is silently dropped and the
+host never reaches CONFIGURED. usb_init() only starts that thread, so
+an adbd on USB signals from there; otherwise adbd_main() signals before
+entering its event loop.
 
 Upstream-Status: Pending
 
 AI-Generated: Claude Opus 5.5 (Claude Code)
 Signed-off-by: Alex Kiernan <alex.kiernan@gmail.com>
 ---
- packages/modules/adb/adb.h           |  6 ++++++
- packages/modules/adb/daemon/main.cpp | 31 +++++++++++++++++++++++++---
- packages/modules/adb/daemon/usb.cpp  |  7 +++++++
- 3 files changed, 41 insertions(+), 3 deletions(-)
-
 --- a/packages/modules/adb/adb.h
 +++ b/packages/modules/adb/adb.h
 @@ -255,3 +255,9 @@ bool is_usb_enabled();
@@ -41,16 +34,20 @@ Signed-off-by: Alex Kiernan <alex.kiernan@gmail.com>
 +#endif
 --- a/packages/modules/adb/daemon/main.cpp
 +++ b/packages/modules/adb/daemon/main.cpp
-@@ -53,6 +53,8 @@
- #include <systemd/sd-daemon.h>
+@@ -45,6 +45,12 @@
+ #include "selinux/android.h"
  #endif
  
++#if defined(HAVE_SYSTEMD)
++#include <systemd/sd-daemon.h>
++#endif
++
 +#include <mutex>
 +
  #include "adb.h"
  #include "adb_auth.h"
  #include "adb_listeners.h"
-@@ -251,6 +253,27 @@ static void drop_privileges() {
+@@ -185,6 +191,27 @@ static void drop_privileges() {
  }
  #endif
  
@@ -78,24 +75,22 @@ Signed-off-by: Alex Kiernan <alex.kiernan@gmail.com>
  static void setup_adb(const std::vector<std::string>& addrs) {
  #if defined(__ANDROID__)
      // Get the first valid port from addrs and register it with mDNS.
-@@ -377,9 +400,11 @@ int adbd_main() {
+@@ -311,6 +338,12 @@ int adbd_main() {
      init_jdwp();
      D("adbd_main(): post init_jdwp()");
  
--#if defined(HAVE_SYSTEMD)
--    sd_notify(1, "READY=1");
--#endif
 +    // On USB, readiness is signalled from the USB thread once functionfs is
 +    // serviced; usb_init() has only started that thread.
 +    if (!is_usb) {
 +        adbd_notify_ready();
 +    }
- 
++
      D("Event loop starting");
      fdevent_loop();
+ 
 --- a/packages/modules/adb/daemon/usb.cpp
 +++ b/packages/modules/adb/daemon/usb.cpp
-@@ -786,6 +786,13 @@ static void usb_ffs_open_thread() {
+@@ -786,6 +786,12 @@ static void usb_ffs_open_thread() {
                  std::move(control), std::move(bulk_out), std::move(bulk_in),
                  std::move(destruction_notifier)));
          register_transport(transport);
@@ -105,7 +100,6 @@ Signed-off-by: Alex Kiernan <alex.kiernan@gmail.com>
 +        // may be bound. Binding earlier races this setup, and the bind is
 +        // silently dropped.
 +        adbd_notify_ready();
-+
          future.wait();
      }
  }

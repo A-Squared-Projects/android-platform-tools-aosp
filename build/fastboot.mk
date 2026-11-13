@@ -43,6 +43,7 @@ CPPFLAGS += \
   -D_FILE_OFFSET_BITS=64 \
   -DADB_BUILD_ID='"$(ADB_BUILD_ID)"' \
   -DPLATFORM_TOOLS_VERSION='"$(PLATFORM_TOOLS_VERSION)"' \
+  -Ibuild/platform/include \
   -Iexternal/avb \
   -Iexternal/fmtlib/include \
   -Ipackages/modules/adb \

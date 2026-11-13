@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Kiernan <alex.kiernan@gmail.com>
+Date: Fri, 13 Nov 2026 12:00:00 +0000
+Subject: [PATCH] adbd: framebuffer: root only off Android
+
+On Android the framebuffer: service's screencap is limited by AID_GRAPHICS
+and SELinux. Off Android nothing equivalent applies, so only offer it
+when adbd runs as root.
+
+Upstream-Status: Inappropriate [non-Android adbd policy]
+
+AI-Generated: Claude Opus 5.5 (Claude Code)
+Signed-off-by: Alex Kiernan <alex.kiernan@gmail.com>
+---
+--- a/packages/modules/adb/daemon/services.cpp
++++ b/packages/modules/adb/daemon/services.cpp
+@@ -301,6 +301,13 @@ unique_fd daemon_service_to_fd(std::stri
+ 
+ #if defined(__linux__)  // Android, or Linux with build/platform
+     if (name.starts_with("framebuffer:")) {
++#if !defined(__ANDROID__)
++        // Off Android nothing like AID_GRAPHICS guards the screen, so only
++        // root gets it.
++        if (getuid() != 0) {
++            return unique_fd{};
++        }
++#endif
+         return create_service_thread("fb", framebuffer_service);
+     } else if (android::base::ConsumePrefix(&name, "remount:")) {
+         std::string cmd = ADBD_REMOUNT_COMMAND " ";

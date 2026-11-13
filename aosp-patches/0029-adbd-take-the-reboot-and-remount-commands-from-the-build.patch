@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Kiernan <alex.kiernan@gmail.com>
+Date: Fri, 13 Nov 2026 12:00:00 +0000
+Subject: [PATCH] adbd: take the reboot and remount commands from the build
+
+`adb reboot` and `adb remount` run /system/bin/reboot and
+/system/bin/remount. Let the build name other commands with
+ADBD_REBOOT_COMMAND and ADBD_REMOUNT_COMMAND; Android's stay the default.
+
+Upstream-Status: Pending
+
+AI-Generated: Claude Opus 5.5 (Claude Code)
+Signed-off-by: Alex Kiernan <alex.kiernan@gmail.com>
+---
+--- a/packages/modules/adb/daemon/services.cpp
++++ b/packages/modules/adb/daemon/services.cpp
+@@ -61,6 +61,15 @@
+ #include "daemon/restart_service.h"
+ #include "daemon/shell_service.h"
+ 
++// The commands behind `adb reboot` and `adb remount`: Android's own unless the
++// build says otherwise.
++#ifndef ADBD_REBOOT_COMMAND
++#define ADBD_REBOOT_COMMAND "/system/bin/reboot"
++#endif
++#ifndef ADBD_REMOUNT_COMMAND
++#define ADBD_REMOUNT_COMMAND "/system/bin/remount"
++#endif
++
+ void reconnect_service(unique_fd fd, atransport* t) {
+     WriteFdExactly(fd.get(), "done");
+     kick_transport(t);
+@@ -159,7 +168,7 @@ static void spin_service(unique_fd fd) {
+     }
+ #endif
+     // Fall through
+-    std::string cmd = "/system/bin/reboot ";
++    std::string cmd = ADBD_REBOOT_COMMAND " ";
+     cmd += name;
+     return StartSubprocess(cmd, nullptr, SubprocessType::kRaw, SubprocessProtocol::kNone);
+ }
+@@ -294,7 +303,7 @@ unique_fd daemon_service_to_fd(std::stri
+     if (name.starts_with("framebuffer:")) {
+         return create_service_thread("fb", framebuffer_service);
+     } else if (android::base::ConsumePrefix(&name, "remount:")) {
+-        std::string cmd = "/system/bin/remount ";
++        std::string cmd = ADBD_REMOUNT_COMMAND " ";
+         cmd += name;
+         return StartSubprocess(cmd, nullptr, SubprocessType::kRaw, SubprocessProtocol::kNone);
+     } else if (android::base::ConsumePrefix(&name, "reboot:")) {

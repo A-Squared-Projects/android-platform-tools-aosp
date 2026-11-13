@@ -26,9 +26,6 @@ CPPFLAGS += \
   -Isystem/libbase/include \
   -Isystem/logging/liblog/include \
 
-ifneq ($(LIBLOG_DEBUGGABLE_PROP_FILES),)
-CPPFLAGS += -DLIBLOG_DEBUGGABLE_PROP_FILES='"$(LIBLOG_DEBUGGABLE_PROP_FILES)"'
-endif
 
 LDFLAGS += \
   -Wl,-rpath='$$ORIGIN' \

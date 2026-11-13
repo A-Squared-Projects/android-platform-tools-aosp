@@ -1,0 +1,113 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Kiernan <alex.kiernan@gmail.com>
+Date: Fri, 13 Nov 2026 12:00:00 +0000
+Subject: [PATCH] adbd: use Android's daemon platform code on Linux
+
+adbd's privilege handling (should_drop_privileges(), drop_privileges()),
+its authentication policy, USB, the --root_seclabel options and the
+platform services (root:, unroot:, remount:, reboot:, framebuffer:,
+tcpip:, usb:, ...) are only built for Android, so a Linux adbd runs as
+whatever started it, never authenticates and offers none of those
+services.
+
+Build them on any Linux. Off Android, the build supplies what they
+expect underneath (build/platform/): minijail, the AID_SHELL user,
+SELinux, and system properties (ro.* from build.prop files, everything
+else in a small store under /run), so upstream's logic runs unchanged:
+ro.secure, ro.debuggable and service.adb.root decide root, ro.adb.secure
+authentication, and `adb root` restarts adbd by exiting, for init to
+start it again.
+
+Upstream-Status: Inappropriate [needs the platform layer of a non-Android build]
+
+AI-Generated: Claude Opus 5.5 (Claude Code)
+Signed-off-by: Alex Kiernan <alex.kiernan@gmail.com>
+---
+--- a/packages/modules/adb/daemon/framebuffer_service.h
++++ b/packages/modules/adb/daemon/framebuffer_service.h
+@@ -18,6 +18,6 @@
+ 
+ #include "adb_unique_fd.h"
+ 
+-#if defined(__ANDROID__)
++#if defined(__linux__)  // Android, or Linux with build/platform
+ void framebuffer_service(unique_fd fd);
+ #endif
+--- a/packages/modules/adb/daemon/main.cpp
++++ b/packages/modules/adb/daemon/main.cpp
+@@ -36,7 +36,7 @@
+ #include <android-base/stringprintf.h>
+ #include <android-base/strings.h>
+ 
+-#if defined(__ANDROID__)
++#if defined(__linux__)  // Android, or Linux with build/platform
+ #include <libminijail.h>
+ #include <log/log_properties.h>
+ #include <scoped_minijail.h>
+@@ -59,7 +59,7 @@
+ #include "daemon/transport_daemon.h"
+ #include "daemon/watchdog.h"
+ 
+-#if defined(__ANDROID__)
++#if defined(__linux__)  // Android, or Linux with build/platform
+ static const char* root_seclabel = nullptr;
+ static const char* tim_seclabel = nullptr;
+ 
+@@ -219,7 +219,7 @@ int adbd_main() {
+     // descriptor will always be open.
+     adbd_cloexec_auth_socket();
+ 
+-#if defined(__ANDROID__)
++#if defined(__linux__)  // Android, or Linux with build/platform
+     bool device_unlocked = android::base::GetProperty("ro.boot.verifiedbootstate", "") == "orange";
+     if (device_unlocked || __android_log_is_debuggable()) {
+ #if defined(__ANDROID_RECOVERY__)
+@@ -245,7 +245,7 @@ int adbd_main() {
+           " unchanged.\n");
+     }
+ 
+-#if defined(__ANDROID__)
++#if defined(__linux__)  // Android, or Linux with build/platform
+     drop_privileges();
+ #endif
+ 
+@@ -260,7 +260,7 @@ int adbd_main() {
+ 
+     bool is_usb = false;
+ 
+-#if defined(__ANDROID__)
++#if defined(__linux__)  // Android, or Linux with build/platform
+     if (access(USB_FFS_ADB_EP0, F_OK) == 0) {
+         // Listen on USB.
+         usb_init();
+@@ -340,7 +340,7 @@ int main(int argc, char** argv) {
+         }
+ 
+         switch (c) {
+-#if defined(__ANDROID__)
++#if defined(__linux__)  // Android, or Linux with build/platform
+             case 's':
+                 root_seclabel = optarg;
+                 break;
+--- a/packages/modules/adb/daemon/restart_service.h
++++ b/packages/modules/adb/daemon/restart_service.h
+@@ -18,7 +18,7 @@
+ 
+ #include "adb_unique_fd.h"
+ 
+-#if defined(__ANDROID__)
++#if defined(__linux__)  // Android, or Linux with build/platform
+ void restart_root_service(unique_fd fd);
+ void restart_unroot_service(unique_fd fd);
+ void restart_tcp_service(unique_fd fd, int port);
+--- a/packages/modules/adb/daemon/services.cpp
++++ b/packages/modules/adb/daemon/services.cpp
+@@ -290,7 +290,7 @@ unique_fd daemon_service_to_fd(std::stri
+     }
+ #endif
+ 
+-#if defined(__ANDROID__)
++#if defined(__linux__)  // Android, or Linux with build/platform
+     if (name.starts_with("framebuffer:")) {
+         return create_service_thread("fb", framebuffer_service);
+     } else if (android::base::ConsumePrefix(&name, "remount:")) {

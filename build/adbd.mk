@@ -2,6 +2,14 @@ NAME = adbd
 
 include build/version.mk
 
+# The Android platform adbd expects (build/platform/): who AID_SHELL is, where
+# properties live, and the commands behind `adb reboot` and `adb remount`.
+ADBD_USER ?= adb
+ADBD_PROPERTY_FILES ?= /etc/build.prop:/run/build.prop
+ADBD_PROPERTY_DIR ?= /run/adbd/properties
+ADBD_REBOOT_COMMAND ?= /usr/libexec/adbd/reboot
+ADBD_REMOUNT_COMMAND ?= remount
+
 # packages/modules/adb/Android.bp
 ADBD_SRC_FILES = \
   adb.cpp \
@@ -48,6 +56,10 @@ LIBASYNCIO_SRC_FILES = libasyncio/AsyncIO.cpp
 
 LIBADBD_AUTH_SRC_FILES = libs/adbd_auth/adbd_auth.cpp
 
+PLATFORM_SRC_FILES = \
+  minijail.cpp \
+  system_properties.cpp \
+
 LOCAL_SRC_FILES := \
   $(ADBD_SRC_FILES) \
   $(LIBADBD_adbconnection_server_SRC_FILES) \
@@ -59,6 +71,7 @@ SOURCES := \
   $(foreach source, $(LIBDIAGNOSE_USB_SRC_FILES), system/core/$(source)) \
   $(foreach source, $(LIBASYNCIO_SRC_FILES), system/core/$(source)) \
   $(foreach source, $(LIBADBD_AUTH_SRC_FILES), frameworks/native/$(source)) \
+  $(foreach source, $(PLATFORM_SRC_FILES), build/platform/$(source)) \
 
 OBJECTS = $(SOURCES:.cpp=.$(NAME).o)
 
@@ -70,9 +83,14 @@ CPPFLAGS += \
   -DADB_BUILD_ID='"$(ADB_BUILD_ID)"' \
   -DPLATFORM_TOOLS_VERSION='"$(PLATFORM_TOOLS_VERSION)"' \
   -DADB_HOST=0 \
-  -DALLOW_ADBD_ROOT=1 \
   -DANDROID_BASE_UNIQUE_FD_DISABLE_IMPLICIT_CONVERSION=1 \
   -DPAGE_SIZE=4096 \
+  -DADBD_USER='"$(ADBD_USER)"' \
+  -DADBD_PROPERTY_FILES='"$(ADBD_PROPERTY_FILES)"' \
+  -DADBD_PROPERTY_DIR='"$(ADBD_PROPERTY_DIR)"' \
+  -DADBD_REBOOT_COMMAND='"$(ADBD_REBOOT_COMMAND)"' \
+  -DADBD_REMOUNT_COMMAND='"$(ADBD_REMOUNT_COMMAND)"' \
+  -Ibuild/platform/include \
   -Iframeworks/native/libs/adbd_auth/include/ \
   -Ipackages/modules/adb \
   -Ipackages/modules/adb/crypto/include \
@@ -96,6 +114,7 @@ LDFLAGS += \
   -lbase \
   -lbrotlidec \
   -lbrotlienc \
+  -lcap \
   -l:libcrypto.so.0 \
   -lcutils \
   -llog \
@@ -107,14 +126,12 @@ LDFLAGS += \
   -l:libssl.so.0 \
   -lzstd \
   -pie \
+  -Wl,--export-dynamic-symbol='__system_property_*' \
+  -Wl,--export-dynamic-symbol=__android_log_is_debuggable \
 
 ifeq ($(HAVE_SYSTEMD),1)
 LDFLAGS += -lsystemd
 CPPFLAGS += -DHAVE_SYSTEMD
-endif
-
-ifeq ($(ADBD_AUTH_UNLESS_DEBUGGABLE),1)
-CPPFLAGS += -DADBD_AUTH_UNLESS_DEBUGGABLE
 endif
 
 ifneq ($(ADBD_AUTH_KEY_PATHS),)

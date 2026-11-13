@@ -18,6 +18,19 @@ makefiles and several patches; nothing here tracks Debian any more.
   needs; `build/*.mk` build one library or tool each; `build/version.mk` sets
   `PLATFORM_TOOLS_VERSION` (from the tree's own `Pkg.Revision`) and
   `ADB_BUILD_ID`.
+- `build/platform/`: the Android platform adbd expects, supplied for Linux so
+  adbd's own code runs unchanged rather than being patched case by case:
+  - system properties (`system_properties.cpp`): `ro.*` from build.prop-style
+    files (`ADBD_PROPERTY_FILES`, default `/etc/build.prop:/run/build.prop`,
+    later files win), everything else one file per property under
+    `ADBD_PROPERTY_DIR` (default `/run/adbd/properties`). It overrides
+    libbase's weak non-bionic implementation and liblog's
+    `__android_log_is_debuggable()`, so upstream's `ro.secure`,
+    `ro.debuggable`, `service.adb.root` and `ro.adb.secure` handling applies;
+  - minijail (`minijail.cpp`): `AID_SHELL` is the Linux user `ADBD_USER`
+    (default `adb`), with its own groups;
+  - SELinux, `build/version.h`, `platform_tools_version.h`: stand-ins;
+  - `adbd-reboot`: the default `ADBD_REBOOT_COMMAND`.
 - `aosp-patches/`: the patch stack (`aosp-patches/series`). Every patch
   carries an `Upstream-Status`.
 - `scripts/export-oe-patches.sh <recipe-dir>`: copies `build/` and the
@@ -33,9 +46,16 @@ makefiles and several patches; nothing here tracks Debian any more.
     make -f build/Makefile host-tools    # adb, fastboot, img2simg, simg2img
 
 Output goes to `out/`. Pass `SYSROOT=`, `PROTOC=` and any of the options the
-makefiles read (`ADB_BUILD_ID`, `HAVE_SYSTEMD=1`,
-`ADBD_AUTH_UNLESS_DEBUGGABLE=1`, `ADBD_AUTH_KEY_PATHS=`,
-`LIBLOG_DEBUGGABLE_PROP_FILES=`) on the make command line.
+makefiles read (`ADB_BUILD_ID`, `HAVE_SYSTEMD=1`, `ADBD_AUTH_KEY_PATHS=`,
+`ADBD_USER=`, `ADBD_PROPERTY_FILES=`, `ADBD_PROPERTY_DIR=`,
+`ADBD_REBOOT_COMMAND=`, `ADBD_REMOUNT_COMMAND=`) on the make command line.
+
+adbd, on the device: it needs a user `ADBD_USER`; root/auth policy comes
+from `ro.secure`, `ro.debuggable` and `ro.adb.secure` in the build.prop
+files, as on Android; `adb root`/`unroot` and `adb tcpip`/`usb` make adbd
+exit for init to restart it (any restart policy that restarts on exit);
+readiness is `sd_notify` with `HAVE_SYSTEMD=1`, else `$ADBD_READY_FIFO`;
+`adb remount` runs `ADBD_REMOUNT_COMMAND` (default `remount` on `$PATH`).
 
 The non-default quilt names keep out of the way of OE's own `${S}/patches`
 and `.pc`.
