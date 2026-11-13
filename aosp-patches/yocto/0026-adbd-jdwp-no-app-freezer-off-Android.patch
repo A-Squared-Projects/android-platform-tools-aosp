@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Kiernan <alex.kiernan@gmail.com>
+Date: Fri, 13 Nov 2026 12:00:00 +0000
+Subject: [PATCH] adbd: jdwp: no app freezer check off Android
+
+37.0.0's jdwp_service.cpp asks libprocessgroup where a process's Android app
+cgroup freezer state lives (CgroupGetAttributePathForProcess("FreezerState")),
+to skip frozen apps. Neither the freezer nor libprocessgroup's task profiles
+exist on a plain Linux system, so report every process as not frozen and
+don't include processgroup.h there.
+
+Upstream-Status: Inappropriate [non-Android adbd]
+
+AI-Generated: Claude Opus 5.5 (Claude Code)
+Signed-off-by: Alex Kiernan <alex.kiernan@gmail.com>
+---
+--- a/packages/modules/adb/daemon/jdwp_service.cpp
++++ b/packages/modules/adb/daemon/jdwp_service.cpp
+@@ -37,7 +37,9 @@
+ #include <android-base/cmsg.h>
+ #include <android-base/file.h>
+ #include <android-base/unique_fd.h>
++#if defined(__ANDROID__)
+ #include <processgroup/processgroup.h>
++#endif
+ 
+ #include "adb.h"
+ #include "adb_io.h"
+@@ -307,7 +309,8 @@ CloseProcess:
+     if (debuggable || profileable) app_process_list_updated();
+ }
+ 
+-static bool is_process_in_freezer(const ProcessInfo& info) {
++static bool is_process_in_freezer([[maybe_unused]] const ProcessInfo& info) {
++#if defined(__ANDROID__)
+     // Check "/sys/fs/cgroup/apps/uid_{}/pid_{}/cgroup.freeze". Since "apps" is configurable,
+     // use libprocessgroup to make sure we always have the right path.
+     std::string path;
+@@ -323,6 +326,11 @@ static bool is_process_in_freezer(const
+     }
+ 
+     return content == "1\n";
++#else
++    // The app cgroup freezer, and libprocessgroup's task profiles that locate
++    // it, are Android-only.
++    return false;
++#endif
+ }
+ 
+ static unique_fd send_socket_to_process(JdwpProcess& proc) {
