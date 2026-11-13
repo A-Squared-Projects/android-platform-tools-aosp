@@ -29,7 +29,11 @@ makefiles and several patches; nothing here tracks Debian any more.
     `ro.debuggable`, `service.adb.root` and `ro.adb.secure` handling applies;
   - minijail (`minijail.cpp`): `AID_SHELL` is the Linux user `ADBD_USER`
     (default `adb`), with its own groups;
-  - SELinux, `build/version.h`, `platform_tools_version.h`: stand-ins;
+  - `selinux_android_setcon()` (`selinux.cpp`), for `--root_seclabel`: the
+    context `adb root` runs in. SELinux's `setcon()` when built with
+    `HAVE_SELINUX=1` and enabled, else SMACK's process label if SMACK is
+    active, else it fails (and adbd comes back unprivileged);
+  - `build/version.h`, `platform_tools_version.h`: stand-ins;
   - `adbd-reboot`: the default `ADBD_REBOOT_COMMAND`.
 - `aosp-patches/`: the patch stack (`aosp-patches/series`). Every patch
   carries an `Upstream-Status`.
@@ -48,7 +52,8 @@ makefiles and several patches; nothing here tracks Debian any more.
 Output goes to `out/`. Pass `SYSROOT=`, `PROTOC=` and any of the options the
 makefiles read (`ADB_BUILD_ID`, `HAVE_SYSTEMD=1`, `ADBD_AUTH_KEY_PATHS=`,
 `ADBD_USER=`, `ADBD_PROPERTY_FILES=`, `ADBD_PROPERTY_DIR=`,
-`ADBD_REBOOT_COMMAND=`, `ADBD_REMOUNT_COMMAND=`) on the make command line.
+`ADBD_REBOOT_COMMAND=`, `ADBD_REMOUNT_COMMAND=`, `HAVE_SELINUX=1`) on the make
+command line.
 
 adbd, on the device: it needs a user `ADBD_USER`; root/auth policy comes
 from `ro.secure`, `ro.debuggable` and `ro.adb.secure` in the build.prop

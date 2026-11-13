@@ -1,13 +1,15 @@
 /*
- * adbd only uses selinux_android_setcon() when started with --root_seclabel.
- * There's no Android SELinux policy here, so asking for one fails, and adbd
- * treats that as fatal rather than running in the wrong context.
+ * Android's libselinux extension, as far as adbd uses it: switching to the
+ * --root_seclabel context when running as root. See build/platform/selinux.cpp.
  */
 #pragma once
 
-#include <errno.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-static inline int selinux_android_setcon(const char* /* context */) {
-    errno = ENOTSUP;
-    return -1;
+int selinux_android_setcon(const char* context);
+
+#ifdef __cplusplus
 }
+#endif

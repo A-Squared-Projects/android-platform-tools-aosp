@@ -58,6 +58,7 @@ LIBADBD_AUTH_SRC_FILES = libs/adbd_auth/adbd_auth.cpp
 
 PLATFORM_SRC_FILES = \
   minijail.cpp \
+  selinux.cpp \
   system_properties.cpp \
 
 LOCAL_SRC_FILES := \
@@ -132,6 +133,11 @@ LDFLAGS += \
 ifeq ($(HAVE_SYSTEMD),1)
 LDFLAGS += -lsystemd
 CPPFLAGS += -DHAVE_SYSTEMD
+endif
+
+ifeq ($(HAVE_SELINUX),1)
+LDFLAGS += -lselinux
+CPPFLAGS += -DHAVE_SELINUX
 endif
 
 ifneq ($(ADBD_AUTH_KEY_PATHS),)
