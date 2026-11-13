@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT (see build/COPYING)
 NAME = fastboot
 
 include build/version.mk

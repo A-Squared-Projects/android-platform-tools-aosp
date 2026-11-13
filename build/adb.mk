@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT (see build/COPYING)
 NAME = adb
 
 include build/version.mk

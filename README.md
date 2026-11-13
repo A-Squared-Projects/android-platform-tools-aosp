@@ -78,3 +78,11 @@ from AOSP release tags (`Pkg.Revision` in
 `development/sdk/plat_tools_source.prop_template` gives the version).
 
 Never commit the tree with patches applied.
+
+## Licensing
+
+The AOSP sources keep their own licenses (mostly Apache-2.0; see each
+project's NOTICE/LICENSE and file headers). `build/` is MIT (Expat), see
+`build/COPYING`; it started from Debian's android-platform-tools packaging.
+The patches in `aosp-patches/` are under the license of the files they
+change.

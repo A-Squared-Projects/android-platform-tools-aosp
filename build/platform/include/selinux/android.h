@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2026 Alex Kiernan <alex.kiernan@gmail.com>
 /*
  * Android's libselinux extension, as far as adbd uses it: switching to the
  * --root_seclabel context when running as root. See build/platform/selinux.cpp.

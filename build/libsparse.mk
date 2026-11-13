@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT (see build/COPYING)
 NAME = libsparse
 
 # system/core/libsparse/Android.bp

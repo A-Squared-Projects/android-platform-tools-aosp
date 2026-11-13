@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT (see build/COPYING)
 NAME = libbase
 
 # system/libbase/Android.bp

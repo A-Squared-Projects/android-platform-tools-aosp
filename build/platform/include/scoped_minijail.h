@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2026 Alex Kiernan <alex.kiernan@gmail.com>
 #pragma once
 
 #include <memory>

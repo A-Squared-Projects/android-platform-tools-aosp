@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT (see build/COPYING)
 NAME = liblog
 
 # system/logging/liblog/Android.bp

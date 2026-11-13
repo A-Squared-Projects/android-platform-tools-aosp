@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT (see build/COPYING)
 NAME = libext4_utils
 
 # system/extras/ext4_utils/Android.bp

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT (see build/COPYING)
 # Version strings compiled into adb, adbd and fastboot.
 #
 # PLATFORM_TOOLS_VERSION defaults to the release the tree declares itself to

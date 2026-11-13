@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT (see build/COPYING)
 NAME:= libcrypto_utils
 
 SOURCES = system/core/libcrypto_utils/android_pubkey.cpp

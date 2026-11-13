@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2026 Alex Kiernan <alex.kiernan@gmail.com>
 /*
  * adbd's reboot command (Android's /system/bin/reboot): `adbd-reboot [target]`.
  *

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2026 Alex Kiernan <alex.kiernan@gmail.com>
 /*
  * minijail, as far as adbd's drop_privileges() needs it, for Linux systems.
  *

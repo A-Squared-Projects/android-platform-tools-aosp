@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2026 Alex Kiernan <alex.kiernan@gmail.com>
 /*
  * The part of minijail's API that adbd's drop_privileges() uses, for Linux
  * systems without minijail. See build/platform/minijail.cpp.

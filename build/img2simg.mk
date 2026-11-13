@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT (see build/COPYING)
 NAME = img2simg
 
 SOURCES = img2simg.cpp

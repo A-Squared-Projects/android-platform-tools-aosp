@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT (see build/COPYING)
 # Top-level build for the Yocto android-tools recipe: builds the libraries a
 # tool needs, in order, then the tool. Run from the top of the tree:
 #

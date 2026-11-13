@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2026 Alex Kiernan <alex.kiernan@gmail.com>
 /*
  * selinux_android_setcon() for Linux: the security context adbd switches to
  * when it runs as root and was started with --root_seclabel=<context>.

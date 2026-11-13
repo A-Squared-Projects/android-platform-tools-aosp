@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (C) 2026 Alex Kiernan <alex.kiernan@gmail.com>
 /*
  * Soong's build/version.h. The build number is ADB_BUILD_ID, set by
  * build/version.mk.
