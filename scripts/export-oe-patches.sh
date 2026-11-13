@@ -11,8 +11,8 @@
 # build.
 set -euo pipefail
 
-DEST=${1:?usage: $0 <recipe-dir>}
-ROOT=$(git rev-parse --show-toplevel)
+DEST=$(realpath -m "${1:?usage: $0 <recipe-dir>}")
+ROOT=$(git -C "$(dirname "$(realpath "$0")")" rev-parse --show-toplevel)
 cd "$ROOT"
 
 if [ -n "$(git status --porcelain)" ]; then
