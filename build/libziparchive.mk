@@ -26,7 +26,7 @@ CPPFLAGS += \
 
 LDFLAGS += \
   -Lout \
-  -Wl,-rpath=/usr/lib/$(DEB_HOST_MULTIARCH)/android \
+  -Wl,-rpath='$$ORIGIN' \
   -Wl,-soname,$(NAME).so.0 \
   -lbase \
   -llog \

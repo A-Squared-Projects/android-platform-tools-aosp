@@ -80,12 +80,6 @@ STATIC_LIBS = \
   out/libadb.a \
   out/extras/libext4_utils.a \
 
-# -latomic should be the last library specified
-# https://github.com/android/ndk/issues/589
-ifneq ($(filter armel mipsel,$(DEB_HOST_ARCH)),)
-  LDFLAGS += -latomic
-endif
-
 out/$(NAME): $(OBJECTS) $(STATIC_LIBS)
 	$(CXX) -o $@ $^ $(LDFLAGS)
 

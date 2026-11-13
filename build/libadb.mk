@@ -83,7 +83,6 @@ CXXFLAGS += \
 
 CPPFLAGS += \
   -DPLATFORM_TOOLS_VERSION='"$(PLATFORM_TOOLS_VERSION)"' \
-  -DADB_VERSION='"$(DEB_VERSION)"' \
   -DANDROID_BASE_UNIQUE_FD_DISABLE_IMPLICIT_CONVERSION=1 \
   -Ipackages/modules/adb \
   -Ipackages/modules/adb/crypto/include \

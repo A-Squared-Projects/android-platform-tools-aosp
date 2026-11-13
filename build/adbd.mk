@@ -70,7 +70,6 @@ CPPFLAGS += \
   -DADB_BUILD_ID='"$(ADB_BUILD_ID)"' \
   -DPLATFORM_TOOLS_VERSION='"$(PLATFORM_TOOLS_VERSION)"' \
   -DADB_HOST=0 \
-  -DADB_VERSION='"$(DEB_VERSION)"' \
   -DALLOW_ADBD_ROOT=1 \
   -DANDROID_BASE_UNIQUE_FD_DISABLE_IMPLICIT_CONVERSION=1 \
   -DPAGE_SIZE=4096 \
@@ -125,12 +124,6 @@ endif
 STATIC_LIBS = \
   out/libadb.a \
   out/libcrypto_utils.a \
-
-# -latomic should be the last library specified
-# https://github.com/android/ndk/issues/589
-ifneq ($(filter armel mipsel,$(DEB_HOST_ARCH)),)
-  LDFLAGS += -latomic
-endif
 
 out/$(NAME): $(OBJECTS) $(STATIC_LIBS)
 	$(CXX) -o $@ $^ $(LDFLAGS)

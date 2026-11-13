@@ -47,12 +47,6 @@ LDFLAGS += \
   -lpthread \
   -shared
 
-# -latomic should be the last library specified
-# https://github.com/android/ndk/issues/589
-ifneq ($(filter armel mipsel,$(DEB_HOST_ARCH)),)
-  LDFLAGS += -latomic
-endif
-
 build: $(OBJECTS_CC) $(OBJECTS_CPP)
 	$(CXX) $^ -o out/$(NAME).so.0 $(LDFLAGS)
 	ln -sf $(NAME).so.0 out/$(NAME).so

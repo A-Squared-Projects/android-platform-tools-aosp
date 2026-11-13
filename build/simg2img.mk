@@ -12,7 +12,7 @@ CPPFLAGS += \
 
 LDFLAGS += \
   -Lout \
-  -Wl,-rpath=/usr/lib/$(DEB_HOST_MULTIARCH)/android \
+  -Wl,-rpath='$$ORIGIN/../lib/android' \
   -lbase \
   -llog \
   -lpthread \
