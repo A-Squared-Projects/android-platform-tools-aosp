@@ -1,0 +1,15 @@
+Description: Added missing headers causing compile errors
+Author: Umang Parmar <umangjparmar@gmail.com>
+Forwarded: not-needed
+Upstream-Status: Inappropriate [inherited from Debian's android-platform-tools packaging]
+
+--- a/packages/modules/adb/pairing_connection/pairing_server.cpp
++++ b/packages/modules/adb/pairing_connection/pairing_server.cpp
+@@ -19,6 +19,7 @@
+ #include <sys/epoll.h>
+ #include <sys/eventfd.h>
+ 
++#include <condition_variable>
+ #include <deque>
+ #include <iomanip>
+ #include <mutex>
