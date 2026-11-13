@@ -4,11 +4,10 @@ Unmodified AOSP sources for platform-tools, with a quilt patch stack on top.
 
 - `scripts/aosp-projects`: AOSP projects and where they live in the tree
 - `scripts/fetch-aosp.sh`: replaces the tree with a given `platform-tools-*` tag, filtered through `aosp.excludes`
-- `debian/**/*.mk`: Debian's hand-written makefiles (from 35.0.2-1~exp6), which replace Soong; the Yocto recipe builds with these
+- `debian/**/*.mk`: Debian's hand-written makefiles (from 35.0.2-1~exp6, updated since), which replace Soong; the Yocto recipe builds with these. `debian/system/version.mk` sets `PLATFORM_TOOLS_VERSION` and `ADB_BUILD_ID`; override either on the make command line
 - `aosp-patches/debian/`: Debian's patches (from 35.0.2; from 37.0.0 on, rebased here since Debian has no newer release)
 - `aosp-patches/yocto/`: Yocto patches (from meta-oe android-tools)
-- `aosp-patches/series`: Debian's full series
-- `aosp-patches/series.yocto`: what Yocto applies, which is Debian's series minus the MIPS reverts, then `yocto/`
+- `aosp-patches/series.yocto`: the patch series: Debian's patches (without Debian's MIPS reverts), then `yocto/`
 
 Applying the patches:
 

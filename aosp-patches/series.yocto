@@ -1,4 +1,4 @@
-# Debian patches used by the Yocto build (no MIPS reverts)
+# Debian patches, then Yocto patches
 debian/gcc-only/stdatomic.patch
 debian/gcc-only/Nullable.patch
 debian/system/unwindstack-porting.patch
