@@ -17,7 +17,7 @@ ADBD_SRC_FILES = \
   daemon/jdwp_service.cpp \
   daemon/logging.cpp \
   daemon/main.cpp \
-  daemon/transport_local.cpp \
+  daemon/transport_socket_server.cpp \
   daemon/usb.cpp \
   daemon/usb_ffs.cpp \
 #  adb_mdns.cpp \
@@ -31,6 +31,7 @@ LIBADBD_services_SRC_FILES := \
   daemon/file_sync_service.cpp \
   daemon/services.cpp \
   daemon/shell_service.cpp \
+  daemon/tradeinmode.cpp \
   shell_service_protocol.cpp \
 
 # packages/modules/adb/libs/libadbd_fs/Android.bp

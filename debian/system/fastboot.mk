@@ -8,6 +8,7 @@ fastboot_SOURCES = \
   filesystem.cpp \
   fs.cpp \
   main.cpp \
+  h2h_workaround.cpp \
   socket.cpp \
   storage.cpp \
   super_flash_helper.cpp \
@@ -19,7 +20,7 @@ fastboot_SOURCES = \
   \
   usb_linux.cpp \
 
-# system/core/fs_mgr/liblp/Android.bp
+# system/fs/fs_mgr/liblp/Android.bp
 fs_mgr_liblp_SOURCES := \
   builder.cpp \
   super_layout_builder.cpp \
@@ -32,7 +33,7 @@ fs_mgr_liblp_SOURCES := \
 
 SOURCES := \
   $(foreach source, $(fastboot_SOURCES), system/core/fastboot/$(source)) \
-  $(foreach source, $(fs_mgr_liblp_SOURCES), system/core/fs_mgr/liblp/$(source))
+  $(foreach source, $(fs_mgr_liblp_SOURCES), system/fs/fs_mgr/liblp/$(source))
 OBJECTS = $(SOURCES:.cpp=.o)
 
 CXXFLAGS += -fpermissive
@@ -44,10 +45,10 @@ CPPFLAGS += \
   -Ipackages/modules/adb \
   -Isystem/core/demangle/include \
   -Isystem/core/diagnose_usb/include \
-  -Isystem/core/fs_mgr/include \
-  -Isystem/core/fs_mgr/include_fstab \
-  -Isystem/core/fs_mgr/liblp/include \
-  -Isystem/core/fs_mgr/libstorage_literals \
+  -Isystem/fs/fs_mgr/include \
+  -Isystem/fs/fs_mgr/include_fstab \
+  -Isystem/fs/fs_mgr/liblp/include \
+  -Isystem/fs/fs_mgr/libstorage_literals \
   -Isystem/core/include \
   -Isystem/core/libcutils/include \
   -Isystem/core/libsparse/include \

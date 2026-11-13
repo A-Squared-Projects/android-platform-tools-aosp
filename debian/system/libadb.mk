@@ -4,6 +4,7 @@ NAME := libadb
 LIBADB_SRC_FILES := \
   adb_unique_fd.cpp \
   adb_utils.cpp \
+  apacket_reader.cpp \
   fdevent/fdevent.cpp \
   sysdeps/env.cpp \
   sysdeps/errno.cpp \

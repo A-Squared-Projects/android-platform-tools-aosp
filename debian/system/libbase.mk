@@ -2,7 +2,6 @@ NAME = libbase
 
 # system/libbase/Android.bp
 SOURCES = \
-  abi_compatibility.cpp \
   chrono_utils.cpp \
   cmsg.cpp \
   file.cpp \

@@ -20,7 +20,6 @@ ADB_SRC_FILES = \
   client/console.cpp \
   client/adb_install.cpp \
   client/line_printer.cpp \
-  client/fastdeploycallbacks.cpp \
   client/incremental.cpp \
   client/incremental_server.cpp \
   client/incremental_utils.cpp \
@@ -39,12 +38,19 @@ LIBADB_host_SRC_FILES := \
   client/auth.cpp \
   client/adb_wifi.cpp \
   client/usb_libusb.cpp \
-  client/transport_local.cpp \
+  client/usb_libusb_device.cpp \
+  client/usb_libusb_hotplug.cpp \
+  client/usb_libusb_inhouse_hotplug.cpp \
+  client/detach.cpp \
+  client/discovered_services.cpp \
+  client/mdns_tracker.cpp \
+  client/transport_emulator.cpp \
   client/mdns_utils.cpp \
   client/transport_usb.cpp \
   client/pairing/pairing_client.cpp \
   \
   client/usb_linux.cpp \
+  client/usb_linux_netlink.cpp \
 
 LOCAL_SRC_FILES := \
   $(ADB_SRC_FILES) \

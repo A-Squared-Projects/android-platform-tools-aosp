@@ -8,6 +8,7 @@ libcutils_sockets_sources = \
   socket_local_client_unix.cpp \
   socket_local_server_unix.cpp \
   socket_network_client_unix.cpp \
+  sockets_utils.cpp \
   sockets_unix.cpp \
 
 libcutils_nonwindows_sources = \
