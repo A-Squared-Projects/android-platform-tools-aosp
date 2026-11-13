@@ -17,7 +17,7 @@ EXCLUDES="$ROOT/aosp.excludes"
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
-while read -r path name; do
+while read -r path name _; do
   case "$path" in ''|'#'*) continue ;; esac
   echo ">> $name @ $TAG -> $path"
   git -c advice.detachedHead=false clone --quiet --depth=1 --branch "$TAG" \

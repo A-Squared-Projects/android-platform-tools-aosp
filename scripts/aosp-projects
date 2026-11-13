@@ -1,21 +1,14 @@
-dalvik                       platform/dalvik
-development                  platform/development
+# <path> <project> [workbench-only]
+# workbench-only: imported here, not fetched by the recipe (AOSP_PROJECTS).
+development                  platform/development workbench-only
 external/avb                 platform/external/avb
-external/cpu_features        platform/external/cpu_features
 external/fmtlib              platform/external/fmtlib
-external/mdnsresponder       platform/external/mdnsresponder
-external/openscreen          platform/external/openscreen
-external/lzma                platform/external/lzma
 frameworks/native            platform/frameworks/native
-libnativehelper              platform/libnativehelper
 packages/modules/adb         platform/packages/modules/adb
 system/core                  platform/system/core
 system/extras                platform/system/extras
 system/fs/fs_mgr             platform/system/fs/fs_mgr
-system/incremental_delivery  platform/system/incremental_delivery
 system/libbase               platform/system/libbase
-system/libprocinfo           platform/system/libprocinfo
 system/libziparchive         platform/system/libziparchive
 system/logging               platform/system/logging
 system/tools/mkbootimg       platform/system/tools/mkbootimg
-system/unwinding             platform/system/unwinding

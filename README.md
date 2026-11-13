@@ -10,17 +10,21 @@ makefiles and several patches; nothing here tracks Debian any more.
 ## Layout
 
 - AOSP sources, unmodified, at their AOSP paths (`packages/modules/adb`,
-  `system/core`, ...). `scripts/aosp-projects` lists the projects;
-  `aosp.excludes` lists what's left out (prebuilts, test data, ...).
+  `system/core`, ...). `scripts/aosp-projects` lists the projects: the ones
+  the build uses (the recipe's `AOSP_PROJECTS`), plus `development`, imported
+  only for the version; `aosp.excludes` lists what's left out (prebuilts,
+  test data, ...).
 - `build/`: the build. `build/Makefile` builds a tool and the libraries it
   needs; `build/*.mk` build one library or tool each; `build/version.mk` sets
   `PLATFORM_TOOLS_VERSION` (from the tree's own `Pkg.Revision`) and
   `ADB_BUILD_ID`.
 - `aosp-patches/`: the patch stack (`aosp-patches/series`). Every patch
   carries an `Upstream-Status`.
-- `scripts/export-oe-patches.sh <recipe-dir>`: copies the stack into an OE
-  recipe directory and writes `android-tools-aosp-patches.inc` (SRCREV plus
-  the patches in SRC_URI).
+- `scripts/export-oe-patches.sh <recipe-dir>`: copies `build/` and the
+  patch stack into the OE recipe directory and writes
+  `android-tools-aosp-patches.inc` (the patches in SRC_URI). The recipe
+  fetches the AOSP projects itself, from android.googlesource.com at
+  `AOSP_TAG`; this repo is where releases get imported and patches rebased.
 
 ## Building
 
