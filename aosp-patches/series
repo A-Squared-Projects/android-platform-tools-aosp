@@ -1,0 +1,29 @@
+# Debian (synced from salsa debian/patches)
+debian/revert/Revert-Remove-mips-support.patch
+debian/revert/Revert-Remove-mips-build.patch
+debian/revert/Revert-Remove-mips-support-fr.patch
+debian/revert/Revert-Remove-a-file-we-haven-t-built-since-2013.patch
+debian/revert/support-mips.patch
+debian/revert/Revert-3-Add-rust-demangling.patch
+debian/revert/Revert-Enforcing-static-invariants-to-prevent-failur.patch
+debian/gcc-only/stdatomic.patch
+debian/gcc-only/workaround__builtin_available.patch
+debian/gcc-only/Nullable.patch
+debian/system/unwindstack-porting.patch
+debian/system/move-log-file-to-proper-dir.patch
+debian/system/Added-missing-headers.patch
+debian/system/libusb-header-path.patch
+debian/system/throw-exception-on-unknown-os.patch
+debian/system/hard-code-build-number.patch
+debian/system/stub-out-fastdeploy.patch
+debian/system/Implement-const_iterator-operator.patch
+debian/system/Drop-gki-dependency-from-mkbootimg.patch
+debian/system/add-missing-headers.patch
+debian/system/Support-MIPS-for-Android-V.patch
+debian/development/typos.patch
+debian/adbd/adbd-allow-usb-on-linux.patch
+debian/adbd/adbd-allow-notifying-systemd.patch
+debian/adbd/adbd-usb-drop-property-monitor.patch
+debian/adbd/adbd-don-t-require-authorization-on-Linux.patch
+
+# Yocto
