@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Replace the AOSP source directories in this repo with a fresh export of
-# the given platform-tools tag.
+# the given AOSP tag: an android-*_r* release tag (scripts/check-aosp-releases.sh
+# lists them), or platform-tools-X.Y.Z up to 35.0.2.
 #
-# usage: scripts/fetch-aosp.sh platform-tools-X.Y.Z
+# usage: scripts/fetch-aosp.sh <tag>
 #
 # Projects are listed in scripts/aosp-projects ("<path> <project>" per line).
 # Paths matching aosp.excludes are dropped (prebuilts, test data, binaries).
 set -euo pipefail
 
-TAG=${1:?usage: $0 platform-tools-X.Y.Z}
+TAG=${1:?usage: $0 <tag>}
 AOSP=${AOSP:-https://android.googlesource.com}
 ROOT=$(git rev-parse --show-toplevel)
 PROJECTS="$ROOT/scripts/aosp-projects"
@@ -32,5 +33,6 @@ done
 (cd "$WORK" && tar --create --exclude-from="$EXCLUDES" --sort=name ./*) \
   | tar --extract --directory="$ROOT"
 
-echo "Imported $TAG. Review with 'git status', then:"
-echo "  git add -A && git commit -m 'Import $TAG' && git tag aosp/${TAG#platform-tools-}"
+VERSION=$(sed -n 's/^Pkg\.Revision=//p' "$ROOT/development/sdk/plat_tools_source.prop_template")
+echo "Imported $TAG (platform-tools $VERSION). Review with 'git status', then:"
+echo "  git add -A && git commit -m 'Import platform-tools $VERSION ($TAG)' && git tag aosp/$VERSION"

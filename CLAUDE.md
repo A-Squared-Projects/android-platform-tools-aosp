@@ -62,5 +62,8 @@ then commit in the layer.
 Google stopped tagging `platform-tools-*` after 35.0.2; use AOSP release tags
 (`android-17.0.0_r1` is 37.0.0; `Pkg.Revision` in
 `development/sdk/plat_tools_source.prop_template` gives the version).
-`scripts/fetch-aosp.sh <tag>`, commit, tag `aosp/<version>`, then rebase the
-stack and update `build/*.mk` source lists against the tag's Android.bp.
+`scripts/check-aosp-releases.sh` lists recent tags with their versions and
+marks those newer than the last import; `--all` also checks every project in
+`scripts/aosp-projects` has the tag. Then `scripts/fetch-aosp.sh <tag>`,
+commit, tag `aosp/<version>` (it prints both), rebase the stack, and update
+`build/*.mk` source lists against the tag's Android.bp.

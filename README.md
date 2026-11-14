@@ -67,7 +67,8 @@ and `.pc`.
 
 ## New upstream release
 
-    scripts/fetch-aosp.sh <tag>          # platform-tools-X.Y.Z, or android-N.0.0_rM
+    scripts/check-aosp-releases.sh --all # newer tags, and whether every project has them
+    scripts/fetch-aosp.sh <tag>          # android-N.0.0_rM (or platform-tools-X.Y.Z)
     git add -A && git commit -m "Import platform-tools X.Y.Z (<tag>)" && git tag aosp/X.Y.Z
     QUILT_PATCHES=aosp-patches QUILT_PC=.pc-aosp quilt push -a
     # fix and refresh failing patches, update build/*.mk source lists, then
