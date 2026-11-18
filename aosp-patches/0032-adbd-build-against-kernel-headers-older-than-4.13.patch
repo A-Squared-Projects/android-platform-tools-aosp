@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Kiernan <alex.kiernan@gmail.com>
+Date: Wed, 18 Nov 2026 16:00:00 +0000
+Subject: [PATCH] adbd: build against kernel headers older than 4.13
+
+struct iocb's aio_rw_flags arrived in 4.13; before that the field is
+aio_reserved1, which the kernel requires to be zero. The control block is
+zero-initialised and nothing else writes that field, so against older
+headers there is nothing to set.
+
+Upstream-Status: Inappropriate [kernels older than 4.13]
+
+AI-Generated: Claude Opus 5.5 (Claude Code)
+Signed-off-by: Alex Kiernan <alex.kiernan@gmail.com>
+---
+--- a/packages/modules/adb/daemon/usb.cpp
++++ b/packages/modules/adb/daemon/usb.cpp
+@@ -28,6 +28,7 @@
+ #include <unistd.h>
+ 
+ #include <linux/usb/functionfs.h>
++#include <linux/version.h>
+ #include <sys/eventfd.h>
+ 
+ #include <algorithm>
+@@ -492,7 +493,9 @@ struct UsbFfsConnection : public Connect
+     IoReadBlock CreateReadBlock(uint64_t id) {
+         IoReadBlock block;
+         PrepareReadBlock(&block, id);
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 13, 0)
+         block.control.aio_rw_flags = 0;
++#endif
+         block.control.aio_lio_opcode = IOCB_CMD_PREAD;
+         block.control.aio_reqprio = 0;
+         block.control.aio_fildes = read_fd_.get();
+@@ -630,7 +633,9 @@ struct UsbFfsConnection : public Connect
+         auto block = IoWriteBlock();
+         block.payload = std::move(payload);
+         block.control.aio_data = static_cast<uint64_t>(TransferId::write(id));
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 13, 0)
+         block.control.aio_rw_flags = 0;
++#endif
+         block.control.aio_lio_opcode = IOCB_CMD_PWRITE;
+         block.control.aio_reqprio = 0;
+         block.control.aio_fildes = write_fd_.get();
