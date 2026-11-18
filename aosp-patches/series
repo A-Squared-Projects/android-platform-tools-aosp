@@ -27,3 +27,4 @@ adbd-usb-drop-property-monitor.patch
 0030-adbd-framebuffer-root-only-off-Android.patch
 0031-adbd-report-readiness-to-the-init-system.patch
 0032-adbd-build-against-kernel-headers-older-than-4.13.patch
+0033-adbd-build-against-kernel-headers-older-than-5.6.patch

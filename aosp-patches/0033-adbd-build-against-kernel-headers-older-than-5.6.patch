@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Alex Kiernan <alex.kiernan@gmail.com>
+Date: Wed, 18 Nov 2026 21:00:00 +0000
+Subject: [PATCH] adbd: build against kernel headers older than 5.6
+
+VMADDR_CID_LOCAL arrived in the 5.6 headers. Its value is the kernel's
+ABI, 1, and an older kernel never reports that CID, so where the headers
+lack it adbd's local-connection check is unchanged by defining it.
+
+Upstream-Status: Inappropriate [kernels older than 5.6]
+
+AI-Generated: Claude Opus 5.5 (Claude Code)
+Signed-off-by: Alex Kiernan <alex.kiernan@gmail.com>
+---
+--- a/packages/modules/adb/daemon/transport_socket_server.cpp
++++ b/packages/modules/adb/daemon/transport_socket_server.cpp
+@@ -54,6 +54,10 @@
+ #include "socket_spec.h"
+ #include "sysdeps/chrono.h"
+ 
++#ifndef VMADDR_CID_LOCAL
++#define VMADDR_CID_LOCAL 1
++#endif
++
+ static bool should_check_vsock_cid() {
+ #if defined(__ANDROID__) && !defined(__ANDROID_RECOVERY__)
+     return com_android_adbd_flags_adbd_restrict_vsock_local_cid();
